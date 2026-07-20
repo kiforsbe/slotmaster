@@ -1,5 +1,5 @@
 // Core Slot Game Engine Renderer & State Controller
-import { checkWins, checkExpandingWins } from './SlotMath.js';
+import { checkWins, checkExpandingWins, PAYLINES } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
 
 export class SlotEngine {
@@ -122,6 +122,7 @@ export class SlotEngine {
         strip: strip,               // The reel strip configuration
         targetStopIndex: 0,         // Index of strip where it should stop
         stopDelay: 0,               // Millisecond delay before stopping
+        feedIndex: 0,
         bounceProgress: 0,          // For reel stop bounce animation
         bounceDirection: 1          // 1 down, -1 up
       });
@@ -179,6 +180,23 @@ export class SlotEngine {
   update() {
     const now = Date.now();
     let allStopped = true;
+    
+    // Periodic state summary (every 120 frames)
+    // if (!this._stateLogTimer || now - this._stateLogTimer > 3000) {
+    //   this._stateLogTimer = now;
+    //   const reelStates = this.reels.map((r, i) => ({
+    //     reel: i,
+    //     state: r.state,
+    //     speed: r.speed.toFixed(1),
+    //     offsetY: r.offsetY.toFixed(1),
+    //     feedIdx: r.feedIndex,
+    //     visible: [r.symbols[1], r.symbols[2], r.symbols[3]]
+    //   }));
+    //   console.log(`[STATE] engine.state=${this.state}, spinStart=${this.spinStart}, elapsed=${(now - this.spinStart).toFixed(0)}ms, reels:`, JSON.stringify(reelStates));
+    //   if (this.targetGrid) {
+    //     console.log(`[STATE] targetGrid:`, JSON.stringify(this.targetGrid));
+    //   }
+    // }
 
     // Update Particles
     this.particles = this.particles.filter(p => {
@@ -219,7 +237,13 @@ export class SlotEngine {
         // Check if it's time to stop this reel
         const spinTimeElapsed = now - this.spinStart;
         if (spinTimeElapsed > reel.stopDelay) {
+          console.log(`[Debug] Reel ${r} transitioning to stopping at ${now}`);
           reel.state = 'stopping';
+          // Set engine state to 'stopping' when first reel starts stopping
+          if (this.state === 'spinning') {
+            this.state = 'stopping';
+            this.config.onStateChange(this.state);
+          }
         }
       } 
       else if (reel.state === 'stopping') {
@@ -241,16 +265,23 @@ export class SlotEngine {
           
           for (let s = 0; s < shiftCount; s++) {
             reel.symbols.pop();
-            // Feed the target final symbol from the pre-calculated results
-            const targetSymbol = this.targetGrid[r][this.config.rowsCount + 2 - reel.symbols.length] || this.getRandomSymbol(reel.strip);
+            const targetIdx = this.config.rowsCount - 1 - reel.feedIndex;
+            const targetSymbol = this.targetGrid[r][targetIdx] || this.getRandomSymbol(reel.strip);
+            reel.feedIndex++;
             reel.symbols.unshift(targetSymbol);
           }
         }
 
         // Check if we reached the final alignment spot (offsetY near 0, symbols align)
         // We match when we have exactly the final symbols loaded on the display reels.
+        const visibleSymbols = [reel.symbols[1], reel.symbols[2], reel.symbols[3]];
+        const targetSymbols = this.targetGrid[r];
         const matchesTarget = this.checkReelMatchesTarget(r);
-        if (matchesTarget && reel.offsetY < reel.speed) {
+        if (r === 0 && this.frameCount % 60 === 0) {
+          console.log(`[STOP] Reel ${r}: state=stopping, speed=${reel.speed.toFixed(1)}, offsetY=${reel.offsetY.toFixed(1)}, feedIdx=${reel.feedIndex}, visible=${JSON.stringify(visibleSymbols)}, target=${JSON.stringify(targetSymbols)}, matches=${matchesTarget}`);
+        }
+        if (matchesTarget && reel.speed < 10) {
+          console.log(`[Debug] Reel ${r} reached target and bouncing at ${now}`);
           reel.offsetY = 0;
           reel.speed = 0;
           reel.state = 'bounce';
@@ -276,6 +307,7 @@ export class SlotEngine {
           if (reel.offsetY <= 0) {
             reel.offsetY = 0;
             reel.state = 'idle';
+            console.log(`[Debug] Reel ${r} settled to idle at ${now}`);
           }
         }
       }
@@ -283,6 +315,7 @@ export class SlotEngine {
 
     // Handle transition from spinning to stops complete
     if (this.state === 'stopping' && allStopped) {
+      console.log(`[Debug] All reels stopped. Evaluating results at ${now}`);
       this.evaluateSpinResult();
     }
 
@@ -393,6 +426,8 @@ export class SlotEngine {
 
     // Pre-calculate Spin Result
     this.targetGrid = this.generateTargetGrid();
+    console.log(`[SPIN] targetGrid:`, JSON.stringify(this.targetGrid));
+    console.log(`[SPIN] spinDuration=${this.spinDuration}, turbo=${this.turboMode}, symbolHeight=${this.symbolHeight}`);
     
     // Trigger Spin Sound
     audio.playSpin();
@@ -406,6 +441,8 @@ export class SlotEngine {
       reel.state = 'spinning';
       reel.speed = 20;
       reel.stopDelay = (this.turboMode ? 500 : this.spinDuration) + (r * stopInterval);
+      reel.feedIndex = 0;
+      console.log(`[SPIN] Reel ${r}: stopDelay=${reel.stopDelay}ms, strip=${reel.strip.length} symbols`);
     }
   }
 
@@ -467,13 +504,19 @@ export class SlotEngine {
   }
 
   stopSpin() {
-    if (this.state !== 'spinning') return;
+    if (this.state !== 'spinning') {
+      console.log(`[Debug] stopSpin called but state is ${this.state}`);
+      return;
+    }
+    console.log(`[Debug] stopSpin called. State: ${this.state}`);
     this.state = 'stopping';
+    this.config.onStateChange(this.state);
     
-    // Instantly queue stop delays to now
     const now = Date.now();
     for (let r = 0; r < this.reels.length; r++) {
+      this.reels[r].state = 'stopping';
       this.reels[r].stopDelay = now - this.spinStart + (r * 100);
+      console.log(`[Debug] Reel ${r} stopDelay set to ${this.reels[r].stopDelay}`);
     }
   }
 
