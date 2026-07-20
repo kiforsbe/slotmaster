@@ -321,19 +321,34 @@ export class SlotEngine {
 
     // Free Spins Expansion Animation
     if (this.state === 'expanding') {
-      this.expansionProgress += 0.03;
-      if (this.expansionProgress >= 1) {
+      // Progress one reel at a time, left to right, slower
+      const reelExpandDuration = 600; // ms per reel
+      const reelDelay = 300; // ms between reels starting
+      
+      for (let i = 0; i < this.expansionReelsToAnimate.length; i++) {
+        const reelIdx = this.expansionReelsToAnimate[i];
+        const startTime = i * reelDelay;
+        const elapsed = now - this.expansionStartTime - startTime;
+        const reelProgress = Math.min(elapsed / reelExpandDuration, 1);
+        
+        if (reelProgress >= 1) {
+          // This reel is fully expanded
+          this.expandedReelsState[reelIdx] = true;
+          for (let row = 0; row < this.config.rowsCount; row++) {
+            this.reels[reelIdx].symbols[row + 1] = this.expandingSymbol;
+          }
+        }
+      }
+      
+      // Check if all reels are done
+      const lastReelIdx = this.expansionReelsToAnimate[this.expansionReelsToAnimate.length - 1];
+      const lastStartTime = (this.expansionReelsToAnimate.length - 1) * reelDelay;
+      const lastElapsed = now - this.expansionStartTime - lastStartTime;
+      
+      if (lastElapsed / reelExpandDuration >= 1) {
+        // All reels expanded, finalize
         this.expansionProgress = 1;
         
-        // Make the expansion persistent in state
-        this.expansionReelsToAnimate.forEach(idx => {
-          this.expandedReelsState[idx] = true;
-          // Set all visible rows to the expanding symbol
-          for (let row = 0; row < this.config.rowsCount; row++) {
-            this.reels[idx].symbols[row + 1] = this.expandingSymbol;
-          }
-        });
-
         // Trigger expanding win sounds & presentation
         this.state = 'showing_wins';
         this.winCycleTimer = Date.now();
@@ -588,6 +603,7 @@ export class SlotEngine {
         this.state = 'expanding';
         this.expansionProgress = 0;
         this.expansionReelsToAnimate = expandingResults.expandingReels;
+        this.expansionStartTime = Date.now(); // Store start time for staggered animation
         this.config.onStateChange(this.state);
         audio.playExpand();
         return;
@@ -826,19 +842,27 @@ export class SlotEngine {
     const tile = this.config.symbolsConfig[this.expandingSymbol];
     if (!tile) return;
 
-    // Draw the expansion overlays on active columns
-    this.expansionReelsToAnimate.forEach(colIdx => {
+    const reelExpandDuration = 600; // ms per reel
+    const reelDelay = 300; // ms between reels starting
+
+    // Draw the expansion overlays on active columns, one at a time
+    this.expansionReelsToAnimate.forEach((colIdx, i) => {
       const cx = this.reelsX + (colIdx * this.symbolWidth);
+      const startTime = i * reelDelay;
+      const elapsed = Date.now() - this.expansionStartTime - startTime;
+      const reelProgress = Math.min(elapsed / reelExpandDuration, 1);
+      
+      if (reelProgress <= 0) return; // Not started yet
 
       // Expansion grows outwards from the center row (row 1)
       const centerRowY = this.reelsY + (1 * this.symbolHeight);
       
       this.ctx.save();
-      this.ctx.globalAlpha = this.expansionProgress * 0.9;
+      this.ctx.globalAlpha = reelProgress * 0.9;
       
       // Calculate animated heights for row 0, 1, 2
       const fullH = this.symbolHeight * 3;
-      const animH = fullH * this.expansionProgress;
+      const animH = fullH * reelProgress;
       const animY = centerRowY + (this.symbolHeight / 2) - (animH / 2);
 
       // Render expanding neon aura
@@ -859,7 +883,7 @@ export class SlotEngine {
         // Only render if within the expanding height bounds
         if (finalY + (this.symbolHeight/2) >= animY && finalY + (this.symbolHeight/2) <= animY + animH) {
           const margin = this.symbolWidth * 0.08;
-          const scale = 0.5 + (0.5 * this.expansionProgress);
+          const scale = 0.5 + (0.5 * reelProgress);
           
           this.ctx.save();
           this.ctx.translate(cx + this.symbolWidth/2, finalY + this.symbolHeight/2);
