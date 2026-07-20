@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SlotMaster Engine Portal</title>
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --gold: #d4af37;
+      --gold-glow: rgba(212, 175, 55, 0.4);
+      --obsidian: #050508;
+      --panel: #0e0d16;
+      --text: #e0e0ea;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--obsidian);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, #1b1725 0%, #030305 100%);
+      padding: 20px;
+    }
+
+    .portal-card {
+      width: 100%;
+      max-width: 720px;
+      background: linear-gradient(135deg, var(--panel) 0%, #08080c 100%);
+      border: 3px solid var(--gold);
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.8), 0 0 25px var(--gold-glow);
+      text-align: center;
+      animation: fadeIn 1s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    h1 {
+      font-family: 'Cinzel', serif;
+      font-size: 42px;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 15px var(--gold), 0 0 30px var(--gold-glow);
+      letter-spacing: 3px;
+      margin-bottom: 20px;
+    }
+
+    h1 span {
+      color: var(--gold);
+    }
+
+    p.subtitle {
+      font-size: 18px;
+      color: #b0b0cf;
+      margin-bottom: 30px;
+      font-weight: 300;
+    }
+
+    .features-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      text-align: left;
+      margin: 30px 0;
+    }
+
+    .feature-item {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      padding: 16px;
+      border-radius: 10px;
+      transition: all 0.3s;
+    }
+
+    .feature-item:hover {
+      background: rgba(212, 175, 55, 0.05);
+      border-color: var(--gold);
+      transform: translateY(-2px);
+    }
+
+    .feature-title {
+      font-weight: 600;
+      color: var(--gold);
+      font-size: 16px;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .feature-desc {
+      font-size: 13px;
+      color: #a0a0b8;
+      line-height: 1.4;
+    }
+
+    .btn-play {
+      display: inline-block;
+      background: var(--gold);
+      color: #000;
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      font-size: 20px;
+      letter-spacing: 2px;
+      padding: 16px 40px;
+      border: none;
+      border-radius: 10px;
+      text-decoration: none;
+      box-shadow: 0 4px 15px var(--gold-glow);
+      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      margin-top: 20px;
+    }
+
+    .btn-play:hover {
+      transform: scale(1.06);
+      box-shadow: 0 8px 25px var(--gold);
+    }
+
+    .btn-play:active {
+      transform: scale(0.98);
+    }
+
+    footer {
+      margin-top: 30px;
+      font-size: 12px;
+      color: #555;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="portal-card">
+    <h1>SLOT<span>MASTER</span></h1>
+    <p class="subtitle">Next-Gen WebGL & HTML5 Canvas Slot Machine Engine</p>
+    
+    <div style="border-bottom: 1px solid rgba(212,175,55,0.2); margin: 20px 0;"></div>
+
+    <div class="features-list">
+      <div class="feature-item">
+        <div class="feature-title">🎰 Double-Buffered Canvas</div>
+        <div class="feature-desc">Sub-pixel reel physics, stop bounce springs, and dynamic vertical motion-blur rendering for physical feedback.</div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-title">🔮 Specialized Free Spins</div>
+        <div class="feature-desc">Awarding Scatter modes, 3D interactive flipping book animations, and random expanding symbols with full line evaluation.</div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-title">🎵 Web Audio Synthesizer</div>
+        <div class="feature-desc">Adaptive sound synthesizer engine producing reels hum, stops clicks, alarms, and a spooky Egyptian adventure melody loop.</div>
+      </div>
+      <div class="feature-item">
+        <div class="feature-title">🎨 Live Theme Swapping</div>
+        <div class="feature-desc">Load spritesheets and tiles layouts dynamically. Instantly toggle between flat, neon glow, or royal theme styles.</div>
+      </div>
+    </div>
+
+    <a href="games/bookbookbook/index.html" class="btn-play">ENTER THE TEMPLE</a>
+
+    <footer>
+      SlotMaster Engine Core v1.0.0 • Powered by HTML5 Canvas & Web Audio API
+    </footer>
+  </div>
+
+</body>
+</html>

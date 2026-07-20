@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book of Book Book - Premium Slot Game</title>
+  <!-- Google Fonts for Epic Archeology Aesthetic -->
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      --gold: #d4af37;
+      --gold-glow: rgba(212, 175, 55, 0.4);
+      --obsidian: #09090d;
+      --obsidian-light: #151522;
+      --ruby: #e63946;
+      --text: #e0e0ea;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: var(--obsidian);
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, #1b1725 0%, #050508 100%);
+    }
+
+    /* Outer Slot Cabinet Frame */
+    .cabinet-container {
+      position: relative;
+      width: 100%;
+      max-width: 960px;
+      height: 100%;
+      max-height: 640px;
+      display: flex;
+      flex-direction: column;
+      border: 4px solid var(--gold);
+      border-radius: 16px;
+      background: #0f0e15;
+      box-shadow: 0 0 40px rgba(0,0,0,0.8), 0 0 20px var(--gold-glow);
+      overflow: hidden;
+    }
+
+    /* Cabinet Header */
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 24px;
+      background: linear-gradient(180deg, rgba(20,20,30,0.8) 0%, rgba(10,10,15,0.8) 100%);
+      border-bottom: 2px solid rgba(212, 175, 55, 0.3);
+      backdrop-filter: blur(8px);
+      z-index: 10;
+    }
+
+    .title-logo {
+      font-family: 'Cinzel', serif;
+      font-size: 28px;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 10px var(--gold), 0 0 20px var(--gold-glow);
+      letter-spacing: 2px;
+    }
+
+    .title-logo span {
+      color: var(--gold);
+    }
+
+    .top-controls {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .btn-icon {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      color: var(--text);
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-icon:hover {
+      background: var(--gold-glow);
+      color: #fff;
+      border-color: var(--gold);
+      box-shadow: 0 0 8px var(--gold-glow);
+    }
+
+    .btn-icon.active {
+      background: var(--gold);
+      color: #000;
+      border-color: #fff;
+      box-shadow: 0 0 10px var(--gold-glow);
+    }
+
+    /* Game Window Wrapper */
+    .game-viewport {
+      flex: 1;
+      position: relative;
+      background-color: #050508;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Free Spins Dynamic Info Overlay */
+    .free-spins-panel {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(26, 10, 5, 0.85);
+      border: 2px solid var(--gold);
+      border-radius: 12px;
+      padding: 8px 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      z-index: 5;
+      pointer-events: none;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.6), 0 0 10px rgba(212,175,55,0.2);
+      backdrop-filter: blur(8px);
+      animation: fsPulse 2s infinite alternate;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+
+    .free-spins-panel.active {
+      opacity: 1;
+    }
+
+    @keyframes fsPulse {
+      0% { box-shadow: 0 0 10px rgba(212,175,55,0.2); }
+      100% { box-shadow: 0 0 25px rgba(212,175,55,0.5); border-color: #fff; }
+    }
+
+    .fs-counter {
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+      font-family: 'Cinzel', serif;
+    }
+
+    .fs-expanded-symbol {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      color: var(--gold);
+      text-transform: uppercase;
+    }
+
+    .fs-symbol-thumbnail {
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--gold);
+      border-radius: 4px;
+      background-size: cover;
+      background-position: center;
+    }
+
+    /* Glassmorphic Control Dashboard */
+    .dashboard {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 2fr 1fr;
+      align-items: center;
+      padding: 16px 24px;
+      background: rgba(15, 14, 21, 0.92);
+      border-top: 2px solid rgba(212, 175, 55, 0.3);
+      gap: 16px;
+      z-index: 10;
+      backdrop-filter: blur(12px);
+    }
+
+    .dashboard-panel {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .bet-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .dashboard-label {
+      font-size: 11px;
+      color: #8f8f9f;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+
+    .dashboard-value {
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .bet-adjuster {
+      display: flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .btn-adjust {
+      background: transparent;
+      border: none;
+      color: var(--gold);
+      width: 36px;
+      height: 36px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-adjust:hover {
+      background: rgba(212, 175, 55, 0.15);
+    }
+
+    .bet-display-value {
+      width: 60px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    /* Central Spin Button Area */
+    .spin-section {
+      display: flex;
+      justify-content: center;
+    }
+
+    .btn-spin {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 4px solid var(--gold);
+      background: radial-gradient(circle, #e2bb4a 0%, #a67c1e 100%);
+      color: #000;
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 0 15px var(--gold-glow), inset 0 2px 5px rgba(255,255,255,0.6);
+      transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      outline: none;
+    }
+
+    .btn-spin:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 25px var(--gold), inset 0 2px 5px rgba(255,255,255,0.6);
+    }
+
+    .btn-spin:active {
+      transform: scale(0.95);
+    }
+
+    .btn-spin.spinning {
+      background: radial-gradient(circle, #ff6b6b 0%, #c92a2a 100%);
+      border-color: #ffa8a8;
+      box-shadow: 0 0 20px rgba(255, 107, 107, 0.6);
+      color: #fff;
+      font-size: 13px;
+    }
+
+    /* Theme Switcher */
+    .theme-selector-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      align-items: flex-end;
+    }
+
+    .theme-select {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      color: var(--text);
+      padding: 6px 12px;
+      border-radius: 6px;
+      outline: none;
+      cursor: pointer;
+      font-family: 'Outfit', sans-serif;
+      font-size: 13px;
+    }
+
+    .theme-select:hover {
+      border-color: var(--gold);
+      background: rgba(212, 175, 55, 0.1);
+    }
+
+    /* MODAL OVERLAYS */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(5, 5, 8, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      backdrop-filter: blur(5px);
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal-content {
+      background: linear-gradient(135deg, #1b1725 0%, #0e0d16 100%);
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 30px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 20px var(--gold-glow);
+      text-align: center;
+      position: relative;
+    }
+
+    /* Paytable Layout */
+    .paytable-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 20px 0;
+      max-height: 250px;
+      overflow-y: auto;
+      padding-right: 5px;
+    }
+
+    .paytable-grid::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .paytable-grid::-webkit-scrollbar-thumb {
+      background-color: var(--gold);
+      border-radius: 3px;
+    }
+
+    .paytable-item {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(212, 175, 55, 0.2);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .paytable-symbol-name {
+      font-size: 12px;
+      font-weight: bold;
+      color: var(--gold);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .paytable-payouts {
+      font-size: 11px;
+      color: #a0a0b0;
+      line-height: 1.4;
+      text-align: left;
+    }
+
+    /* Free Spins / Scatter Trigger Screen */
+    .book-trigger-animation {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .book-container {
+      perspective: 1000px;
+      width: 160px;
+      height: 200px;
+      margin: 20px 0;
+    }
+
+    /* The Animated Book */
+    .book-3d {
+      width: 100%;
+      height: 100%;
+      position: relative;
+      transform-style: preserve-3d;
+      transform: rotateY(-30deg) rotateX(15deg);
+      transition: transform 1.5s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+
+    .book-container.open .book-3d {
+      transform: rotateY(-180deg) rotateX(0deg) scale(1.1);
+    }
+
+    .book-cover {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #5c3d18 0%, #2f1d06 100%);
+      border: 4px solid var(--gold);
+      border-radius: 4px 12px 12px 4px;
+      box-shadow: 5px 5px 15px rgba(0,0,0,0.5);
+      transform-origin: left center;
+      z-index: 5;
+      backface-visibility: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .book-cover::before {
+      content: "BOOK";
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      font-size: 20px;
+      color: var(--gold);
+      text-shadow: 0 2px 4px rgba(0,0,0,0.6);
+    }
+
+    .book-pages {
+      position: absolute;
+      width: 95%;
+      height: 94%;
+      top: 3%;
+      left: 1%;
+      background: #fdf5e6;
+      border: 1px solid #dcd1b4;
+      border-radius: 2px 8px 8px 2px;
+      transform-origin: left center;
+      z-index: 3;
+      transform: rotateY(-5deg);
+      transition: transform 1.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #3b2a1a;
+      font-family: 'Cinzel', serif;
+      font-weight: bold;
+      font-size: 14px;
+      padding: 15px;
+      box-shadow: 2px 2px 8px rgba(0,0,0,0.2);
+    }
+
+    .book-container.open .book-pages {
+      transform: rotateY(-175deg);
+    }
+
+    .chosen-symbol-reveal {
+      font-family: 'Cinzel', serif;
+      font-size: 28px;
+      color: var(--gold);
+      margin-top: 10px;
+      text-shadow: 0 0 10px rgba(212,175,55,0.5);
+      animation: expandPulse 1.5s infinite alternate;
+      opacity: 0;
+      transform: scale(0.8);
+      transition: all 0.5s ease 1s;
+    }
+
+    .chosen-symbol-reveal.reveal {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    @keyframes expandPulse {
+      0% { transform: scale(1); filter: brightness(1); }
+      100% { transform: scale(1.05); filter: brightness(1.3); }
+    }
+
+    .btn-modal-close {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      background: transparent;
+      border: none;
+      color: #6f6f7f;
+      font-size: 24px;
+      cursor: pointer;
+    }
+
+    .btn-modal-close:hover {
+      color: #fff;
+    }
+
+    .btn-primary {
+      background: var(--gold);
+      color: #000;
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 20px;
+      transition: all 0.2s;
+      box-shadow: 0 4px 10px var(--gold-glow);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 15px var(--gold);
+    }
+
+    /* Debug shortcuts dashboard panel */
+    .debug-shortcuts {
+      position: absolute;
+      bottom: 90px;
+      left: 10px;
+      display: flex;
+      gap: 6px;
+      z-index: 50;
+      opacity: 0.15;
+      transition: opacity 0.2s;
+    }
+
+    .debug-shortcuts:hover {
+      opacity: 1.0;
+    }
+
+    .btn-debug {
+      background: rgba(0, 0, 0, 0.85);
+      border: 1px solid rgba(212, 175, 55, 0.4);
+      color: var(--gold);
+      padding: 4px 8px;
+      font-size: 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      text-transform: uppercase;
+    }
+
+    .btn-debug:hover {
+      background: var(--gold);
+      color: #000;
+    }
+
+    /* Notification Ticker */
+    .game-ticker {
+      position: absolute;
+      top: 10px;
+      left: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      background: rgba(0,0,0,0.6);
+      padding: 4px 12px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="cabinet-container">
+    
+    <!-- Header -->
+    <header>
+      <div class="title-logo">BOOK OF <span>BOOK BOOK</span></div>
+      
+      <div class="top-controls">
+        <button id="btn-paytable" class="btn-icon">
+          📋 Paytable
+        </button>
+        <button id="btn-mute" class="btn-icon">
+          🔊 Sound ON
+        </button>
+      </div>
+    </header>
+
+    <!-- Game Viewport (Canvas and overlay panels) -->
+    <div class="game-viewport">
+      
+      <!-- Live Game Ticker -->
+      <div id="game-ticker" class="game-ticker">IDLE</div>
+
+      <!-- Free Spins Header Information Panel -->
+      <div id="fs-panel" class="free-spins-panel">
+        <div id="fs-counter" class="fs-counter">FREE SPINS: 10 / 10</div>
+        <div class="fs-expanded-symbol">
+          <span>Expanding:</span>
+          <div id="fs-symbol-thumbnail" class="fs-symbol-thumbnail"></div>
+          <span id="fs-symbol-name">tut</span>
+        </div>
+      </div>
+
+      <!-- Canvas Renderer -->
+      <canvas id="game-canvas"></canvas>
+
+      <!-- Debug cheats (allows quick testing of scatters/expands) -->
+      <div class="debug-shortcuts">
+        <span class="btn-debug" style="cursor:default; border:none; color:#777;">Cheats:</span>
+        <button id="cheat-scatter" class="btn-debug">Scatter Trigger</button>
+        <button id="cheat-expand" class="btn-debug">Expanding Spin</button>
+        <button id="cheat-bigwin" class="btn-debug">Line Big Win</button>
+      </div>
+
+    </div>
+
+    <!-- Glassmorphic Controls Dashboard -->
+    <div class="dashboard">
+      
+      <!-- Balance Panel -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Balance</span>
+          <span id="display-balance" class="dashboard-value">$1,000.00</span>
+        </div>
+      </div>
+
+      <!-- Bet Size Selector -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Bet Per Line</span>
+          <div class="bet-adjuster">
+            <button id="bet-minus" class="btn-adjust">-</button>
+            <span id="bet-value" class="bet-display-value">1</span>
+            <button id="bet-plus" class="btn-adjust">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Spin & Auto Buttons -->
+      <div class="spin-section">
+        <button id="btn-spin" class="btn-spin">SPIN</button>
+      </div>
+
+      <!-- Turbo / Auto / Theme Switcher -->
+      <div class="theme-selector-container">
+        <div style="display:flex; gap: 8px; margin-bottom: 6px;">
+          <button id="btn-turbo" class="btn-icon">⚡ Turbo</button>
+          <button id="btn-auto" class="btn-icon">🔄 Auto</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span class="dashboard-label" style="font-size:10px;">Theme</span>
+          <select id="theme-select" class="theme-select">
+            <option value="style_1">Style 1 (Flat)</option>
+            <option value="style_2">Style 2 (Glow)</option>
+            <option value="style_3" selected>Style 3 (Royal)</option>
+          </select>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
+  <!-- MODALS -->
+
+  <!-- 1. Paytable Modal -->
+  <div id="modal-paytable" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <button class="btn-modal-close">×</button>
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); margin-bottom: 10px;">SACRED SCROLL PAYTABLE</h2>
+      <p style="font-size: 13px; color: #8f8f9f;">Line wins pay left-to-right on adjacent reels. All wins multiplied by bet per line. Books act as Scatters and Wilds.</p>
+      
+      <div class="paytable-grid" id="paytable-grid-content">
+        <!-- Rendered dynamically in game.js -->
+      </div>
+
+      <h3 style="font-family: 'Cinzel', serif; color: #fff; font-size: 14px; margin: 15px 0 10px 0;">ACTIVE PAYLINES (10 LINES)</h3>
+      <div style="display: flex; gap: 4px; justify-content: center; flex-wrap: wrap;" id="paylines-preview">
+        <!-- We will render payline representations dynamically -->
+      </div>
+      
+      <button id="btn-paytable-ok" class="btn-primary">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- 2. Free Spins Trigger Modal -->
+  <div id="modal-fs-trigger" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); font-size: 28px;">SCATTER MODE TRIGGERED</h2>
+      <p style="font-size: 14px; color: #fff; margin-top: 5px;">3+ SACRED BOOKS OPENED</p>
+
+      <div class="book-container" id="animated-book-container">
+        <div class="book-3d">
+          <div class="book-cover"></div>
+          <div class="book-pages" id="reveal-symbol-txt">REVEALING SYMBOL...</div>
+        </div>
+      </div>
+
+      <div id="chosen-symbol-reveal" class="chosen-symbol-reveal">
+        SYMBOL REVEALED
+      </div>
+
+      <p style="font-size: 13px; color: #a0a0b0; margin-top: 10px; max-width: 320px; margin-left: auto; margin-right: auto;">
+        You are awarded <strong>10 FREE SPINS</strong>. Your special symbol will expand to cover reels it lands on, and pays on all paylines!
+      </p>
+
+      <button id="btn-start-fs" class="btn-primary" style="display:none;">START FREE GAMES</button>
+    </div>
+  </div>
+
+  <!-- 3. Free Spins Summary Modal -->
+  <div id="modal-fs-summary" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); font-size: 32px;">SCATTER MODE COMPLETE</h2>
+      <p style="font-size: 14px; color: #fff; margin: 10px 0 20px 0;">THE SCROLLS CLOSE</p>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--gold); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <span class="dashboard-label">Total Free Spins Win</span>
+        <h3 id="fs-total-win" style="font-size: 36px; font-weight: 800; color: #fff; text-shadow: 0 0 10px var(--gold-glow); margin-top: 6px;">$0.00</h3>
+      </div>
+
+      <button id="btn-close-fs-summary" class="btn-primary">COLLECT PRIZE</button>
+    </div>
+  </div>
+
+  <!-- Core Javascript modules -->
+  <script type="module" src="game.js"></script>
+</body>
+</html>
