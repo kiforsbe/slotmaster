@@ -424,8 +424,11 @@ export class SlotEngine {
     this.expandedReelsState = Array(this.config.reelsCount).fill(false);
     this.config.onStateChange(this.state);
 
-    // Pre-calculate Spin Result
-    this.targetGrid = this.generateTargetGrid();
+    // Pre-calculate Spin Result (skip if forceWinResult already set targetGrid)
+    if (!this.forcedTargetGrid) {
+      this.targetGrid = this.generateTargetGrid();
+    }
+    this.forcedTargetGrid = false; // Reset flag
     console.log(`[SPIN] targetGrid:`, JSON.stringify(this.targetGrid));
     console.log(`[SPIN] spinDuration=${this.spinDuration}, turbo=${this.turboMode}, symbolHeight=${this.symbolHeight}`);
     
@@ -500,6 +503,7 @@ export class SlotEngine {
       }
     }
     
+    this.forcedTargetGrid = true;
     this.spin();
   }
 
@@ -583,7 +587,7 @@ export class SlotEngine {
         this.expandingWinData = expandingResults;
         this.state = 'expanding';
         this.expansionProgress = 0;
-        this.expansionReelsToAnimate = expandingResults.expandedReels;
+        this.expansionReelsToAnimate = expandingResults.expandingReels;
         this.config.onStateChange(this.state);
         audio.playExpand();
         return;

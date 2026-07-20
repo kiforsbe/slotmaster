@@ -196,7 +196,7 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
 
   return {
     symbol: expandingSymbol,
-    expandedReels,
+    expandingReels,
     expandedPositions,
     wins,
     totalPayoutMultiplier: totalPayout
