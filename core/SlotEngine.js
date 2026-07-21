@@ -322,13 +322,12 @@ export class SlotEngine {
     // Free Spins Expansion Animation
     if (this.state === 'expanding') {
       // Progress one reel at a time, left to right, slower
-      const reelExpandDuration = 600; // ms per reel
-      const reelDelay = 300; // ms between reels starting
+      const reelExpandDuration = 900; // ms per reel
       
       for (let i = 0; i < this.expansionReelsToAnimate.length; i++) {
         const reelIdx = this.expansionReelsToAnimate[i];
-        const startTime = i * reelDelay;
-        const elapsed = now - this.expansionStartTime - startTime;
+        const reelStartTime = this.expansionReelStartTimes[i];
+        const elapsed = now - reelStartTime;
         const reelProgress = Math.min(elapsed / reelExpandDuration, 1);
         
         if (reelProgress >= 1) {
@@ -342,8 +341,8 @@ export class SlotEngine {
       
       // Check if all reels are done
       const lastReelIdx = this.expansionReelsToAnimate[this.expansionReelsToAnimate.length - 1];
-      const lastStartTime = (this.expansionReelsToAnimate.length - 1) * reelDelay;
-      const lastElapsed = now - this.expansionStartTime - lastStartTime;
+      const lastStartTime = this.expansionReelStartTimes[this.expansionReelsToAnimate.length - 1];
+      const lastElapsed = now - lastStartTime;
       
       if (lastElapsed / reelExpandDuration >= 1) {
         // All reels expanded, finalize
@@ -603,7 +602,17 @@ export class SlotEngine {
         this.state = 'expanding';
         this.expansionProgress = 0;
         this.expansionReelsToAnimate = expandingResults.expandingReels;
-        this.expansionStartTime = Date.now(); // Store start time for staggered animation
+        // Set per-reel start times: each reel starts after the previous one finishes
+        this.expansionReelStartTimes = [];
+        let currentTime = Date.now();
+        for (let i = 0; i < this.expansionReelsToAnimate.length; i++) {
+          if (i === 0) {
+            this.expansionReelStartTimes[i] = currentTime;
+          } else {
+            currentTime += 900; // Each reel starts 900ms after the previous one
+          }
+          this.expansionReelStartTimes[i] = currentTime;
+        }
         this.config.onStateChange(this.state);
         audio.playExpand();
         return;
@@ -842,14 +851,13 @@ export class SlotEngine {
     const tile = this.config.symbolsConfig[this.expandingSymbol];
     if (!tile) return;
 
-    const reelExpandDuration = 600; // ms per reel
-    const reelDelay = 300; // ms between reels starting
+    const reelExpandDuration = 900; // ms per reel
 
     // Draw the expansion overlays on active columns, one at a time
     this.expansionReelsToAnimate.forEach((colIdx, i) => {
       const cx = this.reelsX + (colIdx * this.symbolWidth);
-      const startTime = i * reelDelay;
-      const elapsed = Date.now() - this.expansionStartTime - startTime;
+      const reelStartTime = this.expansionReelStartTimes[i];
+      const elapsed = Date.now() - reelStartTime;
       const reelProgress = Math.min(elapsed / reelExpandDuration, 1);
       
       if (reelProgress <= 0) return; // Not started yet
