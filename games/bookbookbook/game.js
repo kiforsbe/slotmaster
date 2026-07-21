@@ -49,16 +49,16 @@ function generateReel(paytable, targetLength, seed, exclude=[]) {
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Index of array = hit count (0 to 5)
 const PAYTABLE = {
-  book:    [0, 0, 20, 200, 2000, 10000],  // Book (Scatter pays of Total Bet!)
-  tut:     [0, 0, 10, 100, 1000, 5000],  // Tutankhamun
-  anubis:  [0, 0, 5, 40, 400, 2000],     // Anubis
-  scarab:  [0, 0, 5, 30, 100, 750],      // Scarab Beetle
-  cat:     [0, 0, 5, 30, 100, 750],      // Egyptian Bastet Cat
-  ankh:    [0, 0, 5, 15, 50, 500],       // Ankh Cross
-  ace:     [0, 0, 0, 5, 40, 150],        // Ace
-  king:    [0, 0, 0, 5, 40, 150],        // King
-  queen:   [0, 0, 0, 5, 30, 100],        // Queen
-  jack:    [0, 0, 0, 5, 30, 100],        // Jack
+  book:    [0, 0, 10, 100, 1000, 5000],  // Book (Scatter pays of Total Bet!)
+  tut:     [0, 0,  5,  40,  400, 2000],  // Tutankhamun
+  anubis:  [0, 0,  5,  30,  100,  750],  // Anubis
+  scarab:  [0, 0,  5,  30,  100,  750],  // Scarab Beetle
+  cat:     [0, 0,  5,  30,  100,  750],  // Egyptian Bastet Cat
+  ankh:    [0, 0,  5,  30,  100,  750],  // Ankh Cross
+  ace:     [0, 0,  0,   5,   40,  150],  // Ace
+  king:    [0, 0,  0,   5,   40,  150],  // King
+  queen:   [0, 0,  0,   5,   30,  100],  // Queen
+  jack:    [0, 0,  0,   5,   30,  100],  // Jack
 };
 
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
@@ -122,7 +122,7 @@ const cheatExpand = document.getElementById('cheat-expand');
 const cheatBigWin = document.getElementById('cheat-bigwin');
 
 let engine = null;
-let currentTheme = 'style_3';
+let currentTheme = 'style_2';  // Default theme
 
 // 4. Async Theme Config Loader
 async function loadThemeAssets(themeName) {

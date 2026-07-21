@@ -64,13 +64,11 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
       }
     }
 
-    // Resolve wild-only lines (e.g. Book, Book, Book on line 1)
-    // If the line consists only of wilds or we broke early, check targetSymbol.
-    // If targetSymbol is wild and there are other symbols later, we already handled it.
-    // But if targetSymbol remains wild, it evaluates as a Wild win.
-    
+    // A wild-only run (e.g. Book, Book, Book on line 1) must NOT be paid as a line win:
+    // the wild here doubles as the scatter symbol, which is already paid separately
+    // below using totalBet-scaled multipliers. Paying it again per-line would double-count.
     // Evaluate if the matchCount pays anything for the targetSymbol
-    if (targetSymbol) {
+    if (targetSymbol && targetSymbol !== wildSymbol) {
       const payouts = paytable[targetSymbol];
       if (payouts && payouts[matchCount] > 0) {
         const payout = payouts[matchCount];
