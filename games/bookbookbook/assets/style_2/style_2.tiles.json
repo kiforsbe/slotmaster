@@ -697,6 +697,180 @@
           "flipV": false
         }
       }
+    },
+    {
+      "index": 12,
+      "name": "10s",
+      "x": 0,
+      "y": 768,
+      "w": 256,
+      "h": 256,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 13,
+      "name": "pharao",
+      "x": 256,
+      "y": 768,
+      "w": 256,
+      "h": 256,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 14,
+      "name": "cleopatra",
+      "x": 512,
+      "y": 768,
+      "w": 256,
+      "h": 256,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
     }
   ]
 }
