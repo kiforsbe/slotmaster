@@ -2,47 +2,87 @@
 import { SlotEngine } from '../../core/SlotEngine.js';
 import { PAYLINES } from '../../core/SlotMath.js';
 
-// 1. Reel Strips Config (Egyptian themed distribution of symbols)
-const REEL_STRIPS = [
-  ['jack', 'queen', 'king', 'ace', 'ankh', 'eye', 'scarab', 'cat', 'tut', 'sphinx', 'pyramid', 'anubis', 'book', 'jack', 'queen', 'king', 'ace', 'eye', 'scarab'],
-  ['queen', 'king', 'ace', 'ankh', 'eye', 'scarab', 'cat', 'tut', 'sphinx', 'pyramid', 'anubis', 'book', 'jack', 'queen', 'king', 'ace', 'ankh', 'cat', 'pyramid'],
-  ['king', 'ace', 'ankh', 'eye', 'scarab', 'cat', 'tut', 'sphinx', 'pyramid', 'anubis', 'book', 'jack', 'queen', 'king', 'ace', 'ankh', 'eye', 'scarab', 'tut'],
-  ['jack', 'queen', 'king', 'ace', 'ankh', 'eye', 'scarab', 'cat', 'tut', 'sphinx', 'pyramid', 'anubis', 'book', 'jack', 'queen', 'king', 'ace', 'sphinx', 'cat'],
-  ['jack', 'queen', 'king', 'ace', 'ankh', 'eye', 'scarab', 'cat', 'tut', 'sphinx', 'pyramid', 'anubis', 'book', 'jack', 'queen', 'king', 'ace', 'anubis', 'eye']
-];
+function mulberry32(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  }
+}
 
-// 2. Paytable Config (Classic Book of Dead/Ra multipliers)
+function shuffle(array, rng) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+function generateReel(paytable, targetLength, seed, exclude=[]) {
+  // Step 1: compute weights from 5-of-a-kind payout
+  const weights = {};
+  for (const symbol in paytable) {
+    if (exclude.includes(symbol)) continue; // skip excluded symbols
+    const payout = paytable[symbol][5];
+    weights[symbol] = 1 / (payout + 1);
+  }
+
+  // Step 2: normalize counts to target length
+  const totalWeight = Object.values(weights).reduce((a,b)=>a+b,0);
+  const counts = {};
+  for (const symbol in weights) {
+    counts[symbol] = Math.max(1, Math.round(weights[symbol] / totalWeight * targetLength));
+  }
+
+  // Step 3: build reel
+  const reel = [];
+  for (const [symbol, count] of Object.entries(counts)) {
+    for (let i=0; i<count; i++) reel.push(symbol);
+  }
+
+  // Step 4: shuffle with seed
+  const rng = mulberry32(seed);
+  return shuffle(reel, rng);
+}
+
+// 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Index of array = hit count (0 to 5)
 const PAYTABLE = {
-  tut:     [0, 0, 10, 100, 1000, 5000],  // Tutankhamun (Highest)
+  book:    [0, 0, 20, 200, 2000, 10000],  // Book (Scatter pays of Total Bet!)
+  tut:     [0, 0, 10, 100, 1000, 5000],  // Tutankhamun
   anubis:  [0, 0, 5, 40, 400, 2000],     // Anubis
-  sphinx:  [0, 0, 5, 30, 100, 750],      // Sphinx
   scarab:  [0, 0, 5, 30, 100, 750],      // Scarab Beetle
   cat:     [0, 0, 5, 30, 100, 750],      // Egyptian Bastet Cat
   ankh:    [0, 0, 5, 15, 50, 500],       // Ankh Cross
-  eye:     [0, 0, 5, 15, 50, 500],       // Eye of Horus
-  pyramid: [0, 0, 5, 10, 30, 250],       // Pyramid Scatter/Wild alternate
   ace:     [0, 0, 0, 5, 40, 150],        // Ace
   king:    [0, 0, 0, 5, 40, 150],        // King
   queen:   [0, 0, 0, 5, 30, 100],        // Queen
   jack:    [0, 0, 0, 5, 30, 100],        // Jack
-  book:    [0, 0, 0, 2, 20, 200]         // Book (Scatter pays of Total Bet!)
 };
+
+// 2. Reel Strips Config (Egyptian themed distribution of symbols)
+// Only symbols common to all three tile sets: jack, queen, king, ace, ankh, scarab, cat, tut, anubis, book
+const REEL_STRIPS = [
+  generateReel(PAYTABLE, 220, 1234),
+  generateReel(PAYTABLE, 220, 567),
+  generateReel(PAYTABLE, 220, 89),
+  generateReel(PAYTABLE, 220, 765),
+  generateReel(PAYTABLE, 220, 3321)
+];
 
 // Map of user friendly names for reveal screens
 const FRIENDLY_NAMES = {
   tut: "Tutankhamun",
   anubis: "Anubis Guard",
-  sphinx: "Golden Sphinx",
   scarab: "Scarab Beetle",
   cat: "Bastet Cat",
   ankh: "Sacred Ankh",
-  eye: "Eye of Horus",
-  pyramid: "Ancient Pyramid",
   ace: "Golden Ace",
   king: "Pharaoh King",
   queen: "Royal Queen",
-  jack: "Desert Jack"
+  jack: "Desert Jack",
+  book: "Book of Books"
 };
 
 // 3. UI Dom Selectors
@@ -129,7 +169,7 @@ window.addEventListener('load', async () => {
     spritesheetUrl: themeAssets.spritesheetUrl,
     
     onStateChange: (state) => handleStateChange(state),
-    onFreeSpinsTriggered: () => handleFreeSpinsTrigger(),
+    onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo)
   });
 
@@ -200,7 +240,22 @@ function handleStateChange(state) {
 }
 
 // 7. Free Spins Modes Orchestration
-function handleFreeSpinsTrigger() {
+// Unified scatter handler — game decides what counts as initial trigger vs retrigger
+function handleScatterTrigger(scatterCount, isInFreeSpins) {
+  if (isInFreeSpins) {
+    // Retrigger: 2+ scatters adds extra spins
+    handleScatterRetrigger(scatterCount);
+  } else {
+    // Initial trigger: only 3+ scatters starts free spins
+    if (scatterCount >= 3) {
+      engine.state = 'free_spins_intro';
+      engine.config.onStateChange(engine.state);
+      handleInitialFreeSpinsTrigger();
+    }
+  }
+}
+
+function handleInitialFreeSpinsTrigger() {
   btnSpin.disabled = true;
   modalFsTrigger.classList.add('active');
   
@@ -217,8 +272,8 @@ function handleFreeSpinsTrigger() {
   }, 1000);
 
   setTimeout(() => {
-    // Select random standard symbol (exclude book)
-    const candidates = ['tut', 'anubis', 'sphinx', 'scarab', 'cat', 'ankh', 'eye', 'pyramid', 'ace', 'king', 'queen', 'jack'];
+    // Select random standard symbol (exclude book) — only symbols common to all three tile sets
+    const candidates = ['tut', 'anubis', 'scarab', 'cat', 'ankh', 'ace', 'king', 'queen', 'jack'];
     const chosen = candidates[Math.floor(Math.random() * candidates.length)];
     
     // Update text
@@ -247,6 +302,26 @@ function handleFreeSpinsComplete() {
   fsTotalWin.textContent = `$${engine.freeSpinsAccumulatedWin.toFixed(2)}`;
   modalFsSummary.classList.add('active');
   engine.audio.playScatterTrigger();
+}
+
+function handleScatterRetrigger(scatterCount) {
+  // Add extra spins based on scatter count: 2->5, 3->10, 4->15, 5->20
+  const extraSpins = { 2: 5, 3: 10, 4: 15, 5: 20 };
+  const added = extraSpins[scatterCount] || (scatterCount * 5);
+  
+  engine.freeSpinsTotal += added;
+  engine.freeSpinsRemaining += added;
+  
+  // Update the free spins counter display immediately
+  fsCounter.textContent = `FREE SPINS: ${engine.freeSpinsRemaining} / ${engine.freeSpinsTotal}`;
+  
+  // Show a brief on-screen notification
+  gameTicker.textContent = `+${added} EXTRA SPINS!`;
+  engine.audio.playScatterTrigger();
+  
+  // Reset state so the next auto-spin continues the bonus
+  engine.state = 'idle';
+  handleStateChange('idle');
 }
 
 function closeFreeSpinsSummary() {

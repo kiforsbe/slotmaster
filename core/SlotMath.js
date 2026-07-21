@@ -100,7 +100,7 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
 
   let scatterWin = null;
   let triggerFreeSpins = false;
-  if (scatterCount >= 3) {
+  if (scatterCount >= 2) {
     triggerFreeSpins = true;
   }
 

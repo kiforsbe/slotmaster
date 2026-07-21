@@ -17,6 +17,7 @@ export class SlotEngine {
       spritesheetUrl: '',
       onStateChange: () => {},
       onFreeSpinsTriggered: () => {},
+      onScatterTrigger: (scatterCount) => {},
       onWin: () => {},
       ...config
     };
@@ -575,16 +576,11 @@ export class SlotEngine {
       this.config.onWin({ amount: payoutAmount, isExpanding: false });
     }
 
-    // Check Scatter Mode / Free Spins Trigger
+    // Check Scatter Mode / Free Spins Trigger — game code decides everything
     if (results.scatterWin && results.scatterWin.triggerFreeSpins) {
-      this.state = 'free_spins_intro';
-      this.config.onStateChange(this.state);
+      // Notify game code; it will set state, play animation, and decide what to do
       audio.playScatterTrigger();
-      
-      // Delay before opening book modal in game
-      setTimeout(() => {
-        this.config.onFreeSpinsTriggered();
-      }, 1500);
+      this.config.onScatterTrigger(results.scatterWin.count, this.inFreeSpins);
       return;
     }
 
