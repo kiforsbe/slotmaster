@@ -114,7 +114,8 @@ const modalFsTrigger = document.getElementById('modal-fs-trigger');
 const modalFsSummary = document.getElementById('modal-fs-summary');
 const btnStartFs = document.getElementById('btn-start-fs');
 const btnCloseFsSummary = document.getElementById('btn-close-fs-summary');
-const revealSymbolTxt = document.getElementById('reveal-symbol-txt');
+const bookRevealCanvas = document.getElementById('book-reveal-canvas');
+const bookRevealCtx = bookRevealCanvas.getContext('2d');
 const chosenSymbolReveal = document.getElementById('chosen-symbol-reveal');
 const fsTotalWin = document.getElementById('fs-total-win');
 
@@ -263,39 +264,97 @@ function handleScatterTrigger(scatterCount, isInFreeSpins) {
   }
 }
 
+// Draws a strip of symbol icons (straight from the active theme's spritesheet) that
+// scrolls to a stop on `chosenSymbol` — a mini slot reel rendered on canvas, using
+// the same drawImage/tile-atlas approach as SlotEngine's own reel rendering.
+let bookReelAnimFrame = null;
+
+function playBookSymbolReel(chosenSymbol, durationMs) {
+  if (bookReelAnimFrame) {
+    cancelAnimationFrame(bookReelAnimFrame);
+    bookReelAnimFrame = null;
+  }
+
+  const candidates = ['explorer', 'anubis', 'scarab', 'ace', 'king', 'queen', 'jack', 'ten'];
+  const stripLength = 18;
+  const stripSymbols = [];
+  for (let i = 0; i < stripLength - 1; i++) {
+    stripSymbols.push(candidates[Math.floor(Math.random() * candidates.length)]);
+  }
+  stripSymbols.push(chosenSymbol);
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = bookRevealCanvas.clientWidth;
+  const cssH = bookRevealCanvas.clientHeight;
+  bookRevealCanvas.width = cssW * dpr;
+  bookRevealCanvas.height = cssH * dpr;
+  bookRevealCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  const { symbolsConfig } = engine.config;
+  const spritesheet = engine.spritesheet;
+  const iconSize = cssH;
+  const artSize = Math.max(0, Math.min(cssW, iconSize) - 16);
+  const finalOffset = (stripSymbols.length - 1) * iconSize;
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+
+  function drawFrame(offsetY) {
+    bookRevealCtx.clearRect(0, 0, cssW, cssH);
+    bookRevealCtx.fillStyle = '#fdf5e6';
+    bookRevealCtx.fillRect(0, 0, cssW, cssH);
+
+    stripSymbols.forEach((symbol, i) => {
+      const cellY = (i * iconSize) - offsetY;
+      if (cellY + iconSize < 0 || cellY > cssH) return; // skip icons outside the visible page
+      const tile = symbolsConfig[symbol];
+      if (!tile) return;
+      const destX = (cssW - artSize) / 2;
+      const destY = cellY + (iconSize - artSize) / 2;
+      bookRevealCtx.drawImage(spritesheet, tile.x, tile.y, tile.w, tile.h, destX, destY, artSize, artSize);
+    });
+  }
+
+  const startTime = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - startTime) / durationMs);
+    drawFrame(finalOffset * easeOutCubic(t));
+    bookReelAnimFrame = t < 1 ? requestAnimationFrame(tick) : null;
+  }
+
+  drawFrame(0);
+  bookReelAnimFrame = requestAnimationFrame(tick);
+}
+
 function handleInitialFreeSpinsTrigger() {
   btnSpin.disabled = true;
   modalFsTrigger.classList.add('active');
-  
+
   const bookContainer = document.getElementById('animated-book-container');
   bookContainer.classList.remove('open');
   chosenSymbolReveal.classList.remove('reveal');
   btnStartFs.style.display = 'none';
-  revealSymbolTxt.textContent = "READING SACRED TEXTS...";
 
-  // 3D book animation timings
+  // Select the awarded symbol up front so the reel can land on it exactly
+  const candidates = ['explorer', 'anubis', 'scarab', 'ace', 'king', 'queen', 'jack', 'ten'];
+  const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+  const spinDuration = 1400;
+
   setTimeout(() => {
+    // Book turns open while the page's symbol reel spins, landing together
     bookContainer.classList.add('open');
-    revealSymbolTxt.textContent = "THE CHOSEN ONE IS...";
-  }, 1000);
+    playBookSymbolReel(chosen, spinDuration);
+  }, 400);
 
   setTimeout(() => {
-    // Select random standard symbol (exclude book)
-    const candidates = ['explorer', 'anubis', 'scarab', 'ace', 'king', 'queen', 'jack', 'ten'];
-    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
-    
-    // Update text
-    revealSymbolTxt.textContent = chosen.toUpperCase();
     chosenSymbolReveal.textContent = `${FRIENDLY_NAMES[chosen].toUpperCase()} SELECETED`;
     chosenSymbolReveal.classList.add('reveal');
     btnStartFs.style.display = 'inline-block';
-    
+
     // Temporarily save selected symbol on engine trigger
     engine.expandingSymbol = chosen;
-    
+
     // Play sound alert
     engine.audio.playScatterTrigger();
-  }, 2500);
+  }, 400 + spinDuration);
 }
 
 function startFreeSpins() {
