@@ -19,11 +19,17 @@ function shuffle(array, rng) {
   return array;
 }
 
-function generateReel(paytable, targetLength, seed, exclude=[]) {
-  // Step 1: compute weights from 5-of-a-kind payout
+function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrides={}) {
+  // Step 1: compute weights from 5-of-a-kind payout, unless a symbol has an explicit
+  // frequency override (used e.g. for bonus-triggering symbols that should stay rare
+  // regardless of their payout).
   const weights = {};
   for (const symbol in paytable) {
     if (exclude.includes(symbol)) continue; // skip excluded symbols
+    if (symbol in frequencyOverrides) {
+      weights[symbol] = frequencyOverrides[symbol];
+      continue;
+    }
     const payout = paytable[symbol][5];
     weights[symbol] = 1 / (payout + 1);
   }
@@ -49,9 +55,9 @@ function generateReel(paytable, targetLength, seed, exclude=[]) {
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Index of array = hit count (0 to 5)
 const PAYTABLE = {
-  book:    [0, 0, 10, 100, 1000, 5000],  // Book (Scatter pays of Total Bet!)
-  tut:     [0, 0,  5,  40,  400, 2000],  // Tutankhamun
-  anubis:  [0, 0,  5,  30,  100,  750],  // Anubis
+  book:    [0, 0,  0,   2,   20,  200],  // Book
+  tut:     [0, 0, 10, 100, 1000, 5000],  // Tutankhamun
+  anubis:  [0, 0,  5,  40,  400, 2000],  // Anubis
   scarab:  [0, 0,  5,  30,  100,  750],  // Scarab Beetle
   cat:     [0, 0,  5,  30,  100,  750],  // Egyptian Bastet Cat
   ankh:    [0, 0,  5,  30,  100,  750],  // Ankh Cross
@@ -63,12 +69,17 @@ const PAYTABLE = {
 
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
 // Only symbols common to all three tile sets: jack, queen, king, ace, ankh, scarab, cat, tut, anubis, book
+// Book pays low but triggers the bonus game, so it must be at least as rare as the
+// highest-paying symbol (tut) rather than following its own low payout.
+const SYMBOL_FREQUENCY_OVERRIDES = {
+  book: (1 / (PAYTABLE.tut[5] + 1)) / 2
+};
 const REEL_STRIPS = [
-  generateReel(PAYTABLE, 220, 1234),
-  generateReel(PAYTABLE, 220, 567),
-  generateReel(PAYTABLE, 220, 89),
-  generateReel(PAYTABLE, 220, 765),
-  generateReel(PAYTABLE, 220, 3321)
+  generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
+  generateReel(PAYTABLE, 220, 567, [], SYMBOL_FREQUENCY_OVERRIDES),
+  generateReel(PAYTABLE, 220, 89, [], SYMBOL_FREQUENCY_OVERRIDES),
+  generateReel(PAYTABLE, 220, 765, [], SYMBOL_FREQUENCY_OVERRIDES),
+  generateReel(PAYTABLE, 220, 3321, [], SYMBOL_FREQUENCY_OVERRIDES)
 ];
 
 // Map of user friendly names for reveal screens
