@@ -626,20 +626,28 @@ export class SlotEngine {
       this.winCycleIndex = -1;
     } else {
       this.state = 'idle';
-      this.handleAutoPlay();
     }
+    
+    // Always handle auto-play for free spins progression
+    this.handleAutoPlay();
     
     this.config.onStateChange(this.state);
   }
 
   handleAutoPlay() {
+    // Clear any pending auto-play to prevent stacking
+    if (this.autoPlayTimer) {
+      clearTimeout(this.autoPlayTimer);
+      this.autoPlayTimer = null;
+    }
+    
     if (this.inFreeSpins) {
       // Auto progress free spins
-      setTimeout(() => {
+      this.autoPlayTimer = setTimeout(() => {
         this.spinFreeSpins();
       }, this.turboMode ? 800 : 1800);
     } else if (this.autoPlay) {
-      setTimeout(() => {
+      this.autoPlayTimer = setTimeout(() => {
         if (this.autoPlay && this.state === 'idle') {
           this.spin();
         }
