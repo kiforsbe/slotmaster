@@ -55,24 +55,22 @@ function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrid
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Index of array = hit count (0 to 5)
 const PAYTABLE = {
-  book:    [0, 0,  0,   2,   20,  200],  // Book
-  tut:     [0, 0, 10, 100, 1000, 5000],  // Tutankhamun
-  anubis:  [0, 0,  5,  40,  400, 2000],  // Anubis
-  scarab:  [0, 0,  5,  30,  100,  750],  // Scarab Beetle
-  cat:     [0, 0,  5,  30,  100,  750],  // Egyptian Bastet Cat
-  ankh:    [0, 0,  5,  30,  100,  750],  // Ankh Cross
-  ace:     [0, 0,  0,   5,   40,  150],  // Ace
-  king:    [0, 0,  0,   5,   40,  150],  // King
-  queen:   [0, 0,  0,   5,   30,  100],  // Queen
-  jack:    [0, 0,  0,   5,   30,  100],  // Jack
+  book:     [0, 0,  0,   2,   20,  200],  // Book
+  explorer: [0, 0, 10, 100, 1000, 5000],  // Explorer (formerly Tutankhamun's value)
+  anubis:   [0, 0,  5,  40,  400, 2000],  // Anubis
+  scarab:   [0, 0,  5,  30,  100,  750],  // Scarab Beetle
+  ace:      [0, 0,  0,   5,   40,  150],  // Ace
+  king:     [0, 0,  0,   5,   40,  150],  // King
+  queen:    [0, 0,  0,   5,   30,  100],  // Queen
+  jack:     [0, 0,  0,   5,   30,  100],  // Jack
+  ten:      [0, 0,  0,   5,   30,  100],  // Ten
 };
 
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
-// Only symbols common to all three tile sets: jack, queen, king, ace, ankh, scarab, cat, tut, anubis, book
-// Book pays low but triggers the bonus game, so it must be at least as rare as the
-// highest-paying symbol (tut) rather than following its own low payout.
+// Book pays low but triggers the bonus game, so it must be rarer than the
+// highest-paying symbol (explorer) rather than following its own low payout.
 const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: (1 / (PAYTABLE.tut[5] + 1)) / 2
+  book: (1 / (PAYTABLE.explorer[5] + 1)) / 2
 };
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
@@ -84,15 +82,14 @@ const REEL_STRIPS = [
 
 // Map of user friendly names for reveal screens
 const FRIENDLY_NAMES = {
-  tut: "Tutankhamun",
+  explorer: "The Explorer",
   anubis: "Anubis Guard",
   scarab: "Scarab Beetle",
-  cat: "Bastet Cat",
-  ankh: "Sacred Ankh",
   ace: "Golden Ace",
   king: "Pharaoh King",
   queen: "Royal Queen",
   jack: "Desert Jack",
+  ten: "Lucky Ten",
   book: "Book of Books"
 };
 
@@ -133,7 +130,7 @@ const cheatExpand = document.getElementById('cheat-expand');
 const cheatBigWin = document.getElementById('cheat-bigwin');
 
 let engine = null;
-let currentTheme = 'style_2';  // Default theme
+let currentTheme = 'style_4';  // Default theme
 
 // 4. Async Theme Config Loader
 async function loadThemeAssets(themeName) {
@@ -283,8 +280,8 @@ function handleInitialFreeSpinsTrigger() {
   }, 1000);
 
   setTimeout(() => {
-    // Select random standard symbol (exclude book) — only symbols common to all three tile sets
-    const candidates = ['tut', 'anubis', 'scarab', 'cat', 'ankh', 'ace', 'king', 'queen', 'jack'];
+    // Select random standard symbol (exclude book)
+    const candidates = ['explorer', 'anubis', 'scarab', 'ace', 'king', 'queen', 'jack', 'ten'];
     const chosen = candidates[Math.floor(Math.random() * candidates.length)];
     
     // Update text
