@@ -143,33 +143,53 @@ export class SlotEngine {
   }
 
   resize() {
-    const rect = this.canvas.parentElement.getBoundingClientRect();
+    const parentRect = this.canvas.parentElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    
-    // Set display size
-    this.canvas.style.width = '100%';
-    this.canvas.style.height = '100%';
-    
+
+    // Slot Cabinet Margin Layout (fraction of the canvas box on each axis)
+    const marginXFrac = 0.05;
+    const marginYFrac = 0.08;
+
+    // Symbol art is square, so cells must be square too. Rather than filling the
+    // parent's box as-is (which stretches/letterboxes the grid depending on its
+    // shape), size the canvas itself to the aspect ratio the grid needs so the
+    // reel area — and therefore every tile — fills the whole canvas with no
+    // leftover slack, then center that canvas within the parent.
+    const targetAspect =
+      (this.config.reelsCount * (1 - 2 * marginYFrac)) /
+      (this.config.rowsCount * (1 - 2 * marginXFrac));
+
+    let layoutW = parentRect.width;
+    let layoutH = parentRect.width / targetAspect;
+    if (layoutH > parentRect.height) {
+      layoutH = parentRect.height;
+      layoutW = parentRect.height * targetAspect;
+    }
+
+    // Set display (CSS) size — centered within the parent via CSS (see canvas styling)
+    this.canvas.style.width = `${layoutW}px`;
+    this.canvas.style.height = `${layoutH}px`;
+
     // Set buffer size with high DPI support
-    this.canvas.width = rect.width * dpr;
-    this.canvas.height = rect.height * dpr;
-    
+    this.canvas.width = layoutW * dpr;
+    this.canvas.height = layoutH * dpr;
+
+    this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
 
     // Calculate layouts
-    const layoutW = rect.width;
-    const layoutH = rect.height;
+    const marginX = layoutW * marginXFrac;
+    const marginY = layoutH * marginYFrac;
+    const availW = layoutW - (2 * marginX);
+    const availH = layoutH - (2 * marginY);
 
-    // Slot Cabinet Margin Layout
-    const marginX = layoutW * 0.05;
-    const marginY = layoutH * 0.08;
-    this.reelsWidth = layoutW - (2 * marginX);
-    this.reelsHeight = layoutH - (2 * marginY);
-    this.reelsX = marginX;
-    this.reelsY = marginY;
-
-    this.symbolWidth = this.reelsWidth / this.config.reelsCount;
-    this.symbolHeight = this.reelsHeight / this.config.rowsCount;
+    const cellSize = Math.min(availW / this.config.reelsCount, availH / this.config.rowsCount);
+    this.symbolWidth = cellSize;
+    this.symbolHeight = cellSize;
+    this.reelsWidth = cellSize * this.config.reelsCount;
+    this.reelsHeight = cellSize * this.config.rowsCount;
+    this.reelsX = marginX + (availW - this.reelsWidth) / 2;
+    this.reelsY = marginY + (availH - this.reelsHeight) / 2;
   }
 
   // --- Game Loop ---
@@ -852,12 +872,10 @@ export class SlotEngine {
     const tile = this.config.symbolsConfig[name];
     if (!tile) return;
 
-    // Outer border margin
-    const margin = width * 0.08;
-    const destX = x + margin;
-    const destY = y + margin;
-    const destW = width - (2 * margin);
-    const destH = height - (2 * margin);
+    const destX = x;
+    const destY = y;
+    const destW = width;
+    const destH = height;
 
     this.ctx.save();
     
