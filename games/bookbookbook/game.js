@@ -350,11 +350,7 @@ function handleWin(winInfo) {
 function setupUIHandlers() {
   // Spin button
   btnSpin.addEventListener('click', () => {
-    if (engine.state === 'spinning' || engine.state === 'stopping') {
-      engine.stopSpin();
-    } else {
-      engine.spin();
-    }
+    engine.requestSpin();
   });
 
   // Bet adjustments

@@ -56,6 +56,7 @@ export class SlotEngine {
     this.reelDelay = 150; // MS delay between reel stops
     this.turboMode = false;
     this.autoPlay = false;
+    this.pendingSpinRequest = false; // queued spin click received while busy (e.g. expanding)
 
     // Win presentation state
     this.winData = null;
@@ -399,6 +400,13 @@ export class SlotEngine {
         this.activeWinLineIndex = -1;
       }
     }
+
+    // Consume a queued spin request (from a click received while busy, e.g. mid-expansion)
+    // now that we've reached a safe state to actually spin.
+    if (this.pendingSpinRequest && (this.state === 'idle' || this.state === 'showing_wins')) {
+      this.pendingSpinRequest = false;
+      this.startNextSpin();
+    }
   }
 
   checkReelMatchesTarget(reelIdx) {
@@ -414,6 +422,36 @@ export class SlotEngine {
   }
 
   // --- Spin Controllers ---
+
+  // Entry point for the UI's spin/stop button. Safe to call at any time, including
+  // while an expansion/win presentation is still animating: a click that arrives
+  // mid-animation is queued (see update()) rather than immediately spinning again
+  // or silently consuming a free spin while nothing visible happens.
+  requestSpin() {
+    if (this.state === 'spinning' || this.state === 'stopping') {
+      this.stopSpin();
+      return;
+    }
+    if (this.state === 'idle' || this.state === 'showing_wins') {
+      this.startNextSpin();
+      return;
+    }
+    this.pendingSpinRequest = true;
+  }
+
+  startNextSpin() {
+    // Cancel any pending auto-advance so it can't also fire and double-count
+    if (this.autoPlayTimer) {
+      clearTimeout(this.autoPlayTimer);
+      this.autoPlayTimer = null;
+    }
+    if (this.inFreeSpins) {
+      this.spinFreeSpins();
+    } else {
+      this.spin();
+    }
+  }
+
   spin() {
     if (this.state !== 'idle' && this.state !== 'showing_wins') return;
     
