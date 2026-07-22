@@ -122,17 +122,6 @@ function runSimulation() {
   }, 50);
 }
 
-// Setup Simulation Handlers
-if (btnSim) {
-  btnSim.addEventListener('click', runSimulation);
-}
-
-if (btnCloseSim) {
-  btnCloseSim.addEventListener('click', () => {
-    simModal.style.display = 'none';
-  });
-}
-
 
 let engine = null;
 let currentTheme = 'style_4';  // Default theme
@@ -214,6 +203,16 @@ window.addEventListener('load', async () => {
   const debugShortcuts = document.querySelector('.debug-shortcuts');
   if (debugShortcuts && DEBUG_MODE) {
     debugShortcuts.classList.add('debug-enabled');
+  }
+
+  // Setup Simulation Handlers
+  if (btnSim) {
+    btnSim.addEventListener('click', runSimulation);
+  }
+  if (btnCloseSim) {
+    btnCloseSim.addEventListener('click', () => {
+      simModal.style.display = 'none';
+    });
   }
 
   const themeAssets = await loadThemeAssets(currentTheme);
