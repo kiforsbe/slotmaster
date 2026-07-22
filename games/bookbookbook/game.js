@@ -57,8 +57,9 @@ const PAYTABLE = {
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
 // Book pays low but triggers the bonus game, so it must be rarer than the
 // highest-paying symbol (explorer) rather than following its own low payout.
+// Adjusted frequency to achieve ~0.5-1% free spins trigger rate with 3+ books
 const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: (1 / (PAYTABLE.anubis[5] + 1))/2
+  book: 0.02  // book: ~2% frequency per position, targets ~1% free spins rate
 };
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
