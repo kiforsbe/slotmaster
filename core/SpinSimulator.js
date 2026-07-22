@@ -4,7 +4,7 @@
  */
 import { checkWins, checkExpandingWins } from './SlotMath.js';
 
-export function simulateSpins(config, numBaseSpins = 10000, betPerLine = 1, linesCount = 10) {
+export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, linesCount = 10) {
   const results = {
     totalBets: 0,
     totalWins: 0,
@@ -21,8 +21,38 @@ export function simulateSpins(config, numBaseSpins = 10000, betPerLine = 1, line
   simConfig.betPerLine = betPerLine;
   simConfig.totalBet = betPerLine * linesCount;
 
+  // Main simulation loop for base spins
+  for (let i = 0; i < numBaseSpins; i++) {
+    const result = _runSingleSpin(false);
+    
+    // If free spins were triggered by this base spin, simulate them
+    // The current engine seems to trigger a fixed amount of free spins when scatterCount >= 2.
+    // Based on common Book of Dead mechanics, it's often 10-15 free spins. Let's assume 10 for the model if not specified elsewhere.
+    if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
+      for (let j = 0; j < 10; j++) {
+        const freeSpinResult = _runSingleSpin(true);
+      }
+    }
+  }
+
+  const rtp = results.totalBets > 0 ? (results.totalWins / results.totalBets) * 100 : 0;
+
+  return {
+    rtp: rtp.toFixed(2) + '%',
+    rtpRaw: results.totalBets > 0 ? (results.totalWins / results.totalBets) : 0,
+    totalSpins: results.totalSimulatedSpins,
+    baseSpins: numBaseSpins,
+    totalBets: results.totalBets,
+    totalWins: results.totalWins,
+    maxWin: results.maxWin,
+    minWin: results.minWin === Infinity ? 0 : results.minWin,
+    scatterCounts: results.scatterCounts,
+    freeSpinsTriggered: results.freeSpinsTriggered,
+    winDistribution: results.winDistribution
+  };
+
   // Helper to simulate a single spin (base or free)
-  function runSingleSpin(isFreeSpin = false) {
+  function _runSingleSpin(isFreeSpin = false) {
     const totalSpinBet = isFreeSpin ? 0 : simConfig.betPerLine * linesCount;
     if (!isFreeSpin) results.totalBets += totalSpinBet;
     results.totalSimulatedSpins++;
@@ -69,7 +99,7 @@ export function simulateSpins(config, numBaseSpins = 10000, betPerLine = 1, line
       // The engine logic: "Find which reels contain the expanding symbol"
       // We need to know what the 'expandingSymbol' is. In bookbookbook it's usually 'tut' or 'book'.
       // Let's assume 'tut' for expansion in this game context if not specified.
-      const currentExpandingSymbol = 'tut'; 
+      const currentExpandingSymbol = 'anubis'; 
       expandingResults = checkExpandingWins(targetGrid, currentExpandingSymbol, simConfig.paytable, linesCount);
     }
 
@@ -85,34 +115,4 @@ export function simulateSpins(config, numBaseSpins = 10000, betPerLine = 1, line
 
     return { spinWin, winData, expandingResults };
   }
-
-  // Main simulation loop for base spins
-  for (let i = 0; i < numBaseSpins; i++) {
-    const result = runSingleSpin(false);
-    
-    // If free spins were triggered by this base spin, simulate them
-    // The current engine seems to trigger a fixed amount of free spins when scatterCount >= 2.
-    // Based on common Book of Dead mechanics, it's often 10-15 free spins. Let's assume 10 for the model if not specified elsewhere.
-    if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
-      for (let j = 0; j < 10; j++) {
-        runSingleSpin(true);
-      }
-    }
-  }
-
-  const rtp = results.totalBets > 0 ? (results.totalWins / results.totalBets) * 100 : 0;
-
-  return {
-    rtp: rtp.toFixed(2) + '%',
-    rtpRaw: results.totalBets > 0 ? (results.totalWins / results.totalBets) : 0,
-    totalSpins: results.totalSimulatedSpins,
-    baseSpins: numBaseSpins,
-    totalBets: results.totalBets,
-    totalWins: results.totalWins,
-    maxWin: results.maxWin,
-    minWin: results.minWin === Infinity ? 0 : results.minWin,
-    scatterCounts: results.scatterCounts,
-    freeSpinsTriggered: results.freeSpinsTriggered,
-    winDistribution: results.winDistribution
-  };
 }

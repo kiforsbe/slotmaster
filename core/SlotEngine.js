@@ -1184,7 +1184,7 @@ export class SlotEngine {
    * @param {number} numBaseSpins - The number of base spins to simulate.
    * @returns {object} The simulation results.
    */
-  runSimulation(numBaseSpins = 10000) {
+  runSimulation(numBaseSpins = 100000) {
     return simulateSpins(this.config, numBaseSpins);
   }
 }
