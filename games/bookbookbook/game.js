@@ -72,9 +72,8 @@ const EXPANDING_PAYTABLE = {
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
 // Book pays low but triggers the bonus game, so it must be rarer than the
 // highest-paying symbol (explorer) rather than following its own low payout.
-// Using book's own payout with adjustment factor to hit ~0.7% free spins rate
 const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: (1 / Math.pow(PAYTABLE.book[5] + 1, 0.125)) * 0.213  // ~6 books/reel, ~0.7% rate
+  book: (1 / Math.pow(PAYTABLE.book[5] + 1, 0.125)) * 0.195
 };
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),

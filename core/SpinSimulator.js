@@ -50,7 +50,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     // If free spins were triggered by this base spin, simulate them
     if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
       // Randomize the expanding symbol for each new free spin session
-      const eligibleSymbols = Object.keys(simConfig.expandingPaytable || {});
+      const eligibleSymbols = Object.keys(simConfig.expandingPaytable || {}).filter(s => s !== 'book').filter(s => s !== 'book');
       expandingSymbol = eligibleSymbols.length > 0 
         ? eligibleSymbols[Math.floor(Math.random() * eligibleSymbols.length)]
         : 'anubis';
