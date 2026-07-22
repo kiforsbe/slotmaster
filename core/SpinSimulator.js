@@ -25,6 +25,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     totalBets: 0,
     totalWins: 0,
     winDistribution: {}, // winAmount -> count
+    detailedWins: [],     // New: Detailed breakdown of every win
     scatterCounts: 0,
     maxWin: 0,
     minWin: Infinity,
@@ -72,7 +73,9 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     minWin: results.minWin === Infinity ? 0 : results.minWin,
     scatterCounts: results.scatterCounts,
     freeSpinsTriggered: results.freeSpinsTriggered,
-    winDistribution: results.winDistribution
+    winDistribution: results.winDistribution,
+    detailedWins: results.detailedWins,
+    detailedWins: results.detailedWins
   };
 
   // Helper to simulate a single spin (base or free)
@@ -110,10 +113,31 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
       if (winData.scatterWin.triggerFreeSpins) {
         results.freeSpinsTriggered++;
       }
+
+      // Track scatter wins in detailed stats
+      results.detailedWins.push({
+        type: 'scatter',
+        symbol: 'book',
+        count: winData.scatterWin.count,
+        isFreeSpin: false, // Scatters trigger FS but are usually counted as base spin wins
+        winAmount: winData.scatterWin.payout * simConfig.totalBet
+      });
     }
 
     // Line wins use betPerLine (each line's payout is multiplied by betPerLine)
     spinWin += winData.totalLinePayoutMultiplier * betPerLine;
+    
+    if (winData.lineWins && winData.lineWins.length > 0) {
+      winData.lineWins.forEach((lw, idx) => {
+        results.detailedWins.push({
+          type: 'line',
+          symbol: lw.symbol,
+          count: lw.count,
+          isFreeSpin: false,
+          winAmount: lw.payout * betPerLine
+        });
+      });
+    }
 
     // Check for expanding wins (relevant during free spins usually, but can happen anytime depending on rules)
     // In this game's logic, expansion is triggered by symbols on reels during free spins.
@@ -128,6 +152,15 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
 
     if (expandingResults) {
       spinWin += expandingResults.totalPayoutMultiplier;
+
+      // Track expanding wins in detailed stats
+      results.detailedWins.push({
+        type: 'expanding',
+        symbol: expandingSymbol,
+        count: expandingResults.hitCount || 0, // Assuming checkExpandingWins returns hitCount
+        isFreeSpin: true,
+        winAmount: expandingResults.totalPayoutMultiplier
+      });
     }
 
     // Update stats

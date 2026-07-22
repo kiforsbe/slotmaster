@@ -127,6 +127,76 @@ function runSimulation() {
       simMaxWinDisplay.textContent = `$${results.maxWin}`;
       simFreeSpinsDisplay.textContent = results.freeSpinsTriggered;
 
+      // --- Detailed Stats Processing ---
+      const symbolStats = {}; // { 'explorer': { counts: { 3: { count: 50, totalAmount: 1250 } }, expanding: { count: 5, totalAmount: 5000 } } }
+      
+      results.detailedWins.forEach(win => {
+        if (!symbolStats[win.symbol]) {
+          symbolStats[win.symbol] = { counts: {}, expanding: { count: 0, totalAmount: 0 } };
+        }
+        
+        if (win.type === 'expanding') {
+          symbolStats[win.symbol].expanding.count += 1;
+          symbolStats[win.symbol].expanding.totalAmount += win.winAmount;
+        } else {
+          if (!symbolStats[win.symbol].counts[win.count]) {
+            symbolStats[win.symbol].counts[win.count] = { count: 0, totalAmount: 0 };
+          }
+          symbolStats[win.symbol].counts[win.count].count += 1;
+          symbolStats[win.symbol].counts[win.count].totalAmount += win.winAmount;
+        }
+      });
+
+      // --- UI Generation for Detailed Stats ---
+      let detailsContainer = document.getElementById('sim-details');
+      if (!detailsContainer) {
+        detailsContainer = document.createElement('div');
+        detailsContainer.id = 'sim-details';
+        detailsContainer.style.marginTop = '20px';
+        detailsContainer.style.padding = '10px';
+        detailsContainer.style.background = 'rgba(255, 255, 255, 0.1)';
+        detailsContainer.style.borderRadius = '8px';
+        detailsContainer.style.fontSize = '0.9em';
+        simModal.appendChild(detailsContainer);
+      } else {
+        detailsContainer.innerHTML = '';
+      }
+
+      let detailsHtml = '<h3 style="margin-top: 0;">Detailed Win Breakdown</h3>';
+      detailsHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; margin-top: 10px;">`;
+
+      for (const symbol in symbolStats) {
+        const stats = symbolStats[symbol];
+        const friendlyName = FRIENDLY_NAMES[symbol] || symbol;
+        
+        detailsHtml += `<div style="border: 1px solid rgba(255,255,255,0.3); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
+        detailsHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px;">${friendlyName}</strong>`;
+        
+        const sortedCounts = Object.keys(stats.counts).sort((a, b) => a - b);
+        if (sortedCounts.length > 0) {
+          sortedCounts.forEach(count => {
+            const data = stats.counts[count];
+            detailsHtml += `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                              <span>${count} hits</span>
+                              <span>${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})})</span>
+                            </div>`;
+          });
+        } else {
+          detailsHtml += `<div style="color: #888;">No standard line wins</div>`;
+        }
+
+        if (stats.expanding.count > 0) {
+          detailsHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.2); color: #ffd700;">`;
+          detailsHtml += `<strong>Expanding</strong>: ${stats.expanding.count} wins ($${stats.expanding.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})})`;
+          detailsHtml += `</div>`;
+        }
+
+        detailsHtml += `</div>`;
+      }
+
+      detailsHtml += `</div>`;
+      detailsContainer.innerHTML = detailsHtml;
+
       simModal.style.display = 'block';
     } catch (error) {
       console.error('Simulation failed:', error);
