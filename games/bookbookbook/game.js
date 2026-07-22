@@ -24,7 +24,7 @@ function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrid
   const weights = {};
   for (const symbol in paytable) {
     if (exclude.includes(symbol)) continue;
-    weights[symbol] = symbol in frequencyOverrides ? frequencyOverrides[symbol] : 1 / Math.pow(paytable[symbol][5] + 1, 0.125);
+    weights[symbol] = symbol in frequencyOverrides ? frequencyOverrides[symbol] : 1 / Math.pow(paytable[symbol][5] + 1, 0.145) * 1.155;
   }
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -73,7 +73,7 @@ const EXPANDING_PAYTABLE = {
 // Book pays low but triggers the bonus game, so it must be rarer than the
 // highest-paying symbol (explorer) rather than following its own low payout.
 const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: (1 / Math.pow(PAYTABLE.book[5] + 1, 0.125)) * 0.195
+  book: (1 / Math.pow(PAYTABLE.book[5] + 1, 0.145)) * 0.155
 };
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
@@ -119,7 +119,7 @@ function runSimulation() {
   // Use setTimeout to allow the UI thread to update before the heavy calculation
   setTimeout(() => {
     try {
-      const results = engine.runSimulation(100000);
+      const results = engine.runSimulation(1000000);
       
       simRtpDisplay.textContent = results.rtp;
       simTotalSpinsDisplay.textContent = results.totalSpins;
