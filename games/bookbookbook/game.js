@@ -140,7 +140,7 @@ let currentTheme = 'style_4';  // Default theme
 // 4. Async Theme Config Loader
 async function loadThemeAssets(themeName) {
   try {
-    const response = await fetch(`assets/${themeName}/${themeName}.tiles.json`);
+    const response = await fetch(`./assets/${themeName}/${themeName}.tiles.json`);
     const data = await response.json();
     
     // Convert tiles array into symbol mapping config
@@ -154,7 +154,7 @@ async function loadThemeAssets(themeName) {
       };
     });
 
-    const spritesheetUrl = `assets/${themeName}/${data.sheet}`;
+    const spritesheetUrl = `./assets/${themeName}/${data.sheet}`;
     
     return { spritesheetUrl, symbolsConfig };
   } catch (error) {
