@@ -128,16 +128,19 @@ function runSimulation() {
       simFreeSpinsDisplay.textContent = results.freeSpinsTriggered;
 
       // --- Detailed Stats Processing ---
-      const symbolStats = {}; // { 'explorer': { counts: { 3: { count: 50, totalAmount: 1250 } }, expanding: { count: 5, totalAmount: 5000 } } }
+      const symbolStats = {}; // { 'explorer': { counts: { 3: { count: 50, totalAmount: 1250 } }, expanding: { counts: {} } } } }
       
       results.detailedWins.forEach(win => {
         if (!symbolStats[win.symbol]) {
-          symbolStats[win.symbol] = { counts: {}, expanding: { count: 0, totalAmount: 0 } };
+          symbolStats[win.symbol] = { counts: {}, expanding: { counts: {} } };
         }
         
         if (win.type === 'expanding') {
-          symbolStats[win.symbol].expanding.count += 1;
-          symbolStats[win.symbol].expanding.totalAmount += win.winAmount;
+          if (!symbolStats[win.symbol].expanding.counts[win.count]) {
+            symbolStats[win.symbol].expanding.counts[win.count] = { count: 0, totalAmount: 0 };
+          }
+          symbolStats[win.symbol].expanding.counts[win.count].count += 1;
+          symbolStats[win.symbol].expanding.counts[win.count].totalAmount += win.winAmount;
         } else {
           if (!symbolStats[win.symbol].counts[win.count]) {
             symbolStats[win.symbol].counts[win.count] = { count: 0, totalAmount: 0 };
@@ -153,51 +156,86 @@ function runSimulation() {
         detailsContainer = document.createElement('div');
         detailsContainer.id = 'sim-details';
         detailsContainer.style.marginTop = '20px';
-        detailsContainer.style.padding = '10px';
+        detailsContainer.style.padding = '15px';
         detailsContainer.style.background = 'rgba(255, 255, 255, 0.1)';
-        detailsContainer.style.borderRadius = '8px';
+        detailsContainer.style.borderRadius = '12px';
         detailsContainer.style.fontSize = '0.9em';
         simModal.appendChild(detailsContainer);
       } else {
         detailsContainer.innerHTML = '';
       }
 
-      let detailsHtml = '<h3 style="margin-top: 0;">Detailed Win Breakdown</h3>';
-      detailsHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 15px; margin-top: 10px;">`;
+      const premiumSymbols = ['book', 'explorer', 'anubis', 'scarab'];
+      const nonPremiumSymbols = Object.keys(symbolStats).filter(s => !premiumSymbols.includes(s));
 
-      for (const symbol in symbolStats) {
-        const stats = symbolStats[symbol];
-        const friendlyName = FRIENDLY_NAMES[symbol] || symbol;
+      let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
+      
+      const createSection = (title, symbols) => {
+        if (symbols.length === 0) return '';
+        let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
+        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">`;
         
-        detailsHtml += `<div style="border: 1px solid rgba(255,255,255,0.3); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
-        detailsHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 4px;">${friendlyName}</strong>`;
+        symbols.forEach(symbol => {
+          const stats = symbolStats[symbol];
+          const friendlyName = FRIENDLY_NAMES[symbol] || symbol;
+          
+          sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
+          sectionHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">${friendlyName}</strong>`;
+          
+          // Normal Wins Sub-section
+          sectionHtml += `<div style="margin-bottom: 8px;">`;
+          sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Normal Wins</span>`;
+          const sortedCounts = Object.keys(stats.counts).sort((a, b) => a - b);
+          if (sortedCounts.length > 0) {
+            sortedCounts.forEach(count => {
+              const data = stats.counts[count];
+              sectionHtml += `<div style="display: flex; justify-content: space-between; margin-bottom: 2px;">\
+                                <span style="color: #ccc;">${count} hits</span>\
+                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2})})</span>\
+                              </div>`;
+            });
+          } else {
+            sectionHtml += `<div style="color: #666; font-style: italic; font-size: 0.8em;">No standard line wins</div>`;
+          }
+          sectionHtml += `</div>`;
+
+          // Expanding Wins Sub-section
+          if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
+            sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
+            sectionHtml += `<span style="font-size: 0.7em; color: #ffd700; text-transform: uppercase;">Expanding Wins</span>`;
+            const sortedExpCounts = Object.keys(stats.expanding.counts).sort((a, b) => a - b);
+            sortedExpCounts.forEach(count => {
+              const data = stats.expanding.counts[count];
+              sectionHtml += `<div style="display: flex; justify-content: space-between;">\
+                                <span style="color: #ffd700;">${count} reels</span>\
+                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2})})</span>\
+                              </div>`;
+            });
+            sectionHtml += `</div>`;
+          }
+
+          sectionHtml += `</div>`;
+        });
         
-        const sortedCounts = Object.keys(stats.counts).sort((a, b) => a - b);
-        if (sortedCounts.length > 0) {
-          sortedCounts.forEach(count => {
-            const data = stats.counts[count];
-            detailsHtml += `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                              <span>${count} hits</span>
-                              <span>${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})})</span>
-                            </div>`;
-          });
-        } else {
-          detailsHtml += `<div style="color: #888;">No standard line wins</div>`;
-        }
+        sectionHtml += `</div>`;
+        return sectionHtml;
+      };
 
-        if (stats.expanding.count > 0) {
-          detailsHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.2); color: #ffd700;">`;
-          detailsHtml += `<strong>Expanding</strong>: ${stats.expanding.count} wins ($${stats.expanding.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})})`;
-          detailsHtml += `</div>`;
-        }
+      const premiumContent = createSection('Premium Symbols', premiumSymbols);
+      const standardContent = createSection('Standard Symbols', nonPremiumSymbols);
 
-        detailsHtml += `</div>`;
-      }
+      detailsHtml += `
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+          <div>${premiumContent}</div>
+          <div>${standardContent}</div>
+        </div>`;
 
-      detailsHtml += `</div>`;
       detailsContainer.innerHTML = detailsHtml;
 
       simModal.style.display = 'block';
+      simModal.style.maxWidth = '95%';
+      simModal.style.minWidth = '800px';
+      simModal.style.overflowX = 'auto';
     } catch (error) {
       console.error('Simulation failed:', error);
       alert('Error running simulation');

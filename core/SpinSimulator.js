@@ -40,7 +40,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   
   // Get configuration values with defaults
   const freeSpinsCount = simConfig.freeSpinsCount || 10;
-  const expandingSymbol = simConfig.expandingSymbol || 'anubis';
+  let expandingSymbol = simConfig.expandingSymbol || 'anubis';
   const expandingPaytable = simConfig.expandingPaytable || null;
 
   // Main simulation loop for base spins
@@ -49,6 +49,12 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     
     // If free spins were triggered by this base spin, simulate them
     if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
+      // Randomize the expanding symbol for each new free spin session
+      const eligibleSymbols = Object.keys(simConfig.expandingPaytable || {});
+      expandingSymbol = eligibleSymbols.length > 0 
+        ? eligibleSymbols[Math.floor(Math.random() * eligibleSymbols.length)]
+        : 'anubis';
+
       for (let j = 0; j < freeSpinsCount; j++) {
         const freeSpinResult = _runSingleSpin(true);
         // Accumulate free spin results into the stats
@@ -157,7 +163,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
       results.detailedWins.push({
         type: 'expanding',
         symbol: expandingSymbol,
-        count: expandingResults.hitCount || 0, // Assuming checkExpandingWins returns hitCount
+        count: expandingResults.expandingReels.length, // Number of reels that expanded
         isFreeSpin: true,
         winAmount: expandingResults.totalPayoutMultiplier
       });
