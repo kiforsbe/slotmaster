@@ -162,11 +162,12 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
  * pays payout * numActiveLines. This is Book of Dead style behavior.
  * @param {Array<Array<string>>} grid - 5x3 grid of symbol names
  * @param {string} expandingSymbol - The symbol that expands during free spins
- * @param {Object} paytable - Maps symbol names to payout arrays
+ * @param {Object} paytable - Maps symbol names to payout arrays (used for fallback)
  * @param {number} activeLinesCount - Number of active paylines (default 10)
+ * @param {Object|null} expandingPaytable - Separate paytable for expanding wins; if null, falls back to paytable
  * @returns {Object|null} Expanding win data or null if no win
  */
-export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesCount = 10) {
+export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesCount = 10, expandingPaytable = null) {
   // Input validation
   if (!grid || grid.length !== 5 || grid[0].length !== 3) {
     throw new Error('Grid must be 5 columns x 3 rows');
@@ -195,7 +196,8 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
   }
 
   const count = expandingReels.length;
-  const payouts = paytable[expandingSymbol];
+  // Use the dedicated expanding paytable when available (separate from normal-mode line payouts)
+  const payouts = (expandingPaytable && expandingPaytable[expandingSymbol]) || paytable[expandingSymbol];
   
   // High value symbols pay for 2 or more reels, low value for 3 or more.
   // We can determine this by checking if payout exists for count.

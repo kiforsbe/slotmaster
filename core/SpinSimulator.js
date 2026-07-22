@@ -40,6 +40,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   // Get configuration values with defaults
   const freeSpinsCount = simConfig.freeSpinsCount || 10;
   const expandingSymbol = simConfig.expandingSymbol || 'anubis';
+  const expandingPaytable = simConfig.expandingPaytable || null;
 
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
@@ -121,8 +122,8 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     // and there are multiple of the same high-value symbol on a reel.
     let expandingResults = null;
     if (isFreeSpin) {
-      // Check for expanding wins using the configured expanding symbol
-      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, linesCount);
+      // Check for expanding wins using the configured expanding symbol and paytable
+      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, linesCount, expandingPaytable);
     }
 
     if (expandingResults) {

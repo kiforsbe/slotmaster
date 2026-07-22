@@ -44,14 +44,29 @@ function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrid
 // Index of array = hit count (0 to 5)
 const PAYTABLE = {
   book:     [0, 0,  0,   2,   20,  200],  // Book
-  explorer: [0, 0, 10, 100, 1000, 5000],  // Explorer (formerly Tutankhamun's value)
-  anubis:   [0, 0,  5,  40,  400, 2000],  // Anubis
-  scarab:   [0, 0,  5,  30,  100,  750],  // Scarab Beetle
+  explorer: [0, 0,  0, 100, 1000, 5000],  // Explorer (formerly Tutankhamun's value) — pays at 3+ hits only in normal mode; expanding symbol uses EXPANDING_PAYTABLE during free spins
+  anubis:   [0, 0,  0,  40,  400, 2000],  // Anubis — same rule
+  scarab:   [0, 0,  0,  30,  100,  750],  // Scarab Beetle — same rule
   ace:      [0, 0,  0,   5,   40,  150],  // Ace
   king:     [0, 0,  0,   5,   40,  150],  // King
   queen:    [0, 0,  0,   5,   30,  100],  // Queen
   jack:     [0, 0,  0,   5,   30,  100],  // Jack
   ten:      [0, 0,  0,   5,   30,  100],  // Ten
+};
+
+// Separate paytable for expanding symbol wins during free spins.
+// Index = number of reels containing the expanding symbol (0-5).
+// These values are independent from normal-mode line payouts.
+const EXPANDING_PAYTABLE = {
+  book:     [0, 0,    0,   2,   20,  200],  // Book
+  explorer: [0, 0,   10, 100, 1000, 5000],  // 2-reel pays 10×betPerLine; 3+ uses same as normal mode
+  anubis:   [0, 0,    5,  40,  400, 2000],  // 2-reel pays 5×betPerLine
+  scarab:   [0, 0,    5,  30,  100,  750],  // 2-reel pays 5×betPerLine
+  ace:      [0, 0,    0,   5,   40,  150],  // Ace
+  king:     [0, 0,    0,   5,   40,  150],  // King
+  queen:    [0, 0,    0,   5,   30,  100],  // Queen
+  jack:     [0, 0,    0,   5,   30,  100],  // Jack
+  ten:      [0, 0,    0,   5,   30,  100],  // Ten
 };
 
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
@@ -227,6 +242,7 @@ window.addEventListener('load', async () => {
     reelsCount: 5,
     rowsCount: 3,
     paytable: PAYTABLE,
+    expandingPaytable: EXPANDING_PAYTABLE,
     reelStrips: REEL_STRIPS,
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
