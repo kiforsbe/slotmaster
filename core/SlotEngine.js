@@ -8,20 +8,22 @@ export class SlotEngine {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     
-    // Core game configurations
+    // Core game configurations - shallow copy to avoid mutating caller's object
     this.config = {
       reelsCount: 5,
       rowsCount: 3,
       paytable: {},
       reelStrips: [],
-      symbolsConfig: {}, // Maps symbol name to {x, y, w, h} in spritesheet
-      spritesheetUrl: '',
       onStateChange: () => {},
       onFreeSpinsTriggered: () => {},
       onScatterTrigger: (scatterCount) => {},
       onWin: () => {},
       ...config
     };
+    
+    // Asset references - separate from config to avoid mutating the user's object
+    this.spritesheetUrl = config.spritesheetUrl || '';
+    this.symbolsConfig = config.symbolsConfig || {};
 
     // State Variables
     this.state = 'idle'; // idle, spinning, stopping, evaluating, free_spins_intro, expanding, showing_wins, game_over
@@ -67,6 +69,12 @@ export class SlotEngine {
     this.winCycleDuration = 1000; // ms per win line display
     this.winCycleIndex = -1; // -1 means show all wins, 0..N means show specific line win
     
+    // Frame counter for debug/logging
+    this.frameCount = 0;
+    
+    // Debug mode flag - enables debug console.log statements
+    this.debugMode = false;
+
     // Visual Effects
     this.particles = [];
     this.expandedReelsState = []; // Track which reels are currently expanded [false, false, ...]
@@ -91,10 +99,10 @@ export class SlotEngine {
     this.totalBet = this.betPerLine * this.linesCount;
   }
 
-  loadAssets(spritesheetUrl = this.config.spritesheetUrl, symbolsConfig = this.config.symbolsConfig) {
+  loadAssets(spritesheetUrl = this.spritesheetUrl, symbolsConfig = this.symbolsConfig) {
     this.assetsLoaded = false;
-    this.config.spritesheetUrl = spritesheetUrl;
-    this.config.symbolsConfig = symbolsConfig;
+    this.spritesheetUrl = spritesheetUrl;
+    this.symbolsConfig = symbolsConfig;
 
     this.spritesheet.src = spritesheetUrl;
     this.spritesheet.onload = () => {
@@ -139,7 +147,12 @@ export class SlotEngine {
   }
 
   setupResize() {
-    window.addEventListener('resize', () => this.resize());
+    // Debounce resize handler to prevent excessive recalculations
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+      clearTimeout(resizeTimeout);
+      resizeTimeout = setTimeout(() => this.resize(), 100);
+    });
     this.resize();
   }
 
@@ -201,6 +214,7 @@ export class SlotEngine {
   }
 
   update() {
+    this.frameCount++;
     const now = Date.now();
     let allStopped = true;
     
@@ -260,7 +274,7 @@ export class SlotEngine {
         // Check if it's time to stop this reel
         const spinTimeElapsed = now - this.spinStart;
         if (spinTimeElapsed > reel.stopDelay) {
-          console.log(`[Debug] Reel ${r} transitioning to stopping at ${now}`);
+          if (this.debugMode) console.log(`[Debug] Reel ${r} transitioning to stopping at ${now}`);
           reel.state = 'stopping';
           // Set engine state to 'stopping' when first reel starts stopping
           if (this.state === 'spinning') {
@@ -300,11 +314,11 @@ export class SlotEngine {
         const visibleSymbols = [reel.symbols[1], reel.symbols[2], reel.symbols[3]];
         const targetSymbols = this.targetGrid[r];
         const matchesTarget = this.checkReelMatchesTarget(r);
-        if (r === 0 && this.frameCount % 60 === 0) {
+        if (this.debugMode && r === 0 && this.frameCount % 60 === 0) {
           console.log(`[STOP] Reel ${r}: state=stopping, speed=${reel.speed.toFixed(1)}, offsetY=${reel.offsetY.toFixed(1)}, feedIdx=${reel.feedIndex}, visible=${JSON.stringify(visibleSymbols)}, target=${JSON.stringify(targetSymbols)}, matches=${matchesTarget}`);
         }
         if (matchesTarget && reel.speed < 10) {
-          console.log(`[Debug] Reel ${r} reached target and bouncing at ${now}`);
+          if (this.debugMode) console.log(`[Debug] Reel ${r} reached target and bouncing at ${now}`);
           reel.offsetY = 0;
           reel.speed = 0;
           reel.state = 'bounce';
@@ -330,7 +344,7 @@ export class SlotEngine {
           if (reel.offsetY <= 0) {
             reel.offsetY = 0;
             reel.state = 'idle';
-            console.log(`[Debug] Reel ${r} settled to idle at ${now}`);
+            if (this.debugMode) console.log(`[Debug] Reel ${r} settled to idle at ${now}`);
           }
         }
       }
@@ -338,7 +352,7 @@ export class SlotEngine {
 
     // Handle transition from spinning to stops complete
     if (this.state === 'stopping' && allStopped) {
-      console.log(`[Debug] All reels stopped. Evaluating results at ${now}`);
+      if (this.debugMode) console.log(`[Debug] All reels stopped. Evaluating results at ${now}`);
       this.evaluateSpinResult();
     }
 
@@ -510,8 +524,8 @@ export class SlotEngine {
       this.targetGrid = this.generateTargetGrid();
     }
     this.forcedTargetGrid = false; // Reset flag
-    console.log(`[SPIN] targetGrid:`, JSON.stringify(this.targetGrid));
-    console.log(`[SPIN] spinDuration=${this.spinDuration}, turbo=${this.turboMode}, symbolHeight=${this.symbolHeight}`);
+    if (this.debugMode) console.log(`[SPIN] targetGrid:`, JSON.stringify(this.targetGrid));
+    if (this.debugMode) console.log(`[SPIN] spinDuration=${this.spinDuration}, turbo=${this.turboMode}, symbolHeight=${this.symbolHeight}`);
     
     // Trigger Spin Sound
     audio.playSpin();
@@ -526,7 +540,7 @@ export class SlotEngine {
       reel.speed = 20;
       reel.stopDelay = (this.turboMode ? 500 : this.spinDuration) + (r * stopInterval);
       reel.feedIndex = 0;
-      console.log(`[SPIN] Reel ${r}: stopDelay=${reel.stopDelay}ms, strip=${reel.strip.length} symbols`);
+      if (this.debugMode) console.log(`[SPIN] Reel ${r}: stopDelay=${reel.stopDelay}ms, strip=${reel.strip.length} symbols`);
     }
   }
 
@@ -590,10 +604,10 @@ export class SlotEngine {
 
   stopSpin() {
     if (this.state !== 'spinning') {
-      console.log(`[Debug] stopSpin called but state is ${this.state}`);
+      if (this.debugMode) console.log(`[Debug] stopSpin called but state is ${this.state}`);
       return;
     }
-    console.log(`[Debug] stopSpin called. State: ${this.state}`);
+    if (this.debugMode) console.log(`[Debug] stopSpin called. State: ${this.state}`);
     this.state = 'stopping';
     this.config.onStateChange(this.state);
     
@@ -601,7 +615,7 @@ export class SlotEngine {
     for (let r = 0; r < this.reels.length; r++) {
       this.reels[r].state = 'stopping';
       this.reels[r].stopDelay = now - this.spinStart + (r * 100);
-      console.log(`[Debug] Reel ${r} stopDelay set to ${this.reels[r].stopDelay}`);
+      if (this.debugMode) console.log(`[Debug] Reel ${r} stopDelay set to ${this.reels[r].stopDelay}`);
     }
   }
 
@@ -747,6 +761,18 @@ export class SlotEngine {
     this.freeSpinsTotal += spinsCount;
   }
 
+  // Transition to free spins intro state (called by game code after scatter trigger)
+  enterFreeSpinsIntro() {
+    this.state = 'free_spins_intro';
+    this.config.onStateChange(this.state);
+  }
+
+  // Transition back to idle state (called by game code after free spins summary)
+  returnToIdle() {
+    this.state = 'idle';
+    this.config.onStateChange(this.state);
+  }
+
   exitFreeSpins() {
     this.inFreeSpins = false;
     this.expandingSymbol = null;
@@ -877,7 +903,7 @@ export class SlotEngine {
   }
 
   drawSymbol(name, x, y, width, height, blurSpeed = 0) {
-    const tile = this.config.symbolsConfig[name];
+    const tile = this.symbolsConfig[name];
     if (!tile) return;
 
     const destX = x;
@@ -916,7 +942,7 @@ export class SlotEngine {
   renderExpandingAnimation() {
     if (this.state !== 'expanding' || !this.expandingSymbol) return;
 
-    const tile = this.config.symbolsConfig[this.expandingSymbol];
+    const tile = this.symbolsConfig[this.expandingSymbol];
     if (!tile) return;
 
     const reelExpandDuration = 900; // ms per reel
@@ -1131,6 +1157,8 @@ export class SlotEngine {
   }
 
   spawnWinParticles() {
+    // Limit total particles to prevent performance issues
+    const MAX_PARTICLES = 200;
     this.particles = [];
     const totalWins = (this.expandingWinData ? this.expandingWinData.wins : this.winData.lineWins) || [];
     
@@ -1139,6 +1167,10 @@ export class SlotEngine {
     if (this.winData.scatterWin) {
       spots.push(...this.winData.scatterWin.winningPositions);
     }
+
+    // Limit number of spots to prevent too many particles
+    const maxSpots = Math.min(spots.length, Math.floor(MAX_PARTICLES / 20));
+    spots = spots.slice(0, maxSpots);
 
     spots.forEach(([col, row]) => {
       const cx = this.reelsX + (col * this.symbolWidth) + (this.symbolWidth / 2);

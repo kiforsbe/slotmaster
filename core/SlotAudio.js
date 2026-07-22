@@ -5,8 +5,10 @@ class SlotAudio {
     this.ctx = null;
     this.bgmNode = null;
     this.bgmGain = null;
+    this.bgmInterval = null;
     this.isMuted = false;
     this.globalVolume = 0.3; // Default master volume
+    this.activeOscillators = [];
   }
 
   init() {
@@ -28,6 +30,15 @@ class SlotAudio {
   setMute(mute) {
     this.isMuted = mute;
     if (mute) {
+      // Stop all active oscillators to prevent memory leak
+      this.activeOscillators.forEach(osc => {
+        try {
+          osc.stop();
+        } catch (e) {
+          // Ignore errors from already-stopped oscillators
+        }
+      });
+      this.activeOscillators = [];
       this.stopBGM();
     }
   }
@@ -44,6 +55,17 @@ class SlotAudio {
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
+    
+    // Track oscillator for cleanup on mute
+    this.activeOscillators.push(osc);
+    
+    // Auto-remove from tracking when oscillator ends
+    osc.onended = () => {
+      const idx = this.activeOscillators.indexOf(osc);
+      if (idx !== -1) {
+        this.activeOscillators.splice(idx, 1);
+      }
+    };
     
     osc.connect(gain);
     gain.connect(this.ctx.destination);
@@ -202,9 +224,30 @@ class SlotAudio {
     this.bgmGain.gain.setValueAtTime(this.globalVolume * 0.35, this.ctx.currentTime);
     this.bgmGain.connect(this.ctx.destination);
 
-    // Simple rhythmic synth loop
+    // Spooky Egyptian melody - A minor progression
+    const melody = [
+      220.00, 261.63, 293.66, 329.63,  // A2, C3, D3, E3
+      392.00, 440.00, 392.00, 329.63,  // G3, A3, G3, E3
+      261.63, 293.66, 329.63, 392.00,  // C3, D3, E3, G3
+      440.00, 392.00, 329.63, 293.66   // A3, G3, E3, D3
+    ];
+
+    const bpm = 120;
+    const beatDuration = 60 / bpm; // seconds per quarter note
+    const notesPerBeat = 2; // Eighth notes
+    const noteDuration = beatDuration / notesPerBeat;
+
+    // Web Audio API lookahead scheduler
+    const scheduleLookahead = 0.1; // 100ms lookahead
+    const scheduleInterval = 0.05; // 50ms scheduling interval
+
+    let currentNoteIndex = 0;
+    let nextNoteTime = this.ctx.currentTime + 0.1; // Start 100ms from now
+
+    const melodyLength = melody.length;
     const playNote = (freq, time, duration, type = 'triangle') => {
       if (!this.bgmGain) return;
+      
       const osc = this.ctx.createOscillator();
       const noteGain = this.ctx.createGain();
 
@@ -212,53 +255,56 @@ class SlotAudio {
       noteGain.connect(this.bgmGain);
 
       osc.type = type;
-      osc.frequency.setValueAtTime(freq, time);
-
-      noteGain.gain.setValueAtTime(0, time);
-      noteGain.gain.linearRampToValueAtTime(1.0, time + 0.05);
-      noteGain.gain.exponentialRampToValueAtTime(0.001, time + duration - 0.02);
-
-      osc.start(time);
-      osc.stop(time + duration);
-    };
-
-    let beat = 0;
-    const bpm = 120;
-    const stepTime = 60 / bpm / 2; // eighth notes
-
-    // Spooky minor progression: A, C, B, E
-    const melody = [
-      220.00, 220.00, 261.63, 220.00,
-      246.94, 246.94, 329.63, 246.94,
-      220.00, 261.63, 329.63, 392.00,
-      440.00, 392.00, 329.63, 246.94
-    ];
-
-    const scheduler = () => {
-      if (!this.bgmGain) return;
-      const nextTime = this.ctx.currentTime + 0.1;
       
-      // Schedule next 4 beats
-      for (let i = 0; i < 8; i++) {
-        const noteIdx = (beat + i) % melody.length;
-        const noteTime = nextTime + i * stepTime;
-        const freq = melody[noteIdx];
-        
-        // Bass note on beat 0 and 4
-        if ((beat + i) % 4 === 0) {
-          playNote(freq / 2, noteTime, stepTime * 1.8, 'sawtooth');
-        }
-        
-        // Melody note
-        playNote(freq, noteTime, stepTime * 0.9, 'triangle');
+      // Prevent frequency values of 0 or negative
+      if (!isFinite(freq) || freq <= 0) { 
+        return; 
       }
 
-      beat += 8;
-      // Schedule next batch in 2 seconds
-      this.bgmInterval = setTimeout(scheduler, stepTime * 8 * 1000);
+      const tStart = Math.max(time, this.ctx.currentTime + 0.01);
+
+      noteGain.gain.setValueAtTime(0, tStart);
+      noteGain.linearRampToValueAtTime(0.7, tStart + 0.01);
+      noteGain.exponentialRampToValueAtTime(0.001, tStart + duration - 0.01);
+
+      const oscStartTime = Math.max(tStart, this.ctx.currentTime);
+      
+      try {
+        osc.start(oscStartTime);
+        osc.stop(tStart + duration);
+      } catch (e) {
+        // Ignore errors from stopped oscillators
+      }
     };
 
-    scheduler();
+    const scheduleNotes = () => {
+      if (!this.bgmGain) return;
+      
+      const now = this.ctx.currentTime;
+      
+      // Schedule notes for the next lookahead period
+      while (nextNoteTime < now + scheduleLookahead) {
+        const freq = melody[currentNoteIndex % melodyLength];
+        
+        // Create oscillator for this note
+        playNote(freq, nextNoteTime, noteDuration, 'triangle');
+        
+        // Every 4 notes, add a bass note (octave lower)
+        if (currentNoteIndex % 4 === 0) {
+          playNote(freq / 2, nextNoteTime, noteDuration * 2, 'sine');
+        }
+        
+        currentNoteIndex++;
+        nextNoteTime += noteDuration;
+      }
+      
+      // Schedule next batch
+      this.bgmInterval = setTimeout(scheduleNotes, scheduleInterval * 1000);
+    };
+    
+    // Store bound reference
+    this.bgmScheduler = scheduleNotes.bind(this);
+    this.bgmScheduler();
     this.bgmNode = true; // Mark as active
   }
 

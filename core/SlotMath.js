@@ -1,5 +1,10 @@
 // Core Slot Mathematics Engine
 
+/**
+ * Payline definitions for 5-reel, 3-row slot machine.
+ * Each array defines the row index (0=top, 1=middle, 2=bottom) for each column.
+ * @type {Array<Array<number>>}
+ */
 export const PAYLINES = [
   [1, 1, 1, 1, 1], // Line 1: Horizontal Middle Row
   [0, 0, 0, 0, 0], // Line 2: Horizontal Top Row
@@ -16,8 +21,25 @@ export const PAYLINES = [
 /**
  * Check normal line wins and scatters for a slot grid.
  * Grid structure: grid[col][row], where col is 0..4 and row is 0..2.
+ * @param {Array<Array<string>>} grid - 5x3 grid of symbol names
+ * @param {Object} paytable - Maps symbol names to payout arrays (indexed by hit count)
+ * @param {number} activeLinesCount - Number of active paylines (default 10)
+ * @param {string} wildSymbol - Symbol that acts as wild (default 'book')
+ * @param {string} scatterSymbol - Symbol that acts as scatter (default 'book')
+ * @param {number} scatterTriggerCount - Minimum scatter count to trigger free spins (default 3)
+ * @returns {Object} Object containing lineWins, scatterWin, and total payouts
  */
-export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'book', scatterSymbol = 'book') {
+export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'book', scatterSymbol = 'book', scatterTriggerCount = 3) {
+  // Input validation
+  if (!grid || grid.length !== 5 || grid[0].length !== 3) {
+    throw new Error('Grid must be 5 columns x 3 rows');
+  }
+  if (!paytable || typeof paytable !== 'object') {
+    throw new Error('Invalid paytable');
+  }
+  activeLinesCount = Math.min(activeLinesCount, PAYLINES.length);
+  
+
   const lineWins = [];
   let totalLinePayoutMultiplier = 0;
 
@@ -98,7 +120,7 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
 
   let scatterWin = null;
   let triggerFreeSpins = false;
-  if (scatterCount >= 2) {
+  if (scatterCount >= scatterTriggerCount) {
     triggerFreeSpins = true;
   }
 
@@ -136,8 +158,23 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
  * Check Book of Dead style expanding wins during Free Spins.
  * Reels with the expanding symbol will have it expand to cover the entire reel.
  * Wins are evaluated on all active lines without needing to be adjacent.
+ * Note: Expanding symbol pays on ALL active paylines, so 3 expanding reels
+ * pays payout * numActiveLines. This is Book of Dead style behavior.
+ * @param {Array<Array<string>>} grid - 5x3 grid of symbol names
+ * @param {string} expandingSymbol - The symbol that expands during free spins
+ * @param {Object} paytable - Maps symbol names to payout arrays
+ * @param {number} activeLinesCount - Number of active paylines (default 10)
+ * @returns {Object|null} Expanding win data or null if no win
  */
 export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesCount = 10) {
+  // Input validation
+  if (!grid || grid.length !== 5 || grid[0].length !== 3) {
+    throw new Error('Grid must be 5 columns x 3 rows');
+  }
+  if (!paytable || typeof paytable !== 'object') {
+    throw new Error('Invalid paytable');
+  }
+  
   // Find which reels contain the expanding symbol
   const expandingReels = [];
   const expandedPositions = [];

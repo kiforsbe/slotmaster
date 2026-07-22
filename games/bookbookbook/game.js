@@ -81,53 +81,18 @@ const FRIENDLY_NAMES = {
   book: "Book of Books"
 };
 
-// 3. UI Dom Selectors
-const canvas = document.getElementById('game-canvas');
-const btnSpin = document.getElementById('btn-spin');
-const btnAuto = document.getElementById('btn-auto');
-const btnTurbo = document.getElementById('btn-turbo');
-const btnMute = document.getElementById('btn-mute');
-const btnPaytable = document.getElementById('btn-paytable');
-const btnPaytableOk = document.getElementById('btn-paytable-ok');
-const themeSelect = document.getElementById('theme-select');
-const displayBalance = document.getElementById('display-balance');
-const betValue = document.getElementById('bet-value');
-const betMinus = document.getElementById('bet-minus');
-const betPlus = document.getElementById('bet-plus');
-const gameTicker = document.getElementById('game-ticker');
+// 3. UI Dom Selectors - will be initialized in load handler
+let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
+let themeSelect, displayBalance, betValue, betMinus, betPlus, gameTicker;
+let btnSim, simModal, btnCloseSim;
+let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
+let modalPaytable, modalFsTrigger, modalFsSummary, btnStartFs, btnCloseFsSummary;
+let fsPanel, fsCounter, fsSymbolName, fsSymbolThumbnail;
+let bookRevealCanvas, bookRevealCtx, chosenSymbolReveal, fsTotalWin;
+let cheatScatter, cheatExpand, cheatBigWin;
 
-const btnSim = document.getElementById('btn-sim');
-const simModal = document.getElementById('sim-modal');
-const btnCloseSim = document.getElementById('btn-close-sim');
-
-// Simulation result displays
-const simRtpDisplay = document.getElementById('sim-rtp');
-const simTotalSpinsDisplay = document.getElementById('sim-total-spins');
-const simMaxWinDisplay = document.getElementById('sim-max-win');
-const simFreeSpinsDisplay = document.getElementById('sim-free-spins');
-
-// Add these missing DOM references:
-const modalPaytable = document.getElementById('modal-paytable');
-const modalFsTrigger = document.getElementById('modal-fs-trigger');
-const modalFsSummary = document.getElementById('modal-fs-summary');
-const btnStartFs = document.getElementById('btn-start-fs');
-const btnCloseFsSummary = document.getElementById('btn-close-fs-summary');
-
-const fsPanel = document.getElementById('fs-panel');
-const fsCounter = document.getElementById('fs-counter');
-const fsSymbolName = document.getElementById('fs-symbol-name');
-const fsSymbolThumbnail = document.getElementById('fs-symbol-thumbnail');
-
-const bookRevealCanvas = document.getElementById('book-reveal-canvas');
-const bookRevealCtx = bookRevealCanvas.getContext('2d');
-
-const chosenSymbolReveal = document.getElementById('chosen-symbol-reveal');
-
-const fsTotalWin = document.getElementById('fs-total-win');
-
-const cheatScatter = document.getElementById('cheat-scatter');
-const cheatExpand = document.getElementById('cheat-expand');
-const cheatBigWin = document.getElementById('cheat-bigwin');
+// Debug mode - only enable cheat buttons in development
+const DEBUG_MODE = false;
 
 function runSimulation() {
   if (!engine) return;
@@ -201,6 +166,56 @@ async function loadThemeAssets(themeName) {
 
 // 5. Initialize game on window load
 window.addEventListener('load', async () => {
+  // Initialize all DOM references
+  canvas = document.getElementById('game-canvas');
+  btnSpin = document.getElementById('btn-spin');
+  btnAuto = document.getElementById('btn-auto');
+  btnTurbo = document.getElementById('btn-turbo');
+  btnMute = document.getElementById('btn-mute');
+  btnPaytable = document.getElementById('btn-paytable');
+  btnPaytableOk = document.getElementById('btn-paytable-ok');
+  themeSelect = document.getElementById('theme-select');
+  displayBalance = document.getElementById('display-balance');
+  betValue = document.getElementById('bet-value');
+  betMinus = document.getElementById('bet-minus');
+  betPlus = document.getElementById('bet-plus');
+  gameTicker = document.getElementById('game-ticker');
+
+  btnSim = document.getElementById('btn-sim');
+  simModal = document.getElementById('sim-modal');
+  btnCloseSim = document.getElementById('btn-close-sim');
+
+  simRtpDisplay = document.getElementById('sim-rtp');
+  simTotalSpinsDisplay = document.getElementById('sim-total-spins');
+  simMaxWinDisplay = document.getElementById('sim-max-win');
+  simFreeSpinsDisplay = document.getElementById('sim-free-spins');
+
+  modalPaytable = document.getElementById('modal-paytable');
+  modalFsTrigger = document.getElementById('modal-fs-trigger');
+  modalFsSummary = document.getElementById('modal-fs-summary');
+  btnStartFs = document.getElementById('btn-start-fs');
+  btnCloseFsSummary = document.getElementById('btn-close-fs-summary');
+
+  fsPanel = document.getElementById('fs-panel');
+  fsCounter = document.getElementById('fs-counter');
+  fsSymbolName = document.getElementById('fs-symbol-name');
+  fsSymbolThumbnail = document.getElementById('fs-symbol-thumbnail');
+
+  bookRevealCanvas = document.getElementById('book-reveal-canvas');
+  bookRevealCtx = bookRevealCanvas.getContext('2d');
+  chosenSymbolReveal = document.getElementById('chosen-symbol-reveal');
+  fsTotalWin = document.getElementById('fs-total-win');
+
+  cheatScatter = document.getElementById('cheat-scatter');
+  cheatExpand = document.getElementById('cheat-expand');
+  cheatBigWin = document.getElementById('cheat-bigwin');
+
+  // Enable cheat buttons only in debug mode
+  const debugShortcuts = document.querySelector('.debug-shortcuts');
+  if (debugShortcuts && DEBUG_MODE) {
+    debugShortcuts.classList.add('debug-enabled');
+  }
+
   const themeAssets = await loadThemeAssets(currentTheme);
   if (!themeAssets) {
     alert("Error loading assets!");
@@ -296,8 +311,7 @@ function handleScatterTrigger(scatterCount, isInFreeSpins) {
   } else {
     // Initial trigger: only 3+ scatters starts free spins
     if (scatterCount >= 3) {
-      engine.state = 'free_spins_intro';
-      engine.config.onStateChange(engine.state);
+      engine.enterFreeSpinsIntro();
       handleInitialFreeSpinsTrigger();
     }
   }
@@ -384,7 +398,7 @@ function handleInitialFreeSpinsTrigger() {
   }, 400);
 
   setTimeout(() => {
-    chosenSymbolReveal.textContent = `${FRIENDLY_NAMES[chosen].toUpperCase()} SELECETED`;
+    chosenSymbolReveal.textContent = `${FRIENDLY_NAMES[chosen].toUpperCase()} SELECTED`;
     chosenSymbolReveal.classList.add('reveal');
     btnStartFs.style.display = 'inline-block';
 
@@ -426,14 +440,12 @@ function handleScatterRetrigger(scatterCount) {
   engine.audio.playScatterTrigger();
   
   // Reset state so the next auto-spin continues the bonus
-  engine.state = 'idle';
-  handleStateChange('idle');
+  engine.returnToIdle();
 }
 
 function closeFreeSpinsSummary() {
   modalFsSummary.classList.remove('active');
-  engine.state = 'idle';
-  handleStateChange('idle');
+  engine.returnToIdle();
   updateUI();
   
   // If autoplay was active, continue
@@ -463,8 +475,10 @@ function setupUIHandlers() {
 
   betPlus.addEventListener('click', () => {
     if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
-    if (engine.betPerLine < 100) {
-      engine.betPerLine++;
+    const newBetPerLine = engine.betPerLine + 1;
+    const newTotalBet = newBetPerLine * engine.linesCount;
+    if (newBetPerLine <= 100 && engine.balance >= newTotalBet) {
+      engine.betPerLine = newBetPerLine;
       engine.updateBet();
       updateUI();
     }
@@ -517,18 +531,20 @@ function setupUIHandlers() {
   if (btnStartFs) btnStartFs.addEventListener('click', startFreeSpins);
   if (btnCloseFsSummary) btnCloseFsSummary.addEventListener('click', closeFreeSpinsSummary);
 
-  // Debug Cheat actions
-  if (cheatScatter) cheatScatter.addEventListener('click', () => engine.forceWinResult('scatter'));
-  if (cheatExpand) {
-    cheatExpand.addEventListener('click', () => {
-      if (!engine.inFreeSpins) {
-        alert("Must be in Free Spins mode to test Expanding symbols! Click Scatter Trigger cheat first.");
-        return;
-      }
-      engine.forceWinResult('expanding');
-    });
+  // Debug Cheat actions - only enabled in debug mode
+  if (DEBUG_MODE) {
+    if (cheatScatter) cheatScatter.addEventListener('click', () => engine.forceWinResult('scatter'));
+    if (cheatExpand) {
+      cheatExpand.addEventListener('click', () => {
+        if (!engine.inFreeSpins) {
+          alert("Must be in Free Spins mode to test Expanding symbols! Click Scatter Trigger cheat first.");
+          return;
+        }
+        engine.forceWinResult('expanding');
+      });
+    }
+    if (cheatBigWin) cheatBigWin.addEventListener('click', () => engine.forceWinResult('bigwin'));
   }
-  if (cheatBigWin) cheatBigWin.addEventListener('click', () => engine.forceWinResult('bigwin'));
 }
 
 // 9. Render modal paytable descriptions dynamically

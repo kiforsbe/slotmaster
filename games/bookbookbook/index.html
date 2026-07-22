@@ -558,7 +558,7 @@
       box-shadow: 0 6px 15px var(--gold);
     }
 
-    /* Debug shortcuts dashboard panel */
+    /* Debug shortcuts dashboard panel - hidden in production */
     .debug-shortcuts {
       position: absolute;
       bottom: 90px;
@@ -566,11 +566,17 @@
       display: flex;
       gap: 6px;
       z-index: 50;
-      opacity: 0.15;
-      transition: opacity 0.2s;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.2s, visibility 0.2s;
     }
 
-    .debug-shortcuts:hover {
+    .debug-shortcuts.debug-enabled {
+      opacity: 0.15;
+      visibility: visible;
+    }
+
+    .debug-shortcuts.debug-enabled:hover {
       opacity: 1.0;
     }
 

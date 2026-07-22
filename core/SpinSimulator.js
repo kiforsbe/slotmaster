@@ -4,7 +4,23 @@
  */
 import { checkWins, checkExpandingWins } from './SlotMath.js';
 
+/**
+ * Simulates multiple spins and returns statistical analysis.
+ * @param {Object} config - Slot machine configuration with reelStrips, paytable, etc.
+ * @param {number} numBaseSpins - Number of base spins to simulate (default 100000)
+ * @param {number} betPerLine - Bet per line (default 1)
+ * @param {number} linesCount - Number of active paylines (default 10)
+ * @returns {Object} Simulation results including RTP, win distribution, etc.
+ */
 export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, linesCount = 10) {
+  // Input validation
+  if (!config || !config.reelStrips || !config.paytable) {
+    throw new Error('Invalid config: reelStrips and paytable required');
+  }
+  if (numBaseSpins <= 0 || betPerLine <= 0 || linesCount <= 0) {
+    throw new Error('All numeric parameters must be positive');
+  }
+  
   const results = {
     totalBets: 0,
     totalWins: 0,
@@ -20,17 +36,24 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   simConfig.linesCount = linesCount;
   simConfig.betPerLine = betPerLine;
   simConfig.totalBet = betPerLine * linesCount;
+  
+  // Get configuration values with defaults
+  const freeSpinsCount = simConfig.freeSpinsCount || 10;
+  const expandingSymbol = simConfig.expandingSymbol || 'anubis';
 
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
     const result = _runSingleSpin(false);
     
     // If free spins were triggered by this base spin, simulate them
-    // The current engine seems to trigger a fixed amount of free spins when scatterCount >= 2.
-    // Based on common Book of Dead mechanics, it's often 10-15 free spins. Let's assume 10 for the model if not specified elsewhere.
     if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
-      for (let j = 0; j < 10; j++) {
+      for (let j = 0; j < freeSpinsCount; j++) {
         const freeSpinResult = _runSingleSpin(true);
+        // Accumulate free spin results into the stats
+        results.totalWins += freeSpinResult.spinWin;
+        if (freeSpinResult.spinWin > results.maxWin) results.maxWin = freeSpinResult.spinWin;
+        if (freeSpinResult.spinWin < results.minWin) results.minWin = freeSpinResult.spinWin;
+        results.winDistribution[freeSpinResult.spinWin] = (results.winDistribution[freeSpinResult.spinWin] || 0) + 1;
       }
     }
   }
@@ -80,14 +103,16 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
 
     let spinWin = 0;
     if (winData.scatterWin) {
-      spinWin += winData.scatterWin.payout * (isFreeSpin ? linesCount : betPerLine);
+      // Scatter payouts are always totalBet-scaled, matching the engine behavior.
+      spinWin += winData.scatterWin.payout * simConfig.totalBet;
       results.scatterCounts += winData.scatterWin.count;
       if (winData.scatterWin.triggerFreeSpins) {
         results.freeSpinsTriggered++;
       }
     }
 
-    spinWin += winData.totalLinePayoutMultiplier * (isFreeSpin ? linesCount : betPerLine);
+    // Line wins use betPerLine (each line's payout is multiplied by betPerLine)
+    spinWin += winData.totalLinePayoutMultiplier * betPerLine;
 
     // Check for expanding wins (relevant during free spins usually, but can happen anytime depending on rules)
     // In this game's logic, expansion is triggered by symbols on reels during free spins.
@@ -96,11 +121,8 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     // and there are multiple of the same high-value symbol on a reel.
     let expandingResults = null;
     if (isFreeSpin) {
-      // The engine logic: "Find which reels contain the expanding symbol"
-      // We need to know what the 'expandingSymbol' is. In bookbookbook it's usually 'tut' or 'book'.
-      // Let's assume 'tut' for expansion in this game context if not specified.
-      const currentExpandingSymbol = 'anubis'; 
-      expandingResults = checkExpandingWins(targetGrid, currentExpandingSymbol, simConfig.paytable, linesCount);
+      // Check for expanding wins using the configured expanding symbol
+      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, linesCount);
     }
 
     if (expandingResults) {
