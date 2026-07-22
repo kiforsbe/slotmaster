@@ -82,6 +82,7 @@
       display: flex;
       gap: 12px;
       align-items: center;
+      flex-wrap: wrap;
     }
 
     .btn-icon {
@@ -111,6 +112,17 @@
       color: #000;
       border-color: #fff;
       box-shadow: 0 0 10px var(--gold-glow);
+    }
+
+    .btn-sim-btn {
+      border-color: var(--ruby) !important;
+      color: var(--ruby) !important;
+    }
+
+    .btn-sim-btn:hover {
+      background: rgba(230, 57, 70, 0.15) !important;
+      border-color: var(--ruby) !important;
+      color: #fff !important;
     }
 
     /* Game Window Wrapper */
@@ -593,6 +605,77 @@
       border-radius: 4px;
       pointer-events: none;
     }
+
+    /* Simulation Results Modal */
+    .sim-modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(15, 14, 21, 0.98);
+      border: 3px solid var(--gold);
+      padding: 30px;
+      border-radius: 20px;
+      z-index: 100;
+      max-width: 500px;
+      width: 90%;
+      box-shadow: 0 0 50px rgba(0,0,0,1), 0 0 30px var(--gold-glow);
+      backdrop-filter: blur(10px);
+    }
+
+    .sim-modal h2 {
+      font-family: 'Cinzel', serif;
+      color: var(--gold);
+      margin-bottom: 20px;
+      text-align: center;
+      font-size: 24px;
+    }
+
+    .sim-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .stat-box {
+      background: rgba(255,255,255,0.05);
+      padding: 15px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #8f8f9f;
+      display: block;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .btn-close-sim {
+      width: 100%;
+      padding: 12px;
+      background: var(--gold);
+      border: none;
+      color: #000;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    .btn-close-sim:hover {
+      transform: scale(1.05);
+    }
+
   </style>
 </head>
 <body>
@@ -689,6 +772,26 @@
 
     </div>
 
+    <!-- Simulation Controls & Results -->
+    <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100;">
+      <button id="btn-sim" class="btn-icon btn-sim-btn">RUN SIMULATION</button>
+    </div>
+
+    <div id="sim-modal" class="sim-modal" style="display: none;">
+      <h2>Simulation Results</h2>
+      <div class="sim-stats">
+        <div class="stat-box">
+          <span class="stat-label">Free Spins</span>
+          <div class="stat-value">10</div>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">Total Wins</span>
+          <div class="stat-value">10</div>
+        </div>
+      </div>
+      <button id="btn-close-sim" class="btn-close-sim">CLOSE</button>
+    </div>
+
   </div>
 
   <!-- MODALS -->
@@ -753,6 +856,22 @@
 
       <button id="btn-close-fs-summary" class="btn-primary">COLLECT PRIZE</button>
     </div>
+  </div>
+
+  <!-- Simulation Results Modal -->
+  <div id="sim-modal" class="sim-modal">
+    <h2>Simulation Results</h2>
+    <div class="sim-stats">
+      <div class="stat-box">
+        <div class="stat-label">Free Spins</div>
+        <div class="stat-value">10</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Total Wins</div>
+        <div class="stat-value">10</div>
+      </div>
+    </div>
+    <button class="btn-close-sim">CLOSE</button>
   </div>
 
   <!-- Core Javascript modules -->

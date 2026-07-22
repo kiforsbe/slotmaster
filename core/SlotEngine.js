@@ -1,6 +1,7 @@
 // Core Slot Game Engine Renderer & State Controller
 import { checkWins, checkExpandingWins, PAYLINES } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
+import { simulateSpins } from './SpinSimulator.js';
 
 export class SlotEngine {
   constructor(canvas, config = {}) {
@@ -495,6 +496,13 @@ export class SlotEngine {
     this.expandingWinData = null;
     this.activeWinLineIndex = -1;
     this.expandedReelsState = Array(this.config.reelsCount).fill(false);
+
+    // Initialize expansion timers
+    this.expansionReelStartTimes = [];
+    for (let i = 0; i < this.config.reelsCount; i++) {
+        this.expansionReelStartTimes[i] = Date.now();
+    }
+
     this.config.onStateChange(this.state);
 
     // Pre-calculate Spin Result (skip if forceWinResult already set targetGrid)
@@ -1169,5 +1177,14 @@ export class SlotEngine {
       
       this.ctx.restore();
     });
+  }
+
+    /**
+   * Runs a batch of simulations and returns the results.
+   * @param {number} numBaseSpins - The number of base spins to simulate.
+   * @returns {object} The simulation results.
+   */
+  runSimulation(numBaseSpins = 10000) {
+    return simulateSpins(this.config, numBaseSpins);
   }
 }

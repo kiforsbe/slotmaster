@@ -20,36 +20,24 @@ function shuffle(array, rng) {
 }
 
 function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrides={}) {
-  // Step 1: compute weights from 5-of-a-kind payout, unless a symbol has an explicit
-  // frequency override (used e.g. for bonus-triggering symbols that should stay rare
-  // regardless of their payout).
+  // Step 1 & 2: Compute weights and calculate counts in one pass
   const weights = {};
   for (const symbol in paytable) {
-    if (exclude.includes(symbol)) continue; // skip excluded symbols
-    if (symbol in frequencyOverrides) {
-      weights[symbol] = frequencyOverrides[symbol];
-      continue;
-    }
-    const payout = paytable[symbol][5];
-    weights[symbol] = 1 / (payout + 1);
+    if (exclude.includes(symbol)) continue;
+    weights[symbol] = symbol in frequencyOverrides ? frequencyOverrides[symbol] : 1 / Math.pow(paytable[symbol][5] + 1, 0.2);
   }
 
-  // Step 2: normalize counts to target length
-  const totalWeight = Object.values(weights).reduce((a,b)=>a+b,0);
-  const counts = {};
-  for (const symbol in weights) {
-    counts[symbol] = Math.max(1, Math.round(weights[symbol] / totalWeight * targetLength));
-  }
-
-  // Step 3: build reel
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
   const reel = [];
-  for (const [symbol, count] of Object.entries(counts)) {
-    for (let i=0; i<count; i++) reel.push(symbol);
+
+  // Step 3: Build reel directly from weights and total weight
+  for (const symbol in weights) {
+    const count = Math.max(1, Math.round((weights[symbol] / totalWeight) * targetLength));
+    for (let i = 0; i < count; i++) reel.push(symbol);
   }
 
-  // Step 4: shuffle with seed
-  const rng = mulberry32(seed);
-  return shuffle(reel, rng);
+  // Step 4: Shuffle with seed
+  return shuffle(reel, mulberry32(seed));
 }
 
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
@@ -70,7 +58,7 @@ const PAYTABLE = {
 // Book pays low but triggers the bonus game, so it must be rarer than the
 // highest-paying symbol (explorer) rather than following its own low payout.
 const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: (1 / (PAYTABLE.explorer[5] + 1)) / 2
+  book: ((1 / (PAYTABLE.explorer[5] + 1)) * 2) / 3
 };
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
@@ -108,27 +96,78 @@ const betMinus = document.getElementById('bet-minus');
 const betPlus = document.getElementById('bet-plus');
 const gameTicker = document.getElementById('game-ticker');
 
-// Modals
+const btnSim = document.getElementById('btn-sim');
+const simModal = document.getElementById('sim-modal');
+const btnCloseSim = document.getElementById('btn-close-sim');
+
+// Simulation result displays
+const simRtpDisplay = document.getElementById('sim-rtp');
+const simTotalSpinsDisplay = document.getElementById('sim-total-spins');
+const simMaxWinDisplay = document.getElementById('sim-max-win');
+const simFreeSpinsDisplay = document.getElementById('sim-free-spins');
+
+// Add these missing DOM references:
 const modalPaytable = document.getElementById('modal-paytable');
 const modalFsTrigger = document.getElementById('modal-fs-trigger');
 const modalFsSummary = document.getElementById('modal-fs-summary');
 const btnStartFs = document.getElementById('btn-start-fs');
 const btnCloseFsSummary = document.getElementById('btn-close-fs-summary');
-const bookRevealCanvas = document.getElementById('book-reveal-canvas');
-const bookRevealCtx = bookRevealCanvas.getContext('2d');
-const chosenSymbolReveal = document.getElementById('chosen-symbol-reveal');
-const fsTotalWin = document.getElementById('fs-total-win');
 
-// Free spins overlay
 const fsPanel = document.getElementById('fs-panel');
 const fsCounter = document.getElementById('fs-counter');
-const fsSymbolThumbnail = document.getElementById('fs-symbol-thumbnail');
 const fsSymbolName = document.getElementById('fs-symbol-name');
+const fsSymbolThumbnail = document.getElementById('fs-symbol-thumbnail');
 
-// Debug Cheats
+const bookRevealCanvas = document.getElementById('book-reveal-canvas');
+const bookRevealCtx = bookRevealCanvas.getContext('2d');
+
+const chosenSymbolReveal = document.getElementById('chosen-symbol-reveal');
+
+const fsTotalWin = document.getElementById('fs-total-win');
+
 const cheatScatter = document.getElementById('cheat-scatter');
 const cheatExpand = document.getElementById('cheat-expand');
 const cheatBigWin = document.getElementById('cheat-bigwin');
+
+function runSimulation() {
+  if (!engine) return;
+  
+  // Show loading state (optional, but good for UX as 10k spins take a moment)
+  btnSim.textContent = 'RUNNING...';
+  btnSim.disabled = true;
+
+  // Use setTimeout to allow the UI thread to update before the heavy calculation
+  setTimeout(() => {
+    try {
+      const results = engine.runSimulation(10000);
+      
+      simRtpDisplay.textContent = results.rtp;
+      simTotalSpinsDisplay.textContent = results.totalSpins;
+      simMaxWinDisplay.textContent = `$${results.maxWin}`;
+      simFreeSpinsDisplay.textContent = results.freeSpinsTriggered;
+
+      simModal.style.display = 'block';
+    } catch (error) {
+      console.error('Simulation failed:', error);
+      alert('Error running simulation');
+    } finally {
+      btnSim.textContent = 'RUN SIMULATION';
+      btnSim.disabled = false;
+    }
+  }, 50);
+}
+
+// Setup Simulation Handlers
+if (btnSim) {
+  btnSim.addEventListener('click', runSimulation);
+}
+
+if (btnCloseSim) {
+  btnCloseSim.addEventListener('click', () => {
+    simModal.style.display = 'none';
+  });
+}
+
 
 let engine = null;
 let currentTheme = 'style_4';  // Default theme
@@ -475,19 +514,21 @@ function setupUIHandlers() {
   });
 
   // Free spins action listeners
-  btnStartFs.addEventListener('click', startFreeSpins);
-  btnCloseFsSummary.addEventListener('click', closeFreeSpinsSummary);
+  if (btnStartFs) btnStartFs.addEventListener('click', startFreeSpins);
+  if (btnCloseFsSummary) btnCloseFsSummary.addEventListener('click', closeFreeSpinsSummary);
 
   // Debug Cheat actions
-  cheatScatter.addEventListener('click', () => engine.forceWinResult('scatter'));
-  cheatExpand.addEventListener('click', () => {
-    if (!engine.inFreeSpins) {
-      alert("Must be in Free Spins mode to test Expanding symbols! Click Scatter Trigger cheat first.");
-      return;
-    }
-    engine.forceWinResult('expanding');
-  });
-  cheatBigWin.addEventListener('click', () => engine.forceWinResult('bigwin'));
+  if (cheatScatter) cheatScatter.addEventListener('click', () => engine.forceWinResult('scatter'));
+  if (cheatExpand) {
+    cheatExpand.addEventListener('click', () => {
+      if (!engine.inFreeSpins) {
+        alert("Must be in Free Spins mode to test Expanding symbols! Click Scatter Trigger cheat first.");
+        return;
+      }
+      engine.forceWinResult('expanding');
+    });
+  }
+  if (cheatBigWin) cheatBigWin.addEventListener('click', () => engine.forceWinResult('bigwin'));
 }
 
 // 9. Render modal paytable descriptions dynamically
