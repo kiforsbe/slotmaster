@@ -59,7 +59,7 @@ const PAYTABLE = {
 // highest-paying symbol (explorer) rather than following its own low payout.
 // Adjusted frequency to achieve ~0.5-1% free spins trigger rate with 3+ books
 const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: 0.02  // book: ~2% frequency per position, targets ~1% free spins rate
+  book: 0.107  // Weight to get ~6 books per reel for ~0.7% free spins rate
 };
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
