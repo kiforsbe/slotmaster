@@ -24,7 +24,7 @@ function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrid
   const weights = {};
   for (const symbol in paytable) {
     if (exclude.includes(symbol)) continue;
-    weights[symbol] = symbol in frequencyOverrides ? frequencyOverrides[symbol] : 1 / Math.pow(paytable[symbol][5] + 1, 0.2);
+    weights[symbol] = symbol in frequencyOverrides ? frequencyOverrides[symbol] : 1 / Math.pow(paytable[symbol][5] + 1, 0.15);
   }
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);

@@ -772,24 +772,9 @@
 
     </div>
 
-    <!-- Simulation Controls & Results -->
+    <!-- Simulation Controls -->
     <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100;">
       <button id="btn-sim" class="btn-icon btn-sim-btn">RUN SIMULATION</button>
-    </div>
-
-    <div id="sim-modal" class="sim-modal" style="display: none;">
-      <h2>Simulation Results</h2>
-      <div class="sim-stats">
-        <div class="stat-box">
-          <span class="stat-label">Free Spins</span>
-          <div class="stat-value">10</div>
-        </div>
-        <div class="stat-box">
-          <span class="stat-label">Total Wins</span>
-          <div class="stat-value">10</div>
-        </div>
-      </div>
-      <button id="btn-close-sim" class="btn-close-sim">CLOSE</button>
     </div>
 
   </div>
@@ -859,19 +844,28 @@
   </div>
 
   <!-- Simulation Results Modal -->
-  <div id="sim-modal" class="sim-modal">
+  <div id="sim-modal" class="sim-modal" style="display: none;">
+    <button class="btn-modal-close">×</button>
     <h2>Simulation Results</h2>
     <div class="sim-stats">
       <div class="stat-box">
-        <div class="stat-label">Free Spins</div>
-        <div class="stat-value">10</div>
+        <span class="stat-label">Return to Player (RTP)</span>
+        <div id="sim-rtp" class="stat-value">-</div>
       </div>
       <div class="stat-box">
-        <div class="stat-label">Total Wins</div>
-        <div class="stat-value">10</div>
+        <span class="stat-label">Total Spins</span>
+        <div id="sim-total-spins" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Max Win</span>
+        <div id="sim-max-win" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Free Spins Triggered</span>
+        <div id="sim-free-spins" class="stat-value">-</div>
       </div>
     </div>
-    <button class="btn-close-sim">CLOSE</button>
+    <button id="btn-close-sim" class="btn-close-sim">CLOSE</button>
   </div>
 
   <!-- Core Javascript modules -->
