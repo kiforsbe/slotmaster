@@ -152,7 +152,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     let expandingResults = null;
     if (isFreeSpin) {
       // Check for expanding wins using the configured expanding symbol and paytable
-      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, linesCount, expandingPaytable);
+      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, linesCount);
     }
 
     if (expandingResults) {

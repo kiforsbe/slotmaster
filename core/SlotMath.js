@@ -239,3 +239,41 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
     totalPayoutMultiplier: totalPayout
   };
 }
+
+export function generateReel(paytable, targetLength, seed, exclude=[]) {
+  function _mulberry32(seed) {
+    return function() {
+      let t = seed += 0x6D2B79F5;
+      t = Math.imul(t ^ t >>> 15, t | 1);
+      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+  }
+
+  function _shuffle(array, rng) {
+    for (let i = array.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
+  }
+  
+  // Step 1 & 2: Compute weights and calculate counts in one pass
+  const weights = {};
+  for (const symbol in paytable) {
+    if (exclude.includes(symbol)) continue;
+    weights[symbol] = paytable[symbol].frequency || 1;
+  }
+
+  const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+  const reel = [];
+
+  // Step 3: Build reel directly from weights and total weight
+  for (const symbol in weights) {
+    const count = Math.max(1, Math.round((weights[symbol] / totalWeight) * targetLength));
+    for (let i = 0; i < count; i++) reel.push(symbol);
+  }
+
+  // Step 4: Shuffle with seed
+  return _shuffle(reel, _mulberry32(seed));
+}
