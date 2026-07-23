@@ -124,7 +124,8 @@ function runSimulation() {
       simRtpDisplay.textContent = results.rtp;
       simTotalSpinsDisplay.textContent = results.totalSpins;
       simMaxWinDisplay.textContent = `$${results.maxWin}`;
-      simFreeSpinsDisplay.textContent = results.freeSpinsTriggered;
+      const pct = results.totalSpins > 0 ? (results.freeSpinsTriggered / results.totalSpins) * 100 : 0;
+      simFreeSpinsDisplay.textContent = `${results.freeSpinsTriggered} (${pct.toFixed(4)}%)`;
 
       // --- Detailed Stats Processing ---
       const symbolStats = {}; // { 'explorer': { counts: { 3: { count: 50, totalAmount: 1250 } }, expanding: { counts: {} } } } }
