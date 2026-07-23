@@ -43,15 +43,15 @@ function generateReel(paytable, targetLength, seed, exclude=[]) {
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Index of array = hit count (1 to 5)
 const PAYTABLE = {
-  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.155 },
-  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.040 },
-  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.080 },
-  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.120 },
-  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.250 },
-  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.250 },
-  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.250 },
-  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.250 },
-  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250 },
+  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.155, type: 'scatter', paymode: 'any',  wild: false },
+  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.040, type: 'premium', paymode: 'line', wild: false },
+  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.080, type: 'premium', paymode: 'line', wild: false },
+  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.120, type: 'premium', paymode: 'line', wild: false },
+  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
+  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
+  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
+  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
+  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
 };
 
 // Separate paytable for expanding symbol wins during free spins.
