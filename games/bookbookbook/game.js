@@ -43,15 +43,15 @@ function generateReel(paytable, targetLength, seed, exclude=[]) {
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Index of array = hit count (1 to 5)
 const PAYTABLE = {
-  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.155, type: 'scatter', paymode: 'any',  wild: false },
-  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.040, type: 'premium', paymode: 'line', wild: false },
-  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.080, type: 'premium', paymode: 'line', wild: false },
-  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.120, type: 'premium', paymode: 'line', wild: false },
-  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
-  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
-  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
-  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
-  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false },
+  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.155, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
+  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.040, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
+  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.080, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
+  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.120, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
+  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
+  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
+  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
+  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
+  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
 };
 
 // Separate paytable for expanding symbol wins during free spins.
@@ -159,7 +159,7 @@ function runSimulation() {
         
         symbols.forEach(symbol => {
           const stats = symbolStats[symbol];
-          const friendlyName = FRIENDLY_NAMES[symbol] || symbol;
+          const friendlyName = PAYTABLE[symbol].friendlyName || symbol;
           
           sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
           sectionHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">${friendlyName}</strong>`;
