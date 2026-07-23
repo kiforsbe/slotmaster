@@ -58,15 +58,15 @@ const PAYTABLE = {
 // Index = number of reels containing the expanding symbol (0-5).
 // These values are independent from normal-mode line payouts.
 const EXPANDING_PAYTABLE = {
-  book:     [0, 0,    0,   2,   20,  200],  // Book
-  explorer: [0, 0,   10, 100, 1000, 5000],  // 2-reel pays 10×betPerLine; 3+ uses same as normal mode
-  anubis:   [0, 0,    5,  40,  400, 2000],  // 2-reel pays 5×betPerLine
-  scarab:   [0, 0,    5,  30,  100,  750],  // 2-reel pays 5×betPerLine
-  ace:      [0, 0,    0,   5,   40,  150],  // Ace
-  king:     [0, 0,    0,   5,   40,  150],  // King
-  queen:    [0, 0,    0,   5,   30,  100],  // Queen
-  jack:     [0, 0,    0,   5,   30,  100],  // Jack
-  ten:      [0, 0,    0,   5,   30,  100],  // Ten
+  book:     [0, 0,  0,   2,   20,  200],  // Book
+  explorer: [0, 0, 10, 100, 1000, 5000],  // 2-reel pays 10×betPerLine; 3+ uses same as normal mode
+  anubis:   [0, 0,  5,  40,  400, 2000],  // 2-reel pays 5×betPerLine
+  scarab:   [0, 0,  5,  30,  100,  750],  // 2-reel pays 5×betPerLine
+  ace:      [0, 0,  0,   5,   40,  150],  // Ace
+  king:     [0, 0,  0,   5,   40,  150],  // King
+  queen:    [0, 0,  0,   5,   30,  100],  // Queen
+  jack:     [0, 0,  0,   5,   30,  100],  // Jack
+  ten:      [0, 0,  0,   5,   30,  100],  // Ten
 };
 
 // 2. Reel Strips Config (Egyptian themed distribution of symbols)
