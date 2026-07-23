@@ -19,12 +19,12 @@ function shuffle(array, rng) {
   return array;
 }
 
-function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrides={}) {
+function generateReel(paytable, targetLength, seed, exclude=[]) {
   // Step 1 & 2: Compute weights and calculate counts in one pass
   const weights = {};
   for (const symbol in paytable) {
     if (exclude.includes(symbol)) continue;
-    weights[symbol] = symbol in frequencyOverrides ? frequencyOverrides[symbol] : 1 / Math.pow(paytable[symbol][5] + 1, 0.145) * 1.155;
+    weights[symbol] = paytable[symbol].frequency || 1;
   }
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -41,46 +41,28 @@ function generateReel(paytable, targetLength, seed, exclude=[], frequencyOverrid
 }
 
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
-// Index of array = hit count (0 to 5)
+// Index of array = hit count (1 to 5)
 const PAYTABLE = {
-  book:     [0, 0,  0,   2,   20,  200],  // Book
-  explorer: [0, 0,  0, 100, 1000, 5000],  // Explorer (formerly Tutankhamun's value) — pays at 3+ hits only in normal mode; expanding symbol uses EXPANDING_PAYTABLE during free spins
-  anubis:   [0, 0,  0,  40,  400, 2000],  // Anubis — same rule
-  scarab:   [0, 0,  0,  30,  100,  750],  // Scarab Beetle — same rule
-  ace:      [0, 0,  0,   5,   40,  150],  // Ace
-  king:     [0, 0,  0,   5,   40,  150],  // King
-  queen:    [0, 0,  0,   5,   30,  100],  // Queen
-  jack:     [0, 0,  0,   5,   30,  100],  // Jack
-  ten:      [0, 0,  0,   5,   30,  100],  // Ten
+  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.155 },
+  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.040 },
+  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.080 },
+  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.120 },
+  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.250 },
+  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.250 },
+  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.250 },
+  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.250 },
+  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250 },
 };
 
 // Separate paytable for expanding symbol wins during free spins.
-// Index = number of reels containing the expanding symbol (0-5).
+// Index = number of reels containing the expanding symbol (1-5).
 // These values are independent from normal-mode line payouts.
-const EXPANDING_PAYTABLE = {
-  book:     [0, 0,  0,   2,   20,  200],  // Book
-  explorer: [0, 0, 10, 100, 1000, 5000],  // 2-reel pays 10×betPerLine; 3+ uses same as normal mode
-  anubis:   [0, 0,  5,  40,  400, 2000],  // 2-reel pays 5×betPerLine
-  scarab:   [0, 0,  5,  30,  100,  750],  // 2-reel pays 5×betPerLine
-  ace:      [0, 0,  0,   5,   40,  150],  // Ace
-  king:     [0, 0,  0,   5,   40,  150],  // King
-  queen:    [0, 0,  0,   5,   30,  100],  // Queen
-  jack:     [0, 0,  0,   5,   30,  100],  // Jack
-  ten:      [0, 0,  0,   5,   30,  100],  // Ten
-};
-
-// 2. Reel Strips Config (Egyptian themed distribution of symbols)
-// Book pays low but triggers the bonus game, so it must be rarer than the
-// highest-paying symbol (explorer) rather than following its own low payout.
-const SYMBOL_FREQUENCY_OVERRIDES = {
-  book: (1 / Math.pow(PAYTABLE.book[5] + 1, 0.145)) * 0.155
-};
 const REEL_STRIPS = [
-  generateReel(PAYTABLE, 220, 1234, [], SYMBOL_FREQUENCY_OVERRIDES),
-  generateReel(PAYTABLE, 220, 567, [], SYMBOL_FREQUENCY_OVERRIDES),
-  generateReel(PAYTABLE, 220, 89, [], SYMBOL_FREQUENCY_OVERRIDES),
-  generateReel(PAYTABLE, 220, 765, [], SYMBOL_FREQUENCY_OVERRIDES),
-  generateReel(PAYTABLE, 220, 3321, [], SYMBOL_FREQUENCY_OVERRIDES)
+  generateReel(PAYTABLE, 220, 1234),
+  generateReel(PAYTABLE, 220, 567),
+  generateReel(PAYTABLE, 220, 89),
+  generateReel(PAYTABLE, 220, 765),
+  generateReel(PAYTABLE, 220, 3321)
 ];
 
 // Map of user friendly names for reveal screens
@@ -350,7 +332,6 @@ window.addEventListener('load', async () => {
     reelsCount: 5,
     rowsCount: 3,
     paytable: PAYTABLE,
-    expandingPaytable: EXPANDING_PAYTABLE,
     reelStrips: REEL_STRIPS,
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,

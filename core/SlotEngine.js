@@ -13,7 +13,6 @@ export class SlotEngine {
       reelsCount: 5,
       rowsCount: 3,
       paytable: {},
-      expandingPaytable: null,
       reelStrips: [],
       onStateChange: () => {},
       onFreeSpinsTriggered: () => {},
@@ -672,7 +671,7 @@ export class SlotEngine {
         this.expandingSymbol,
         this.config.paytable,
         this.linesCount,
-        this.config.expandingPaytable
+        this.config.paytable
       );
 
       if (expandingResults) {
