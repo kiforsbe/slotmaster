@@ -3,6 +3,16 @@ import { SlotEngine } from '../../core/SlotEngine.js';
 import { PAYLINES, generateReel } from '../../core/SlotMath.js';
 import { tuneFrequencies } from '../../core/SpinSimulator.js';
 
+// Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
+// frequency tuner - a single source of truth so all three actually model the same reels
+// instead of the simulation/tuner silently drifting onto their own hardcoded defaults.
+const REELS_COUNT = 5;
+const ROWS_COUNT = 3;
+const REEL_LENGTH = 500;
+const REEL_SEEDS = [1234, 567, 89, 765, 3321];
+const BET_PER_LINE = 1;
+const LINES_COUNT = 10;
+
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Frequencies tuned (with SlotMath's now-fixed payout math and generateReel's scatter
 // min-gap enforcement) to land near 96% RTP while keeping the book/scatter trigger rate
@@ -25,13 +35,7 @@ const PAYTABLE = {
 const EXPANDING_CANDIDATES = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type !== 'scatter');
 
 // 2. Reel Strips Generation (Randomized for each reel)
-const REEL_STRIPS = [
-  generateReel(PAYTABLE, 500, 1234),
-  generateReel(PAYTABLE, 500, 567),
-  generateReel(PAYTABLE, 500, 89),
-  generateReel(PAYTABLE, 500, 765),
-  generateReel(PAYTABLE, 500, 3321)
-];
+const REEL_STRIPS = REEL_SEEDS.map(seed => generateReel(PAYTABLE, REEL_LENGTH, seed));
 
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
@@ -56,7 +60,7 @@ function runSimulation() {
   // Use setTimeout to allow the UI thread to update before the heavy calculation
   setTimeout(() => {
     try {
-      const results = engine.runSimulation(1000000);
+      const results = engine.runSimulation(1000000, BET_PER_LINE, LINES_COUNT);
 
       if (simStats) simStats.style.display = '';
       simRtpDisplay.textContent = results.rtp;
@@ -224,6 +228,9 @@ function openTunePanel() {
         <label style="font-size: 0.8em; color: #ccc;">Target Trigger Rate (%)<br>
           <input id="tune-target-trigger" type="number" value="0.6" step="0.05" min="0.01" style="width: 100%; margin-top: 4px;">
         </label>
+        <label style="font-size: 0.8em; color: #ccc;">Reel Length<br>
+          <input id="tune-reel-length" type="number" value="${REEL_LENGTH}" step="10" min="30" style="width: 100%; margin-top: 4px;">
+        </label>
         <label style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
           <input id="tune-trial-spins" type="number" value="300000" step="50000" min="10000" style="width: 100%; margin-top: 4px;">
         </label>
@@ -301,12 +308,25 @@ async function startTuning() {
   const inputs = {
     targetRtp: document.getElementById('tune-target-rtp'),
     targetTriggerRatePct: document.getElementById('tune-target-trigger'),
+    reelLength: document.getElementById('tune-reel-length'),
     trialSpins: document.getElementById('tune-trial-spins'),
     trialsPerPoint: document.getElementById('tune-trials-per-point'),
     maxIterations: document.getElementById('tune-max-iterations'),
   };
 
   const options = {
+    // Grid shape, reel seeds, bet, and line count are fixed to whatever the live game
+    // actually uses (see the shared constants near the top of this file) rather than
+    // exposed as inputs - changing them would desync the tuner from PAYLINES/the real
+    // game grid. Reel length is exposed since it's a legitimate balance lever that doesn't
+    // break anything structural, and it must match REEL_LENGTH by default or the tuner
+    // would be reasoning about a different virtual reel than the one the game actually spins.
+    reelsCount: REELS_COUNT,
+    rowsCount: ROWS_COUNT,
+    reelSeeds: REEL_SEEDS,
+    betPerLine: BET_PER_LINE,
+    linesCount: LINES_COUNT,
+    reelLength: parseInt(inputs.reelLength.value, 10) || REEL_LENGTH,
     targetRtp: parseFloat(inputs.targetRtp.value) || 96,
     targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
@@ -506,8 +526,8 @@ window.addEventListener('load', async () => {
 
   // Create slot engine instance
   engine = new SlotEngine(canvas, {
-    reelsCount: 5,
-    rowsCount: 3,
+    reelsCount: REELS_COUNT,
+    rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
     reelStrips: REEL_STRIPS,
     symbolsConfig: themeAssets.symbolsConfig,

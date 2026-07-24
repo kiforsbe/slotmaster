@@ -1215,9 +1215,12 @@ export class SlotEngine {
     /**
    * Runs a batch of simulations and returns the results.
    * @param {number} numBaseSpins - The number of base spins to simulate.
+   * @param {number} betPerLine - Defaults to this engine's own live betPerLine, so the
+   *   simulation models exactly what the running game would actually pay, not a duplicated constant.
+   * @param {number} linesCount - Defaults to this engine's own live linesCount, same reasoning.
    * @returns {object} The simulation results.
    */
-  runSimulation(numBaseSpins = 100000) {
-    return simulateSpins(this.config, numBaseSpins);
+  runSimulation(numBaseSpins = 100000, betPerLine = this.betPerLine, linesCount = this.linesCount) {
+    return simulateSpins(this.config, numBaseSpins, betPerLine, linesCount);
   }
 }
