@@ -57,7 +57,7 @@ function runSimulation() {
       simTotalSpinsDisplay.textContent = results.totalSpins;
       simMaxWinDisplay.textContent = `$${results.maxWin}`;
       const pct = results.totalSpins > 0 ? (results.freeSpinsTriggered / results.totalSpins) * 100 : 0;
-      simFreeSpinsDisplay.textContent = `${results.freeSpinsTriggered} (${pct.toFixed(4)}%)`;
+      simFreeSpinsDisplay.textContent = `${results.freeSpinsTriggered} (${pct.toFixed(2)}%)`;
 
       // --- Detailed Stats Processing ---
       const symbolStats = {}; // { 'explorer': { counts: { 3: { count: 50, totalAmount: 1250 } }, expanding: { counts: {} } } } }
@@ -128,7 +128,7 @@ function runSimulation() {
               const data = stats.counts[count];
               sectionHtml += `<div style="display: flex; justify-content: space-between; margin-bottom: 2px;">\
                                 <span style="color: #ccc;">${count} hits</span>\
-                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2})})</span>\
+                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 0})})</span>\
                               </div>`;
             });
           } else {
@@ -145,7 +145,7 @@ function runSimulation() {
               const data = stats.expanding.counts[count];
               sectionHtml += `<div style="display: flex; justify-content: space-between;">\
                                 <span style="color: #ffd700;">${count} reels</span>\
-                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 2})})</span>\
+                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 0})})</span>\
                               </div>`;
             });
             sectionHtml += `</div>`;
@@ -305,7 +305,7 @@ window.addEventListener('load', async () => {
 // Update UI text values
 function updateUI() {
   if (!engine) return;
-  displayBalance.textContent = `$${engine.balance.toFixed(2)}`;
+  displayBalance.textContent = `$${engine.balance.toFixed(0)}`;
   betValue.textContent = engine.betPerLine;
 }
 
@@ -328,7 +328,7 @@ function handleStateChange(state) {
     
     if (state === 'showing_wins') {
       const winVal = engine.lastWin;
-      gameTicker.textContent = `WIN: $${winVal.toFixed(2)}!`;
+      gameTicker.textContent = `WIN: $${winVal.toFixed(0)}!`;
     } else if (state === 'expanding') {
       gameTicker.textContent = `EXPANDING SYMBOLS!`;
     } else if (state === 'free_spins_intro') {
@@ -481,7 +481,7 @@ function startFreeSpins() {
 }
 
 function handleFreeSpinsComplete() {
-  fsTotalWin.textContent = `$${engine.freeSpinsAccumulatedWin.toFixed(2)}`;
+  fsTotalWin.textContent = `$${engine.freeSpinsAccumulatedWin.toFixed(0)}`;
   modalFsSummary.classList.add('active');
   engine.audio.playScatterTrigger();
 }
