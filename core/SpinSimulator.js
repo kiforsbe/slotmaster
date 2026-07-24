@@ -216,10 +216,12 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
  * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
  * @param {number} [options.trialsPerPoint=3] - Independent trials averaged per candidate (reduces rare-event noise).
  * @param {number} [options.maxIterations=14] - Bisection steps per phase.
- * @param {(phase: 'scatter'|'rtp', iteration: number, multiplier: number, result: {rtp:number, triggerRate:number}) => void} [options.onProgress]
- * @returns {{ paytable: Object, rtp: number, triggerRatePct: number, diagnostics: Object }}
+ * @param {(phase: 'scatter'|'rtp', iteration: number, multiplier: number, result: {rtp:number, triggerRate:number}, best: {mult:number, error:number, result:Object, paytable:Object}) => (void|Promise<void>)} [options.onProgress] -
+ *   Called (and awaited, if it returns a promise) after each candidate is measured, before yielding to the
+ *   event loop - a caller can safely touch the DOM here and see it rendered before the next (heavier) candidate runs.
+ * @returns {Promise<{ paytable: Object, rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
-export function tuneFrequencies(paytable, options = {}) {
+export async function tuneFrequencies(paytable, options = {}) {
   const {
     reelsCount = 5,
     rowsCount = 3,
@@ -236,6 +238,12 @@ export function tuneFrequencies(paytable, options = {}) {
     maxIterations = 14,
     onProgress = null,
   } = options;
+
+  // Each candidate measurement is itself a synchronous, CPU-bound block (simulateSpins
+  // doesn't yield internally) - but yielding *between* candidates via a macrotask lets a
+  // browser tab repaint after each onProgress call, so a caller can render live, iterative
+  // results instead of the whole run appearing to freeze the page until it's done.
+  const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0));
 
   if (!paytable || typeof paytable !== 'object') {
     throw new Error('tuneFrequencies requires a paytable');
@@ -285,7 +293,8 @@ export function tuneFrequencies(paytable, options = {}) {
       const result = measure(trial);
       const error = Math.abs(result.triggerRate - targetTriggerRatePct);
       if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
-      if (onProgress) onProgress('scatter', i, mid, result);
+      if (onProgress) await onProgress('scatter', i, mid, result, best);
+      await yieldToEventLoop();
       if (error <= triggerRateTolerancePct) break;
       if (result.triggerRate < targetTriggerRatePct) lo = mid; else hi = mid;
     }
@@ -319,7 +328,8 @@ export function tuneFrequencies(paytable, options = {}) {
       const result = measure(trial);
       const error = Math.abs(result.rtp - targetRtp);
       if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
-      if (onProgress) onProgress('rtp', i, mid, result);
+      if (onProgress) await onProgress('rtp', i, mid, result, best);
+      await yieldToEventLoop();
       if (error <= rtpTolerancePct) break;
       if (result.rtp < targetRtp) lo = mid; else hi = mid;
     }
@@ -335,7 +345,8 @@ export function tuneFrequencies(paytable, options = {}) {
       const result = measure(trial);
       const error = Math.abs(result.rtp - targetRtp);
       if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
-      if (onProgress) onProgress('rtp', i, mid, result);
+      if (onProgress) await onProgress('rtp', i, mid, result, best);
+      await yieldToEventLoop();
       if (error <= rtpTolerancePct) break;
       if (result.rtp < targetRtp) lo = mid; else hi = mid;
     }

@@ -197,86 +197,133 @@ function runSimulation() {
   }, 50);
 }
 
-// Runs the frequency auto-balancer (core/SpinSimulator.js: tuneFrequencies) against the
-// live PAYTABLE and shows the suggested frequencies side by side with the current ones.
-// This only reports a suggestion - it does not mutate PAYTABLE or the live reels, since
+// Opens the frequency auto-balancer panel (core/SpinSimulator.js: tuneFrequencies) with
+// inputs for the tuning targets, and shows live iteration-by-iteration progress while it
+// runs (tuneFrequencies yields to the event loop between candidates for exactly this reason).
+// This only ever reports a suggestion - it never mutates PAYTABLE or the live reels, since
 // applying it means regenerating REEL_STRIPS and is a deliberate code change, not a runtime toggle.
-function runFrequencyTuner() {
-  if (!btnTune) return;
+function openTunePanel() {
+  let tuneContainer = document.getElementById('tune-details');
+  if (!tuneContainer) {
+    tuneContainer = document.createElement('div');
+    tuneContainer.id = 'tune-details';
+    tuneContainer.style.marginTop = '20px';
+    tuneContainer.style.padding = '15px';
+    tuneContainer.style.background = 'rgba(255, 255, 255, 0.1)';
+    tuneContainer.style.borderRadius = '12px';
+    tuneContainer.style.fontSize = '0.9em';
+    simModal.appendChild(tuneContainer);
 
-  btnTune.textContent = 'TUNING...';
-  btnTune.disabled = true;
+    tuneContainer.innerHTML = `
+      <h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
+        <label style="font-size: 0.8em; color: #ccc;">Target RTP (%)<br>
+          <input id="tune-target-rtp" type="number" value="96" step="0.5" min="1" style="width: 100%; margin-top: 4px;">
+        </label>
+        <label style="font-size: 0.8em; color: #ccc;">Target Trigger Rate (%)<br>
+          <input id="tune-target-trigger" type="number" value="0.6" step="0.05" min="0.01" style="width: 100%; margin-top: 4px;">
+        </label>
+        <label style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
+          <input id="tune-trial-spins" type="number" value="300000" step="50000" min="10000" style="width: 100%; margin-top: 4px;">
+        </label>
+        <label style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
+          <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
+        </label>
+        <label style="font-size: 0.8em; color: #ccc;">Max Iterations / Phase<br>
+          <input id="tune-max-iterations" type="number" value="10" step="1" min="3" max="30" style="width: 100%; margin-top: 4px;">
+        </label>
+      </div>
+      <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
+      <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
+      <div id="tune-results"></div>
+    `;
+    document.getElementById('tune-start-btn').addEventListener('click', startTuning);
+  }
 
-  setTimeout(() => {
-    try {
-      const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = tuneFrequencies(PAYTABLE, {
-        targetRtp: 96,
-        targetTriggerRatePct: 0.6,
-        trialSpins: 300000,
-        trialsPerPoint: 2,
-        maxIterations: 10,
-        // tuneFrequencies runs fully synchronously, so the browser can't repaint between
-        // iterations - this only shows up in the console, not the (frozen) button label.
-        onProgress: (phase, i, mult, r) => {
-          console.log(`  [tuner ${phase} ${i}] mult=${mult.toFixed(4)} -> RTP=${r.rtp.toFixed(2)}% trigger=${r.triggerRate.toFixed(3)}%`);
-        }
-      });
+  simModal.style.display = 'block';
+  simModal.style.maxWidth = '900px';
+  simModal.style.width = '95%';
+}
 
-      let tuneContainer = document.getElementById('tune-details');
-      if (!tuneContainer) {
-        tuneContainer = document.createElement('div');
-        tuneContainer.id = 'tune-details';
-        tuneContainer.style.marginTop = '20px';
-        tuneContainer.style.padding = '15px';
-        tuneContainer.style.background = 'rgba(255, 255, 255, 0.1)';
-        tuneContainer.style.borderRadius = '12px';
-        tuneContainer.style.fontSize = '0.9em';
-        simModal.appendChild(tuneContainer);
-      } else {
-        tuneContainer.innerHTML = '';
+async function startTuning() {
+  const startBtn = document.getElementById('tune-start-btn');
+  const logEl = document.getElementById('tune-progress-log');
+  const resultsEl = document.getElementById('tune-results');
+  const inputs = {
+    targetRtp: document.getElementById('tune-target-rtp'),
+    targetTriggerRatePct: document.getElementById('tune-target-trigger'),
+    trialSpins: document.getElementById('tune-trial-spins'),
+    trialsPerPoint: document.getElementById('tune-trials-per-point'),
+    maxIterations: document.getElementById('tune-max-iterations'),
+  };
+
+  const options = {
+    targetRtp: parseFloat(inputs.targetRtp.value) || 96,
+    targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
+    trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
+    trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
+    maxIterations: parseInt(inputs.maxIterations.value, 10) || 10,
+  };
+
+  Object.values(inputs).forEach(el => { el.disabled = true; });
+  startBtn.disabled = true;
+  startBtn.textContent = 'TUNING...';
+  resultsEl.innerHTML = '';
+  logEl.style.display = 'block';
+  logEl.innerHTML = '';
+
+  const appendLog = (line) => {
+    const row = document.createElement('div');
+    row.textContent = line;
+    logEl.appendChild(row);
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  try {
+    const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(PAYTABLE, {
+      ...options,
+      onProgress: (phase, i, mult, r, best) => {
+        const label = phase === 'scatter' ? 'Scatter frequency' : 'Premium/regular split';
+        appendLog(`[${label} ${i + 1}] RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  (best so far: err=${best.error.toFixed(4)})`);
       }
+    });
 
-      let html = `<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner Suggestion</h3>`;
-      html += `<p style="font-size: 0.85em; color: #ccc; margin: 8px 0;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
-      html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em; margin-top: 10px;">`;
-      html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
-                  <th style="text-align: left; padding: 4px;">Symbol</th>
-                  <th style="text-align: left; padding: 4px;">Type</th>
-                  <th style="text-align: right; padding: 4px;">Current Freq</th>
-                  <th style="text-align: right; padding: 4px;">Suggested Freq</th>
-                  <th style="text-align: right; padding: 4px;">Δ</th>
-                </tr></thead><tbody>`;
-      Object.keys(PAYTABLE).forEach(symbol => {
-        const current = PAYTABLE[symbol].frequency;
-        const suggested = tunedPaytable[symbol].frequency;
-        const delta = suggested - current;
-        const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
-        html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                    <td style="padding: 4px;">${PAYTABLE[symbol].friendlyName || symbol}</td>
-                    <td style="padding: 4px; color: #999;">${PAYTABLE[symbol].type}</td>
-                    <td style="text-align: right; padding: 4px;">${current.toFixed(4)}</td>
-                    <td style="text-align: right; padding: 4px; font-weight: bold;">${suggested.toFixed(4)}</td>
-                    <td style="text-align: right; padding: 4px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
-                  </tr>`;
-      });
-      html += `</tbody></table>`;
-      html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by editing PAYTABLE's frequency values in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
+    appendLog(`Done. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%`);
+    console.log('Frequency tuner diagnostics:', diagnostics);
 
-      tuneContainer.innerHTML = html;
-
-      simModal.style.display = 'block';
-      simModal.style.maxWidth = '900px';
-      simModal.style.width = '95%';
-
-      console.log('Frequency tuner diagnostics:', diagnostics);
-    } catch (error) {
-      console.error('Frequency tuning failed:', error);
-      alert('Error running frequency tuner');
-    } finally {
-      btnTune.textContent = 'TUNE FREQUENCIES';
-      btnTune.disabled = false;
-    }
-  }, 50);
+    let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">`;
+    html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
+                <th style="text-align: left; padding: 4px;">Symbol</th>
+                <th style="text-align: left; padding: 4px;">Type</th>
+                <th style="text-align: right; padding: 4px;">Current Freq</th>
+                <th style="text-align: right; padding: 4px;">Suggested Freq</th>
+                <th style="text-align: right; padding: 4px;">Δ</th>
+              </tr></thead><tbody>`;
+    Object.keys(PAYTABLE).forEach(symbol => {
+      const current = PAYTABLE[symbol].frequency;
+      const suggested = tunedPaytable[symbol].frequency;
+      const delta = suggested - current;
+      const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
+      html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 4px;">${PAYTABLE[symbol].friendlyName || symbol}</td>
+                  <td style="padding: 4px; color: #999;">${PAYTABLE[symbol].type}</td>
+                  <td style="text-align: right; padding: 4px;">${current.toFixed(4)}</td>
+                  <td style="text-align: right; padding: 4px; font-weight: bold;">${suggested.toFixed(4)}</td>
+                  <td style="text-align: right; padding: 4px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
+                </tr>`;
+    });
+    html += `</tbody></table>`;
+    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by editing PAYTABLE's frequency values in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
+    resultsEl.innerHTML = html;
+  } catch (error) {
+    console.error('Frequency tuning failed:', error);
+    appendLog(`Error: ${error.message}`);
+  } finally {
+    Object.values(inputs).forEach(el => { el.disabled = false; });
+    startBtn.disabled = false;
+    startBtn.textContent = 'START TUNING';
+  }
 }
 
 
@@ -368,7 +415,7 @@ window.addEventListener('load', async () => {
     btnSim.addEventListener('click', runSimulation);
   }
   if (btnTune) {
-    btnTune.addEventListener('click', runFrequencyTuner);
+    btnTune.addEventListener('click', openTunePanel);
   }
   if (btnCloseSim) {
     btnCloseSim.addEventListener('click', () => {
