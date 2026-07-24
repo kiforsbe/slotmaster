@@ -297,13 +297,27 @@ export class SlotEngine {
         reel.offsetY += reel.speed;
 
         if (reel.offsetY >= this.symbolHeight) {
-          const shiftCount = Math.floor(reel.offsetY / this.symbolHeight);
+          const rawShiftCount = Math.floor(reel.offsetY / this.symbolHeight);
+          // Filling the visible window (indices 1..rowsCount) takes rowsCount unshifts to feed
+          // the target column in, PLUS one more "settle" shift to carry that freshly-fed run
+          // out of the hidden index-0 slot and into the visible window - so the correct total is
+          // rowsCount + 1, not rowsCount. (Capping at rowsCount alone leaves the visible window
+          // permanently one shift short of matching - it never resolves, at any speed.)
+          // Beyond that point, any further shift pushes a NEW symbol to index 0 and shoves the
+          // already-correct visible symbols out of alignment again, so it still must be capped:
+          // a high enough reel speed (turbo's maxSpeed in particular) can travel more than
+          // rowsCount+1 symbol-heights while decelerating, corrupting the match indefinitely.
+          const totalShiftsNeeded = this.config.rowsCount + 1;
+          const remaining = Math.max(totalShiftsNeeded - reel.feedIndex, 0);
+          const shiftCount = Math.min(rawShiftCount, remaining);
           reel.offsetY = reel.offsetY % this.symbolHeight;
-          
+
           for (let s = 0; s < shiftCount; s++) {
             reel.symbols.pop();
             const targetIdx = this.config.rowsCount - 1 - reel.feedIndex;
-            const targetSymbol = this.targetGrid[r][targetIdx] || this.getRandomSymbol(reel.strip);
+            // The final settle shift (targetIdx < 0) lands in the hidden above-buffer slot,
+            // so its content doesn't matter - any filler symbol works.
+            const targetSymbol = targetIdx >= 0 ? this.targetGrid[r][targetIdx] : this.getRandomSymbol(reel.strip);
             reel.feedIndex++;
             reel.symbols.unshift(targetSymbol);
           }
@@ -399,6 +413,12 @@ export class SlotEngine {
         audio.playWin(totalPayout);
         this.spawnWinParticles();
         this.config.onWin({ amount: winAmount, isExpanding: true });
+
+        // Without this, free spins silently stall here forever: expanding wins are the
+        // headline feature of free spins, so every free-spin round that includes one would
+        // otherwise never advance to the next spin without a manual click.
+        this.handleAutoPlay();
+
         this.config.onStateChange(this.state);
       }
     }
@@ -725,7 +745,10 @@ export class SlotEngine {
       }, this.turboMode ? 800 : 1800);
     } else if (this.autoPlay) {
       this.autoPlayTimer = setTimeout(() => {
-        if (this.autoPlay && this.state === 'idle') {
+        // spin() itself accepts 'idle' or 'showing_wins' as valid starting states - matching
+        // that here is essential: after any winning spin the state is 'showing_wins', not
+        // 'idle', and an 'idle'-only check would silently stop autoplay on the very first win.
+        if (this.autoPlay && (this.state === 'idle' || this.state === 'showing_wins')) {
           this.spin();
         }
       }, this.turboMode ? 300 : 1000);

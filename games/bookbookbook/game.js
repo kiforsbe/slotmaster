@@ -743,8 +743,11 @@ function handleScatterRetrigger(scatterCount) {
   gameTicker.textContent = `+${added} EXTRA SPINS!`;
   engine.audio.playScatterTrigger();
   
-  // Reset state so the next auto-spin continues the bonus
+  // Reset state so the next auto-spin continues the bonus. returnToIdle() only sets state -
+  // it deliberately doesn't schedule anything itself (see its own comment), so the free-spin
+  // loop must be explicitly resumed here or it silently stalls after every retrigger.
   engine.returnToIdle();
+  engine.handleAutoPlay();
 }
 
 function closeFreeSpinsSummary() {
