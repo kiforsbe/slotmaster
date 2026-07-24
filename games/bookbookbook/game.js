@@ -15,6 +15,10 @@ const PAYTABLE = {
   ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
 };
 
+// Symbols eligible to be picked as the free spins expanding symbol - anything that
+// isn't a scatter (scatter symbols trigger free spins, they can't also expand during them).
+const EXPANDING_CANDIDATES = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type !== 'scatter');
+
 // 2. Reel Strips Generation (Randomized for each reel)
 const REEL_STRIPS = [
   generateReel(PAYTABLE, 220, 1234),
@@ -78,6 +82,8 @@ function runSimulation() {
         }
       });
 
+      console.log('Symbols captured in simulation wins:', Object.keys(symbolStats));
+
       // --- UI Generation for Detailed Stats ---
       let detailsContainer = document.getElementById('sim-details');
       if (!detailsContainer) {
@@ -93,26 +99,29 @@ function runSimulation() {
         detailsContainer.innerHTML = '';
       }
 
-      const premiumSymbols = ['book', 'explorer', 'anubis', 'scarab'];
-      const nonPremiumSymbols = Object.keys(symbolStats).filter(s => !premiumSymbols.includes(s));
+      // Always list every paytable symbol, even ones with zero recorded wins in this run,
+      // so the breakdown reflects the full paytable rather than only what happened to hit.
+      const premiumSymbols = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type === 'premium');
+      const nonPremiumSymbols = Object.keys(PAYTABLE).filter(s => !premiumSymbols.includes(s));
 
       let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
-      
+
       const createSection = (title, symbols) => {
-        if (symbols.length === 0) return '';
+        if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
         let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
         sectionHtml += `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">`;
-        
+
         symbols.forEach(symbol => {
-          const stats = symbolStats[symbol];
-          const friendlyName = PAYTABLE[symbol].friendlyName || symbol;
-          
+          const stats = symbolStats[symbol] || { counts: {}, expanding: { counts: {} } };
+          const friendlyName = PAYTABLE[symbol]?.friendlyName || symbol;
+          const isScatter = PAYTABLE[symbol]?.type === 'scatter';
+
           sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
           sectionHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">${friendlyName}</strong>`;
-          
-          // Normal Wins Sub-section
+
+          // Normal (line) or Scatter Wins Sub-section
           sectionHtml += `<div style="margin-bottom: 8px;">`;
-          sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Normal Wins</span>`;
+          sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : 'Normal Wins'}</span>`;
           const sortedCounts = Object.keys(stats.counts).sort((a, b) => a - b);
           if (sortedCounts.length > 0) {
             sortedCounts.forEach(count => {
@@ -123,7 +132,7 @@ function runSimulation() {
                               </div>`;
             });
           } else {
-            sectionHtml += `<div style="color: #666; font-style: italic; font-size: 0.8em;">No standard line wins</div>`;
+            sectionHtml += `<div style="color: #666; font-style: italic; font-size: 0.8em;">${isScatter ? 'No scatter wins' : 'No standard line wins'}</div>`;
           }
           sectionHtml += `</div>`;
 
@@ -380,7 +389,7 @@ function playBookSymbolReel(chosenSymbol, durationMs) {
     bookReelAnimFrame = null;
   }
 
-  const candidates = ['explorer', 'anubis', 'scarab', 'ace', 'king', 'queen', 'jack', 'ten'];
+  const candidates = EXPANDING_CANDIDATES;
   const stripLength = 18;
   const stripSymbols = [];
   for (let i = 0; i < stripLength - 1; i++) {
@@ -439,7 +448,7 @@ function handleInitialFreeSpinsTrigger() {
   btnStartFs.style.display = 'none';
 
   // Select the awarded symbol up front so the reel can land on it exactly
-  const candidates = ['explorer', 'anubis', 'scarab', 'ace', 'king', 'queen', 'jack', 'ten'];
+  const candidates = EXPANDING_CANDIDATES;
   const chosen = candidates[Math.floor(Math.random() * candidates.length)];
   const spinDuration = 1400;
 

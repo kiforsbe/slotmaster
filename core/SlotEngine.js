@@ -627,7 +627,7 @@ export class SlotEngine {
       this.targetGrid, 
       this.config.paytable, 
       this.linesCount, 
-      'book', 
+      null,  // no wild symbol - book is scatter only
       'book'
     );
 

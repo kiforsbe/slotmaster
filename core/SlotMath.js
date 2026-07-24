@@ -86,14 +86,16 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
       }
     }
 
-    // A wild-only run (e.g. Book, Book, Book on line 1) must NOT be paid as a line win:
-    // the wild here doubles as the scatter symbol, which is already paid separately
-    // below using totalBet-scaled multipliers. Paying it again per-line would double-count.
-    // Evaluate if the matchCount pays anything for the targetSymbol
-    if (targetSymbol && targetSymbol !== wildSymbol) {
-      const payouts = paytable[targetSymbol];
-      if (payouts && payouts[matchCount] > 0) {
-        const payout = payouts[matchCount];
+    // A scatter-paymode run (e.g. Book, Book, Book on line 1) must NOT be paid as a line win:
+    // scatter symbols are already paid separately below using totalBet-scaled multipliers.
+    // Paying them again per-line would double-count. Gate on the paytable's own paymode
+    // rather than the wild symbol, since a symbol can be scatter-only without being wild.
+    const targetMeta = targetSymbol && paytable[targetSymbol];
+    if (targetSymbol && targetSymbol !== wildSymbol && targetMeta && targetMeta.paymode === 'line') {
+      const payouts = targetMeta.payout;
+      // payout[i] is the payout for (i+1) matching symbols (index 0 = 1 match, ... index 4 = 5 matches).
+      if (payouts && payouts[matchCount - 1] > 0) {
+        const payout = payouts[matchCount - 1];
         lineWins.push({
           lineIndex: lineIdx,
           symbol: targetSymbol,
@@ -124,10 +126,11 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
     triggerFreeSpins = true;
   }
 
-  // Scatters pay based on total bet, usually defined separately in the paytable
-  const scatterPayouts = paytable[scatterSymbol];
-  if (scatterPayouts && scatterPayouts[scatterCount] > 0) {
-    const payout = scatterPayouts[scatterCount];
+  // Scatters pay based on total bet, usually defined separately in the paytable.
+  // payout[i] is the payout for (i+1) scatters, same convention as line wins.
+  const scatterPayouts = paytable[scatterSymbol] && paytable[scatterSymbol].payout;
+  if (scatterPayouts && scatterPayouts[scatterCount - 1] > 0) {
+    const payout = scatterPayouts[scatterCount - 1];
     scatterWin = {
       symbol: scatterSymbol,
       count: scatterCount,
@@ -197,18 +200,20 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
 
   const count = expandingReels.length;
   // Use the dedicated expanding paytable when available (separate from normal-mode line payouts)
-  const payouts = (expandingPaytable && expandingPaytable[expandingSymbol]) || paytable[expandingSymbol];
+  const payouts = (expandingPaytable && expandingPaytable[expandingSymbol] && expandingPaytable[expandingSymbol].payout)
+    || (paytable[expandingSymbol] && paytable[expandingSymbol].payout);
   
   // High value symbols pay for 2 or more reels, low value for 3 or more.
   // We can determine this by checking if payout exists for count.
-  const hasWin = payouts && payouts[count] > 0;
+  // payout[i] is the payout for (i+1) expanded reels, same convention as line wins.
+  const hasWin = payouts && payouts[count - 1] > 0;
 
   if (!hasWin || count === 0) {
     return null;
   }
 
   const wins = [];
-  const payoutPerLine = payouts[count];
+  const payoutPerLine = payouts[count - 1];
   let totalPayout = 0;
 
   // In expanding mode, since the symbol covers all positions on the expanded reels,

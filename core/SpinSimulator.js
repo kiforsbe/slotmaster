@@ -48,19 +48,17 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     
     // If free spins were triggered by this base spin, simulate them
     if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
-      // Randomize the expanding symbol for each new free spin session
-      const eligibleSymbols = Object.keys(simConfig.paytable || {}).filter(s => s !== 'book');
-      expandingSymbol = eligibleSymbols.length > 0 
+      // Randomize the expanding symbol for each new free spin session.
+      // Scatter symbols (e.g. book) can never be the expanding symbol - derive
+      // eligibility from the paytable's own type rather than hardcoding a symbol name.
+      const eligibleSymbols = Object.keys(simConfig.paytable || {})
+        .filter(s => simConfig.paytable[s].type !== 'scatter');
+      expandingSymbol = eligibleSymbols.length > 0
         ? eligibleSymbols[Math.floor(Math.random() * eligibleSymbols.length)]
-        : 'anubis';
+        : expandingSymbol;
 
       for (let j = 0; j < freeSpinsCount; j++) {
-        const freeSpinResult = _runSingleSpin(true);
-        // Accumulate free spin results into the stats
-        results.totalWins += freeSpinResult.spinWin;
-        if (freeSpinResult.spinWin > results.maxWin) results.maxWin = freeSpinResult.spinWin;
-        if (freeSpinResult.spinWin < results.minWin) results.minWin = freeSpinResult.spinWin;
-        results.winDistribution[freeSpinResult.spinWin] = (results.winDistribution[freeSpinResult.spinWin] || 0) + 1;
+        _runSingleSpin(true); // _runSingleSpin accumulates into results internally
       }
     }
   }
@@ -79,7 +77,6 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     scatterCounts: results.scatterCounts,
     freeSpinsTriggered: results.freeSpinsTriggered,
     winDistribution: results.winDistribution,
-    detailedWins: results.detailedWins,
     detailedWins: results.detailedWins
   };
 
@@ -106,7 +103,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
       targetGrid,
       simConfig.paytable,
       linesCount,
-      'book', // Wild/Scatter symbol
+      null, // no wild symbol - book is scatter only
       'book'  // Scatter symbol for this specific game
     );
 
@@ -138,7 +135,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
           type: 'line',
           symbol: lw.symbol,
           count: lw.count,
-          isFreeSpin: false,
+          isFreeSpin: isFreeSpin,
           winAmount: lw.payout * betPerLine
         });
       });
@@ -156,7 +153,14 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     }
 
     if (expandingResults) {
-      spinWin += expandingResults.totalPayoutMultiplier;
+      // totalPayoutMultiplier is per-line; multiply by betPerLine for actual payout.
+      // Matches SlotEngine.evaluateSpinResult(), which adds the normal line-win payout
+      // (already included in spinWin above) and the expanding-win payout independently,
+      // with no reconciliation between them - the simulator must mirror that exactly to
+      // produce an accurate RTP estimate, even if that double-credit is itself worth
+      // revisiting as a gameplay design question.
+      const expandingWinAmount = expandingResults.totalPayoutMultiplier * betPerLine;
+      spinWin += expandingWinAmount;
 
       // Track expanding wins in detailed stats
       results.detailedWins.push({
@@ -164,7 +168,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
         symbol: expandingSymbol,
         count: expandingResults.expandingReels.length, // Number of reels that expanded
         isFreeSpin: true,
-        winAmount: expandingResults.totalPayoutMultiplier
+        winAmount: expandingWinAmount
       });
     }
 
