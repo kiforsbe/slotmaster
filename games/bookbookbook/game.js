@@ -1,7 +1,7 @@
 // Game Coordinator for Book of Book Book Slot Machine
 import { SlotEngine } from '../../core/SlotEngine.js';
-import { PAYLINES, generateReel } from '../../core/SlotMath.js';
-import { tuneFrequencies } from '../../core/SpinSimulator.js';
+import { generateReel } from '../../core/SlotMath.js';
+import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
 // frequency tuner - a single source of truth so all three actually model the same reels
@@ -12,6 +12,21 @@ const REEL_LENGTH = 500;
 const REEL_SEEDS = [1234, 567, 89, 765, 3321];
 const BET_PER_LINE = 1;
 const LINES_COUNT = 10;
+
+// Payline definitions - previously lived in core/SlotMath.js as a shared default;
+// each game now owns its own paylines so the core stays grid-shape-agnostic.
+const PAYLINES = [
+  [1, 1, 1, 1, 1], // Line 1: Horizontal Middle Row
+  [0, 0, 0, 0, 0], // Line 2: Horizontal Top Row
+  [2, 2, 2, 2, 2], // Line 3: Horizontal Bottom Row
+  [0, 1, 2, 1, 0], // Line 4: V-Shape
+  [2, 1, 0, 1, 2], // Line 5: Inverted V-Shape
+  [0, 0, 1, 2, 2], // Line 6: Step Down-Up
+  [2, 2, 1, 0, 0], // Line 7: Step Up-Down
+  [1, 2, 2, 2, 1], // Line 8: U-Shape Bottom
+  [1, 0, 0, 0, 1], // Line 9: U-Shape Top
+  [0, 1, 0, 1, 0]  // Line 10: Zigzag
+];
 
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Frequencies tuned (with SlotMath's now-fixed payout math and generateReel's scatter
@@ -49,376 +64,6 @@ let cheatScatter, cheatExpand, cheatBigWin;
 
 // Debug mode - only enable cheat buttons in development
 const DEBUG_MODE = true; // Set to false in production
-
-function runSimulation() {
-  if (!engine) return;
-  
-  // Show loading state (optional, but good for UX as 10k spins take a moment)
-  btnSim.textContent = 'RUNNING...';
-  btnSim.disabled = true;
-
-  // Use setTimeout to allow the UI thread to update before the heavy calculation
-  setTimeout(() => {
-    try {
-      const results = engine.runSimulation(1000000, BET_PER_LINE, LINES_COUNT);
-
-      if (simStats) simStats.style.display = '';
-      simRtpDisplay.textContent = results.rtp;
-      simTotalSpinsDisplay.textContent = results.totalSpins;
-      simMaxWinDisplay.textContent = `$${results.maxWin}`;
-      const pct = results.totalSpins > 0 ? (results.freeSpinsTriggered / results.totalSpins) * 100 : 0;
-      simFreeSpinsDisplay.textContent = `${results.freeSpinsTriggered} (${pct.toFixed(2)}%)`;
-
-      // --- Detailed Stats Processing ---
-      const symbolStats = {}; // { 'explorer': { counts: { 3: { count: 50, totalAmount: 1250 } }, expanding: { counts: {} } } } }
-      
-      results.detailedWins.forEach(win => {
-        if (!symbolStats[win.symbol]) {
-          symbolStats[win.symbol] = { counts: {}, expanding: { counts: {} } };
-        }
-        
-        if (win.type === 'expanding') {
-          if (!symbolStats[win.symbol].expanding.counts[win.count]) {
-            symbolStats[win.symbol].expanding.counts[win.count] = { count: 0, totalAmount: 0 };
-          }
-          symbolStats[win.symbol].expanding.counts[win.count].count += 1;
-          symbolStats[win.symbol].expanding.counts[win.count].totalAmount += win.winAmount;
-        } else {
-          if (!symbolStats[win.symbol].counts[win.count]) {
-            symbolStats[win.symbol].counts[win.count] = { count: 0, totalAmount: 0 };
-          }
-          symbolStats[win.symbol].counts[win.count].count += 1;
-          symbolStats[win.symbol].counts[win.count].totalAmount += win.winAmount;
-        }
-      });
-
-      console.log('Symbols captured in simulation wins:', Object.keys(symbolStats));
-
-      // --- UI Generation for Detailed Stats ---
-      let detailsContainer = document.getElementById('sim-details');
-      if (!detailsContainer) {
-        detailsContainer = document.createElement('div');
-        detailsContainer.id = 'sim-details';
-        detailsContainer.style.marginTop = '20px';
-        detailsContainer.style.padding = '15px';
-        detailsContainer.style.background = 'rgba(255, 255, 255, 0.1)';
-        detailsContainer.style.borderRadius = '12px';
-        detailsContainer.style.fontSize = '0.9em';
-        simModal.appendChild(detailsContainer);
-      } else {
-        detailsContainer.innerHTML = '';
-      }
-
-      // Always list every paytable symbol, even ones with zero recorded wins in this run,
-      // so the breakdown reflects the full paytable rather than only what happened to hit.
-      // Book leads the Premium section even though its paytable type is 'scatter', since
-      // it's the game's headline symbol.
-      const premiumSymbols = ['book', ...Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type === 'premium')];
-      const nonPremiumSymbols = Object.keys(PAYTABLE).filter(s => !premiumSymbols.includes(s));
-
-      let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
-
-      // Renders a counts map ({ hitCount: { count, totalAmount } }) as a compact table:
-      // Hits | Wins | Avg Win | Total Win.
-      const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-      const renderWinTable = (counts, hitLabel, accentColor, emptyText) => {
-        const sortedKeys = Object.keys(counts).sort((a, b) => a - b);
-        if (sortedKeys.length === 0) {
-          return `<div style="color: #666; font-style: italic; font-size: 0.8em;">${emptyText}</div>`;
-        }
-        let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">`;
-        html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase;">
-                    <th style="text-align: left; font-weight: normal; padding: 2px 4px 4px 0;">${hitLabel}</th>
-                    <th style="text-align: right; font-weight: normal; padding: 2px 4px 4px;">Wins</th>
-                    <th style="text-align: right; font-weight: normal; padding: 2px 4px 4px;">Avg Win</th>
-                    <th style="text-align: right; font-weight: normal; padding: 2px 0 4px;">Total Win</th>
-                  </tr></thead><tbody>`;
-        sortedKeys.forEach(key => {
-          const data = counts[key];
-          const avg = data.totalAmount / data.count;
-          html += `<tr>
-                      <td style="padding: 2px 4px 2px 0; color: ${accentColor};">${key}</td>
-                      <td style="text-align: right; padding: 2px 4px;">${data.count}</td>
-                      <td style="text-align: right; padding: 2px 4px;">$${fmt(avg)}</td>
-                      <td style="text-align: right; padding: 2px 0; font-weight: bold;">$${fmt(data.totalAmount)}</td>
-                    </tr>`;
-        });
-        html += `</tbody></table>`;
-        return html;
-      };
-
-      const createSection = (title, symbols) => {
-        if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
-        let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
-        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">`;
-
-        symbols.forEach(symbol => {
-          const stats = symbolStats[symbol] || { counts: {}, expanding: { counts: {} } };
-          const friendlyName = PAYTABLE[symbol]?.friendlyName || symbol;
-          const isScatter = PAYTABLE[symbol]?.type === 'scatter';
-
-          sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
-          sectionHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">${friendlyName}</strong>`;
-
-          // Normal (line) or Scatter Wins Sub-section
-          sectionHtml += `<div style="margin-bottom: 8px;">`;
-          sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : 'Normal Wins'}</span>`;
-          sectionHtml += renderWinTable(stats.counts, 'Hits', '#ccc', isScatter ? 'No scatter wins' : 'No standard line wins');
-          sectionHtml += `</div>`;
-
-          // Expanding Wins Sub-section
-          if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
-            sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-            sectionHtml += `<span style="font-size: 0.7em; color: #ffd700; text-transform: uppercase;">Expanding Wins</span>`;
-            sectionHtml += renderWinTable(stats.expanding.counts, 'Reels', '#ffd700', '');
-            sectionHtml += `</div>`;
-          }
-
-          sectionHtml += `</div>`;
-        });
-
-        sectionHtml += `</div>`;
-        return sectionHtml;
-      };
-
-      // Stacked full-width sections (rather than squeezing two 3-column grids side by
-      // side into half the modal) so each symbol card gets enough room to lay out its
-      // win breakdown without wrapping awkwardly at typical modal widths.
-      detailsHtml += createSection('Premium Symbols', premiumSymbols);
-      detailsHtml += createSection('Standard Symbols', nonPremiumSymbols);
-
-      detailsContainer.innerHTML = detailsHtml;
-
-      simModal.style.display = 'block';
-      simModal.style.maxWidth = '1200px';
-      simModal.style.width = '95%';
-    } catch (error) {
-      console.error('Simulation failed:', error);
-      alert('Error running simulation');
-    } finally {
-      btnSim.textContent = 'RUN SIMULATION';
-      btnSim.disabled = false;
-    }
-  }, 50);
-}
-
-// Opens the frequency auto-balancer panel (core/SpinSimulator.js: tuneFrequencies) with
-// inputs for the tuning targets, and shows live iteration-by-iteration progress while it
-// runs (tuneFrequencies yields to the event loop between candidates for exactly this reason).
-// This only ever reports a suggestion - it never mutates PAYTABLE or the live reels, since
-// applying it means regenerating REEL_STRIPS and is a deliberate code change, not a runtime toggle.
-function openTunePanel() {
-  let tuneContainer = document.getElementById('tune-details');
-  if (!tuneContainer) {
-    tuneContainer = document.createElement('div');
-    tuneContainer.id = 'tune-details';
-    tuneContainer.style.marginTop = '20px';
-    tuneContainer.style.padding = '15px';
-    tuneContainer.style.background = 'rgba(255, 255, 255, 0.1)';
-    tuneContainer.style.borderRadius = '12px';
-    tuneContainer.style.fontSize = '0.9em';
-    simModal.appendChild(tuneContainer);
-
-    tuneContainer.innerHTML = `
-      <h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner</h3>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
-        <label style="font-size: 0.8em; color: #ccc;">Target RTP (%)<br>
-          <input id="tune-target-rtp" type="number" value="96" step="0.5" min="1" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label style="font-size: 0.8em; color: #ccc;">Target Trigger Rate (%)<br>
-          <input id="tune-target-trigger" type="number" value="0.6" step="0.05" min="0.01" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label style="font-size: 0.8em; color: #ccc;">Reel Length<br>
-          <input id="tune-reel-length" type="number" value="${REEL_LENGTH}" step="10" min="30" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
-          <input id="tune-trial-spins" type="number" value="300000" step="50000" min="10000" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
-          <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label style="font-size: 0.8em; color: #ccc;">Max Iterations / Phase<br>
-          <input id="tune-max-iterations" type="number" value="10" step="1" min="3" max="30" style="width: 100%; margin-top: 4px;">
-        </label>
-      </div>
-      <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
-      <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
-      <div id="tune-results"></div>
-    `;
-    document.getElementById('tune-start-btn').addEventListener('click', startTuning);
-  }
-
-  // The RTP/Total Spins/Max Win/Free Spins stat boxes are populated by RUN SIMULATION and
-  // don't map onto a tuning run - showing them here would just sit at "-" looking broken,
-  // so hide them; the tuner panel has its own "Achieved RTP / trigger rate" summary line.
-  if (simStats) simStats.style.display = 'none';
-
-  simModal.style.display = 'block';
-  simModal.style.maxWidth = '900px';
-  simModal.style.width = '95%';
-}
-
-// Renders a tuned paytable back out as a paste-ready `const PAYTABLE = { ... }` literal,
-// column-aligned the same way the hand-written PAYTABLE in this file is: keys padded so
-// every `{` lines up, each payout column right-aligned to its own width, and every other
-// field padded so the next field's key starts in the same column on every row.
-function formatPaytableForCopy(pt) {
-  const symbols = Object.keys(pt);
-  if (symbols.length === 0) return 'const PAYTABLE = {};';
-
-  const keyWidth = Math.max(...symbols.map(s => s.length + 1)); // +1 for the colon
-
-  const payoutLen = pt[symbols[0]].payout.length;
-  const payoutColWidths = Array.from({ length: payoutLen }, (_, col) =>
-    Math.max(...symbols.map(s => String(pt[s].payout[col]).length))
-  );
-  const fmtPayout = (arr) =>
-    '[' + arr.map((v, i) => String(v).padStart(payoutColWidths[i])).join(', ') + ']';
-
-  // Renders one `key: value,` field for every symbol, then pads each to the widest
-  // rendering so the field that follows starts in the same column on every line.
-  const fmtField = (renderFn) => {
-    const rendered = {};
-    symbols.forEach(s => { rendered[s] = renderFn(s); });
-    const width = Math.max(...symbols.map(s => rendered[s].length));
-    const padded = {};
-    symbols.forEach(s => { padded[s] = rendered[s].padEnd(width); });
-    return padded;
-  };
-
-  const freqField = fmtField(s => `frequency: ${pt[s].frequency.toFixed(3)},`);
-  const typeField = fmtField(s => `type: '${pt[s].type}',`);
-  const paymodeField = fmtField(s => `paymode: '${pt[s].paymode}',`);
-  const wildField = fmtField(s => `wild: ${pt[s].wild},`);
-  const triggerField = fmtField(s => `triggerFreeSpins: ${pt[s].triggerFreeSpins},`);
-
-  const lines = symbols.map(symbol => {
-    const data = pt[symbol];
-    const keyPart = `${symbol}:`.padEnd(keyWidth);
-    return `  ${keyPart} { payout: ${fmtPayout(data.payout)}, ${freqField[symbol]} ${typeField[symbol]} ${paymodeField[symbol]} ${wildField[symbol]} ${triggerField[symbol]} friendlyName: '${data.friendlyName}' },`;
-  });
-
-  return `const PAYTABLE = {\n${lines.join('\n')}\n};`;
-}
-
-async function startTuning() {
-  const startBtn = document.getElementById('tune-start-btn');
-  const logEl = document.getElementById('tune-progress-log');
-  const resultsEl = document.getElementById('tune-results');
-  const inputs = {
-    targetRtp: document.getElementById('tune-target-rtp'),
-    targetTriggerRatePct: document.getElementById('tune-target-trigger'),
-    reelLength: document.getElementById('tune-reel-length'),
-    trialSpins: document.getElementById('tune-trial-spins'),
-    trialsPerPoint: document.getElementById('tune-trials-per-point'),
-    maxIterations: document.getElementById('tune-max-iterations'),
-  };
-
-  const options = {
-    // Grid shape, reel seeds, bet, and line count are fixed to whatever the live game
-    // actually uses (see the shared constants near the top of this file) rather than
-    // exposed as inputs - changing them would desync the tuner from PAYLINES/the real
-    // game grid. Reel length is exposed since it's a legitimate balance lever that doesn't
-    // break anything structural, and it must match REEL_LENGTH by default or the tuner
-    // would be reasoning about a different virtual reel than the one the game actually spins.
-    reelsCount: REELS_COUNT,
-    rowsCount: ROWS_COUNT,
-    reelSeeds: REEL_SEEDS,
-    betPerLine: BET_PER_LINE,
-    linesCount: LINES_COUNT,
-    reelLength: parseInt(inputs.reelLength.value, 10) || REEL_LENGTH,
-    targetRtp: parseFloat(inputs.targetRtp.value) || 96,
-    targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
-    trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
-    trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
-    maxIterations: parseInt(inputs.maxIterations.value, 10) || 10,
-  };
-
-  Object.values(inputs).forEach(el => { el.disabled = true; });
-  startBtn.disabled = true;
-  startBtn.textContent = 'TUNING...';
-  resultsEl.innerHTML = '';
-  logEl.style.display = 'block';
-  logEl.innerHTML = '';
-
-  const appendLog = (line) => {
-    const row = document.createElement('div');
-    row.textContent = line;
-    logEl.appendChild(row);
-    logEl.scrollTop = logEl.scrollHeight;
-  };
-
-  try {
-    const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(PAYTABLE, {
-      ...options,
-      onProgress: (phase, i, mult, r, best) => {
-        const label = phase === 'scatter' ? 'Scatter frequency' : 'Premium/regular split';
-        appendLog(`[${label} ${i + 1}] RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  (best so far: err=${best.error.toFixed(4)})`);
-      }
-    });
-
-    appendLog(`Done. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%`);
-    console.log('Frequency tuner diagnostics:', diagnostics);
-
-    let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
-    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">`;
-    html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
-                <th style="text-align: left; padding: 4px;">Symbol</th>
-                <th style="text-align: left; padding: 4px;">Type</th>
-                <th style="text-align: right; padding: 4px;">Current Freq</th>
-                <th style="text-align: right; padding: 4px;">Suggested Freq</th>
-                <th style="text-align: right; padding: 4px;">Δ</th>
-              </tr></thead><tbody>`;
-    Object.keys(PAYTABLE).forEach(symbol => {
-      const current = PAYTABLE[symbol].frequency;
-      const suggested = tunedPaytable[symbol].frequency;
-      const delta = suggested - current;
-      const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
-      html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 4px;">${PAYTABLE[symbol].friendlyName || symbol}</td>
-                  <td style="padding: 4px; color: #999;">${PAYTABLE[symbol].type}</td>
-                  <td style="text-align: right; padding: 4px;">${current.toFixed(4)}</td>
-                  <td style="text-align: right; padding: 4px; font-weight: bold;">${suggested.toFixed(4)}</td>
-                  <td style="text-align: right; padding: 4px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
-                </tr>`;
-    });
-    html += `</tbody></table>`;
-    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by editing PAYTABLE's frequency values in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
-
-    html += `<div style="margin-top: 12px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                  <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Copy-paste ready PAYTABLE</span>
-                  <button id="tune-copy-btn" class="btn-icon btn-sim-btn" style="padding: 4px 10px; font-size: 0.75em;">COPY</button>
-                </div>
-                <textarea id="tune-paytable-output" readonly style="width: 100%; height: 200px; box-sizing: border-box; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.4); color: #ddd; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;"></textarea>
-              </div>`;
-
-    resultsEl.innerHTML = html;
-
-    const paytableOutput = document.getElementById('tune-paytable-output');
-    paytableOutput.value = formatPaytableForCopy(tunedPaytable);
-
-    const copyBtn = document.getElementById('tune-copy-btn');
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(paytableOutput.value);
-      } catch (err) {
-        // Clipboard API can fail (permissions, insecure context) - fall back to manual select.
-        paytableOutput.select();
-      }
-      const original = copyBtn.textContent;
-      copyBtn.textContent = 'COPIED!';
-      setTimeout(() => { copyBtn.textContent = original; }, 1500);
-    });
-  } catch (error) {
-    console.error('Frequency tuning failed:', error);
-    appendLog(`Error: ${error.message}`);
-  } finally {
-    Object.values(inputs).forEach(el => { el.disabled = false; });
-    startBtn.disabled = false;
-    startBtn.textContent = 'START TUNING';
-  }
-}
 
 
 let engine = null;
@@ -507,10 +152,34 @@ window.addEventListener('load', async () => {
 
   // Setup Simulation Handlers
   if (btnSim) {
-    btnSim.addEventListener('click', runSimulation);
+    btnSim.addEventListener('click', () => {
+      runSimulationAndRender({
+        engine,
+        paytable: PAYTABLE,
+        betPerLine: BET_PER_LINE,
+        linesCount: LINES_COUNT,
+        numSpins: 1000000,
+        domRefs: { btnSim, simModal, simStats, simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay },
+      });
+    });
   }
   if (btnTune) {
-    btnTune.addEventListener('click', openTunePanel);
+    btnTune.addEventListener('click', () => {
+      openTuneFrequenciesPanel({
+        paytable: PAYTABLE,
+        tuneConfig: {
+          reelsCount: REELS_COUNT,
+          rowsCount: ROWS_COUNT,
+          paylines: PAYLINES,
+          scatterSymbol: 'book',
+          reelSeeds: REEL_SEEDS,
+          betPerLine: BET_PER_LINE,
+          linesCount: LINES_COUNT,
+          reelLength: REEL_LENGTH,
+        },
+        domRefs: { simModal, simStats },
+      });
+    });
   }
   if (btnCloseSim) {
     btnCloseSim.addEventListener('click', () => {
@@ -530,9 +199,12 @@ window.addEventListener('load', async () => {
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
     reelStrips: REEL_STRIPS,
+    paylines: PAYLINES,
+    wildSymbol: null,
+    scatterSymbol: 'book',
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
-    
+
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo)
