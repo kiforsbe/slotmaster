@@ -3,16 +3,19 @@ import { SlotEngine } from '../../core/SlotEngine.js';
 import { PAYLINES, generateReel } from '../../core/SlotMath.js';
 
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
+// Frequencies tuned (with SlotMath's now-fixed payout math and generateReel's scatter
+// min-gap enforcement) to land near 96% RTP while keeping the book/scatter trigger rate
+// around 0.5% of spins (~1 in 200), with 4+ books rare and 5+ books effectively astronomical.
 const PAYTABLE = {
-  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.155, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
-  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.040, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
-  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.080, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
-  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.120, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
-  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
-  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
-  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
-  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
-  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.250, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
+  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.045, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
+  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.075, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
+  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.150, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
+  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.224, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
+  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
+  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
+  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
+  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
+  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
 };
 
 // Symbols eligible to be picked as the free spins expanding symbol - anything that
@@ -109,7 +112,7 @@ function runSimulation() {
       const createSection = (title, symbols) => {
         if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
         let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
-        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;">`;
+        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">`;
 
         symbols.forEach(symbol => {
           const stats = symbolStats[symbol] || { counts: {}, expanding: { counts: {} } };
@@ -158,21 +161,17 @@ function runSimulation() {
         return sectionHtml;
       };
 
-      const premiumContent = createSection('Premium Symbols', premiumSymbols);
-      const standardContent = createSection('Standard Symbols', nonPremiumSymbols);
-
-      detailsHtml += `
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
-          <div>${premiumContent}</div>
-          <div>${standardContent}</div>
-        </div>`;
+      // Stacked full-width sections (rather than squeezing two 3-column grids side by
+      // side into half the modal) so each symbol card gets enough room to lay out its
+      // win breakdown without wrapping awkwardly at typical modal widths.
+      detailsHtml += createSection('Premium Symbols', premiumSymbols);
+      detailsHtml += createSection('Standard Symbols', nonPremiumSymbols);
 
       detailsContainer.innerHTML = detailsHtml;
 
       simModal.style.display = 'block';
-      simModal.style.maxWidth = '95%';
-      simModal.style.minWidth = '800px';
-      simModal.style.overflowX = 'auto';
+      simModal.style.maxWidth = '900px';
+      simModal.style.width = '95%';
     } catch (error) {
       console.error('Simulation failed:', error);
       alert('Error running simulation');

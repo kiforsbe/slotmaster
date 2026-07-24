@@ -245,7 +245,7 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
   };
 }
 
-export function generateReel(paytable, targetLength, seed, exclude=[]) {
+export function generateReel(paytable, targetLength, seed, exclude=[], minScatterGap=3) {
   function _mulberry32(seed) {
     return function() {
       let t = seed += 0x6D2B79F5;
@@ -262,7 +262,50 @@ export function generateReel(paytable, targetLength, seed, exclude=[]) {
     }
     return array;
   }
-  
+
+  // A plain weighted shuffle can, by chance, place the same scatter symbol twice within
+  // any minScatterGap-wide window (the visible row window), which silently invalidates
+  // the intended scatter-count rarity: two "books" on one reel would let 2 reels produce
+  // a 3+ scatter hit instead of needing 3 separate reels. Spread scatter-type symbols out
+  // so at most one can ever land in the same visible window.
+  function _enforceMinScatterGap(reel, targetSymbols, minGap, rng) {
+    const n = reel.length;
+    if (n === 0 || targetSymbols.size === 0) return reel;
+    const isTarget = (s) => targetSymbols.has(s);
+    const circularDist = (a, b) => {
+      const d = Math.abs(a - b);
+      return Math.min(d, n - d);
+    };
+
+    for (let pass = 0; pass < n; pass++) {
+      const positions = [];
+      for (let i = 0; i < n; i++) if (isTarget(reel[i])) positions.push(i);
+      if (positions.length <= 1) return reel;
+
+      let violation = null;
+      for (let a = 0; a < positions.length && !violation; a++) {
+        for (let b = a + 1; b < positions.length; b++) {
+          if (circularDist(positions[a], positions[b]) < minGap) {
+            violation = { moveFrom: positions[b], keep: positions.filter((_, idx) => idx !== b) };
+            break;
+          }
+        }
+      }
+      if (!violation) return reel;
+
+      const candidates = [];
+      for (let k = 0; k < n; k++) {
+        if (isTarget(reel[k])) continue;
+        if (violation.keep.every(p => circularDist(k, p) >= minGap)) candidates.push(k);
+      }
+      if (candidates.length === 0) return reel; // reel too dense to fully space out; best effort
+
+      const swapIdx = candidates[Math.floor(rng() * candidates.length)];
+      [reel[violation.moveFrom], reel[swapIdx]] = [reel[swapIdx], reel[violation.moveFrom]];
+    }
+    return reel;
+  }
+
   // Step 1 & 2: Compute weights and calculate counts in one pass
   const weights = {};
   for (const symbol in paytable) {
@@ -280,5 +323,12 @@ export function generateReel(paytable, targetLength, seed, exclude=[]) {
   }
 
   // Step 4: Shuffle with seed
-  return _shuffle(reel, _mulberry32(seed));
+  const rng = _mulberry32(seed);
+  _shuffle(reel, rng);
+
+  // Step 5: Guarantee scatter symbols (e.g. book) can never double up inside one visible window
+  const scatterSymbols = new Set(
+    Object.keys(paytable).filter(s => !exclude.includes(s) && paytable[s].type === 'scatter')
+  );
+  return _enforceMinScatterGap(reel, scatterSymbols, minScatterGap, rng);
 }
