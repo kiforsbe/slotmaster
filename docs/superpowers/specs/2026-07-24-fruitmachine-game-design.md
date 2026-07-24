@@ -35,8 +35,9 @@ machine specifics onto the book game's model.
   bonus round, using the rules below.
 - The fruit machine's symbol frequencies are tuned (via the existing
   `tuneFrequencies`) to land at 96% RTP.
-- The reusable dev tooling (RUN SIMULATION, TUNE FREQUENCIES modal) works for
-  the fruit machine the same way it does for bookbookbook.
+- The RUN SIMULATION / TUNE FREQUENCIES dev tooling is extracted into a
+  shared `core/SimulationPanel.js` used by both games, instead of being
+  duplicated into the fruit machine's `game.js`.
 
 ## Non-goals
 
@@ -161,18 +162,21 @@ future UI polish pass).
 
 ```js
 const PAYTABLE = {
-  bar:        { payout: [0, 0, 10],   frequency: ..., friendlyName: 'Bar' },
-  clover:     { payout: [0, 0, 4],    frequency: ..., wildPenalty: 1, friendlyName: 'Clover' },
-  pear:       { payout: [0, 0, 3],    frequency: ..., friendlyName: 'Pear' },
-  melon:      { payout: [0, 0, 3],    frequency: ..., friendlyName: 'Watermelon' },
-  grapes:     { payout: [0, 0, 2],    frequency: ..., wildPenalty: 1, friendlyName: 'Grapes' },
-  plum:       { payout: [0, 0, 2],    frequency: ..., friendlyName: 'Plum' },
-  orange:     { payout: [0, 0, 1.60], frequency: ..., friendlyName: 'Orange' },
-  cherries:   { payout: [0.40, 0.80, 1.60], frequency: ..., friendlyName: 'Cherries' },
-  star:       { payout: [0, 0, 0], frequency: ..., wild: true, wildExcludes: ['cherries'], friendlyName: 'Star' },
-  strawberry: { payout: [0, 0, 0], frequency: ..., wild: true, wildOnly: ['cherries'], aloneBonus: 0.80, friendlyName: 'Strawberry' },
+  bar:        { payout: [0, 0, 10],   frequency: ..., type: 'regular', friendlyName: 'Bar' },
+  clover:     { payout: [0, 0, 4],    frequency: ..., type: 'regular', wildPenalty: 1, friendlyName: 'Clover' },
+  pear:       { payout: [0, 0, 3],    frequency: ..., type: 'regular', friendlyName: 'Pear' },
+  melon:      { payout: [0, 0, 3],    frequency: ..., type: 'regular', friendlyName: 'Watermelon' },
+  grapes:     { payout: [0, 0, 2],    frequency: ..., type: 'regular', wildPenalty: 1, friendlyName: 'Grapes' },
+  plum:       { payout: [0, 0, 2],    frequency: ..., type: 'regular', friendlyName: 'Plum' },
+  orange:     { payout: [0, 0, 1.60], frequency: ..., type: 'regular', friendlyName: 'Orange' },
+  cherries:   { payout: [0.40, 0.80, 1.60], frequency: ..., type: 'regular', friendlyName: 'Cherries' },
+  star:       { payout: [0, 0, 0], frequency: ..., type: 'wild', wild: true, wildExcludes: ['cherries'], friendlyName: 'Star' },
+  strawberry: { payout: [0, 0, 0], frequency: ..., type: 'wild', wild: true, wildOnly: ['cherries'], aloneBonus: 0.80, friendlyName: 'Strawberry' },
 };
 ```
+
+(`type` here is only used by `core/SimulationPanel.js`, §6, to group the
+detailed win breakdown — it has no effect on `checkWildLineWins` itself.)
 
 `bar_double`, `bar_triple`, `bell`, `diamond`, `luckyseven` are not included
 — unused art, no reel strip weight, no payout.
@@ -191,7 +195,70 @@ beyond its scatter-tuning phase, which already no-ops when there are no
 RTP 96%, then hand-copied into the source like bookbookbook's `PAYTABLE`
 already documents doing.
 
-### 6. `SpinSimulator.js` changes
+### 6. Shared dev tooling: `core/SimulationPanel.js`
+
+`bookbookbook/game.js` has ~250 lines of RUN SIMULATION / TUNE FREQUENCIES
+modal code (`runSimulation()`, `openTunePanel()`, `startTuning()`,
+`formatPaytableForCopy()`) that's almost entirely generic DOM rendering over
+`SpinSimulator.js`'s pure `simulateSpins`/`tuneFrequencies` output — it just
+hasn't been factored out because there was only one game. Copy-pasting it
+into `fruitmachine/game.js` would leave two copies to keep in sync by hand.
+Two things in it are currently book-specific and need generalizing along the
+way, not duplicating:
+
+- `runSimulation()`'s "Detailed Win Breakdown" hardcodes `const
+  premiumSymbols = ['book', ...Object.keys(PAYTABLE).filter(s =>
+  PAYTABLE[s].type === 'premium')]`. This becomes purely data-driven: group
+  symbols by `paytable[symbol].type` (defaulting to `'other'` if unset),
+  in the order each type first appears in the paytable object — no
+  hardcoded symbol or type name. (Book's paytable already has `type:
+  'scatter'/'premium'/'regular'`; the fruit machine paytable gets a `type:
+  'wild'/'regular'` field added for the same grouping to work — a small
+  addition to §5's paytable sketch.)
+- `formatPaytableForCopy()` hardcodes the exact field list (`frequency`,
+  `type`, `paymode`, `wild`, `triggerFreeSpins`, `friendlyName`) to
+  column-align. It becomes field-agnostic: format whichever scalar/array/
+  boolean fields exist on each symbol (union across all symbols in the
+  table), so it works unchanged for the fruit machine's different field set
+  (`wildExcludes`, `wildOnly`, `wildPenalty`, `aloneBonus`).
+
+Everything else (the sim-stats display, the win-table renderer, the tune
+panel's inputs/progress log/results table, the copy-to-clipboard button)
+moves as-is, parameterized by a config object instead of closing over
+`bookbookbook/game.js`'s module-level constants:
+
+```js
+// core/SimulationPanel.js
+export function runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins, domRefs }) { ... }
+export function openTuneFrequenciesPanel({ paytable, tuneConfig, domRefs, onApply }) { ... }
+export function formatPaytableForCopy(paytable) { ... }
+```
+
+`tuneConfig` is `{ reelsCount, rowsCount, paylines, reelSeeds, betPerLine,
+linesCount, reelLength, winEvaluator }` — passed straight through to
+`tuneFrequencies`'s options, so §7's `SpinSimulator.js` changes
+(paylines/winEvaluator options) are exactly what this needs.
+
+`domRefs` is the same set of element IDs both games' `index.html` already
+define identically (`sim-modal`, `sim-stats`, `sim-rtp`,
+`sim-total-spins`, `sim-max-win`, `sim-free-spins`, `btn-sim`, `btn-tune`,
+`btn-close-sim`) — no HTML changes needed in either game beyond the fruit
+machine's own copy of that markup.
+
+**Left alone, not extracted:**
+- The debug cheat buttons themselves (`forceWinResult('scatter'/'expanding'/'bigwin')`)
+  stay in `bookbookbook/game.js` — scatter/expanding are mechanics the fruit
+  machine doesn't have. `SlotEngine.forceWinResult()`'s `'bigwin'` branch has
+  the same hardcoded-5-reels bug as `renderWinEffects` (§2) and gets the same
+  fix (`this.config.reelsCount`), since it's the one mode both games can use;
+  `'scatter'`/`'expanding'` stay book-only, gated on whether the game's
+  config actually sets a scatter/expanding symbol.
+- Basic spin/bet/autoplay/turbo/mute button wiring stays duplicated per
+  game — it's small (~30 lines) and already varies slightly per game (bet
+  caps, what "showing_wins" transitions to). Not worth abstracting for two
+  call sites.
+
+### 7. `SpinSimulator.js` changes
 
 `simulateSpins` and `tuneFrequencies` currently call `checkWins` directly
 (hardcoding the book game's win model) and build target grids assuming 5×3.
@@ -201,7 +268,7 @@ fruit machine can pass `checkWildLineWins` and its own paylines/grid shape.
 Target-grid generation already loops over `config.reelsCount`/`rowsCount`
 generically — no change needed there.
 
-### 7. `games/fruitmachine` game — UI scope
+### 8. `games/fruitmachine` game — UI scope
 
 Built from `games/bookbookbook`'s `index.html`/`game.js` as a starting point,
 trimmed and reworked:
@@ -209,7 +276,8 @@ trimmed and reworked:
 **Kept, reused as-is or near-as-is:** cabinet/canvas layout, bet
 adjust ± , spin button, autoplay, turbo, mute, paytable modal (rebuilt to
 render this game's 10-entry paytable and 5 paylines instead of 10-symbol/10-line),
-RUN SIMULATION and TUNE FREQUENCIES dev modal + buttons.
+RUN SIMULATION and TUNE FREQUENCIES dev modal + buttons — both games now call
+into `core/SimulationPanel.js` (§6) instead of each having their own copy.
 
 **Removed:** free-spins panel, book-reveal 3D animation and its canvas, free
 spins trigger/summary modals, scatter/expanding debug cheat buttons, theme
@@ -258,6 +326,11 @@ verification follows the same ad hoc pattern already established:
   turbo all work; wins highlight the correct lines/cells; paytable modal
   renders correctly; RUN SIMULATION and TUNE FREQUENCIES both work against
   the 3-reel config.
+- After extracting `core/SimulationPanel.js`, re-run bookbookbook's RUN
+  SIMULATION and TUNE FREQUENCIES from the UI and confirm the rendered
+  output (stats, detailed win breakdown grouping, copy-paste paytable
+  textarea) is identical to before the extraction — this is a pure
+  refactor of that game's dev tooling, not a behavior change.
 
 ## Migration notes
 
@@ -270,3 +343,9 @@ verification follows the same ad hoc pattern already established:
   paylines arg, relying on the old default import).
 - `checkExpandingWins` similarly gains a `paylines` parameter for the same
   reason (it also reads the module-level `PAYLINES` internally today).
+- `bookbookbook/game.js`'s `runSimulation()`, `openTunePanel()`,
+  `startTuning()`, and `formatPaytableForCopy()` are deleted from that file
+  and replaced with calls into the new `core/SimulationPanel.js` (§6). No
+  `index.html` changes needed in `bookbookbook` — the DOM IDs it already
+  wires up (`sim-modal`, `sim-rtp`, etc.) are exactly what the shared module
+  expects.
