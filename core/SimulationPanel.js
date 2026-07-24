@@ -292,16 +292,17 @@ export function openTuneFrequenciesPanel({ paytable, tuneConfig, domRefs }) {
         </label>
         <label style="font-size: 0.8em; color: #ccc;">Frequency Mode<br>
           <select id="tune-frequency-mode" style="width: 100%; margin-top: 4px;">
-            <option value="premiumSplit">Premium / Other Split</option>
-            <option value="rankTilt">Rank Tilt (value-ordered)</option>
+            <option value="rankTilt" selected>Rank Tilt (value-ordered, default)</option>
+            <option value="premiumSplit">Premium / Other Split (value-ordered)</option>
             <option value="randomSearch">Random Search (value-ordered)</option>
           </select>
         </label>
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
-        Premium/Other Split can make the highest-paying symbol the most frequent one if that's the only way
-        to hit target RTP. Rank Tilt and Random Search instead guarantee every symbol stays no more frequent
-        than any lower-paying one - but for some paytables the target RTP may not be reachable under that
+        Every mode here guarantees a higher-paying symbol is never more frequent than a lower-paying one.
+        Rank Tilt groups symbols by exact payout value (finest-grained); Premium/Other Split groups them
+        into just two tiers (premium vs. everything else, coarser); Random Search samples many distributions
+        instead of one smooth tilt curve. For some paytables the target RTP may not be reachable under that
         constraint (achieved RTP will fall short; see the result below).
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
@@ -369,9 +370,9 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(paytable, {
       ...options,
       onProgress: (phase, i, mult, r, best) => {
-        const labels = { scatter: 'Scatter frequency', shape: `Frequency shape (${options.frequencyMode})`, rtp: 'Premium/regular split' };
+        const labels = { scatter: 'Scatter frequency', shape: `Frequency shape (${options.frequencyMode})` };
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
-        appendLog(`[${labels[phase] || phase} ${i + 1}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  (best so far: err=${best.error.toFixed(4)})`);
+        appendLog(`[${labels[phase] || phase} ${i + 1}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
       }
     });
 
