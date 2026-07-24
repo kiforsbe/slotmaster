@@ -376,17 +376,24 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
       }
     });
 
-    appendLog(`Done. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%`);
+    const rtpConverged = !!diagnostics.rtpPhase?.converged;
+    const scatterConverged = diagnostics.scatterPhase == null || !!diagnostics.scatterPhase.converged;
+    appendLog(
+      rtpConverged && scatterConverged
+        ? `Done. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%`
+        : `⚠ Did NOT converge. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%  (this is the closest attempt found, not a successful tune)`
+    );
     console.log('Frequency tuner diagnostics:', diagnostics);
 
     let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
 
     const targetRtp = options.targetRtp;
-    if (Math.abs(rtp - targetRtp) > (options.rtpTolerancePct ?? 1.5)) {
+    if (!rtpConverged) {
       html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
-                 Target RTP (${targetRtp}%) wasn't reached under the "${options.frequencyMode}" ordering constraint - this paytable's
-                 payout ceilings may not allow ${targetRtp}% RTP while keeping every symbol no more frequent than a lower-paying one.
-                 This is the closest distribution found, not an error.
+                 <strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> under the "${options.frequencyMode}" ordering constraint -
+                 the closest attempt found is off by ${diagnostics.rtpPhase.error.toFixed(2)} percentage points. This can mean the payout
+                 table's current frequencies/payouts don't allow ${targetRtp}% RTP while keeping every symbol no more frequent than a
+                 lower-paying one - don't treat the RTP shown above as final without checking this.
                </p>`;
     }
 

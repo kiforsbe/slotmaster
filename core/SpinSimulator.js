@@ -270,7 +270,11 @@ function renormalizeWeights(raw, valueBudget) {
  *   iteration (damping against noisy slope estimates); decays each step.
  * @param {number} [args.trustFactorDecay=0.9]
  * @param {number} [args.epsilon=0.05] - Finite-difference probe distance in log-space.
- * @returns {Promise<{ mult: number, error: number, result: Object, paytable: Object }>}
+ * @returns {Promise<{ mult: number, error: number, result: Object, paytable: Object, converged: boolean }>} -
+ *   `converged` is true iff the best candidate found landed within `tolerance` of `target`;
+ *   false means the search exhausted its iterations (or every direction was a flat
+ *   plateau) without reaching the target - callers should surface this rather than
+ *   silently treating `best` as a successful tune.
  */
 export async function gradientDescent1D({
   initialParam, minParam, maxParam, target, tolerance,
@@ -297,20 +301,31 @@ export async function gradientDescent1D({
     await yieldToEventLoop();
     if (error <= tolerance || i === maxIterations - 1) break;
 
-    const xProbe = Math.min(maxX, x + epsilon);
-    const dx = xProbe - x;
-    if (dx > 0) {
-      const probeResult = measure(buildTrial(Math.exp(xProbe)), stepSeed);
-      const slope = (metricOf(probeResult) - metric) / dx;
-      if (slope !== 0) {
-        const step = ((target - metric) / slope) * trust;
-        x = Math.min(maxX, Math.max(minX, x + step));
+    // Probe for a measurable slope, widening the probe distance (and, failing that,
+    // trying the opposite direction) when the first probe lands on a flat plateau -
+    // generateReel() rounds symbol counts to whole numbers per reel, so a small parameter
+    // change can measure as an *exactly* zero slope even though the metric does move at a
+    // larger step. Without this, the search stalls permanently at the first such plateau
+    // (trust decays every iteration regardless, but x itself never moves).
+    let slope = 0;
+    outer: for (const sign of [1, -1]) {
+      for (let widen = 1; widen <= 8; widen *= 2) {
+        const xProbe = Math.min(maxX, Math.max(minX, x + sign * epsilon * widen));
+        const dx = xProbe - x;
+        if (dx === 0) continue;
+        const probeResult = measure(buildTrial(Math.exp(xProbe)), stepSeed);
+        slope = (metricOf(probeResult) - metric) / dx;
+        if (slope !== 0) break outer;
       }
+    }
+    if (slope !== 0) {
+      const step = ((target - metric) / slope) * trust;
+      x = Math.min(maxX, Math.max(minX, x + step));
     }
     trust *= trustFactorDecay;
   }
 
-  return best;
+  return { ...best, converged: best.error <= tolerance };
 }
 
 /**
@@ -541,7 +556,7 @@ export async function tuneFrequencies(paytable, options = {}) {
         const result = measure(trial, searchSeed + 600000 + i * 7919);
         const error = Math.abs(result.rtp - targetRtp);
         const resultWithError = { ...result, error };
-        const candidate = { mult: tilt, error, result, paytable: trial };
+        const candidate = { mult: tilt, error, result, paytable: trial, converged: error <= rtpTolerancePct };
         if (!best || error < candidate.error) best = candidate;
         attempts.push(candidate);
         if (onProgress) await onProgress('shape', i, tilt, resultWithError, best);
@@ -608,10 +623,11 @@ export async function tuneFrequencies(paytable, options = {}) {
     rtp: finalResult.rtp,
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
-      scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, ...scatterPhase.result } : null,
+      scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
       rtpPhase: rtpPhase ? {
         multiplier: rtpPhase.mult,
         error: rtpPhase.error,
+        converged: !!rtpPhase.converged,
         ...rtpPhase.result,
         ...(rtpPhase.topCandidates ? { topCandidates: rtpPhase.topCandidates } : {}),
       } : null,
