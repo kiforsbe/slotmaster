@@ -52,6 +52,8 @@ export const PAYTABLE = {
   strawberry: { payout: [0.00, 0.00,  0.00], type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 4.00 },
 };
 
+// Frequency tables for each reel. These are based on the actual symbol weights used in the original machines.
+// Note that REEL_1 does not contain the star or strawberry symbols.
 export const FREQUENCY_REEL1 = {
   bar:        { frequency: 16.0 },
   clover:     { frequency: 16.0 },
@@ -65,6 +67,7 @@ export const FREQUENCY_REEL1 = {
   strawberry: { frequency:  0.0 },
 };
 
+// This reel contains the same symbols as reel 1, but with different frequencies to create a different distribution of symbols.
 export const FREQUENCY_REEL2 = {
   bar:        { frequency:  8.0 },
   clover:     { frequency:  8.0 },
@@ -78,6 +81,7 @@ export const FREQUENCY_REEL2 = {
   strawberry: { frequency:  0.0 },
 };
 
+// This reel contains additional symbols (star and strawberry) and different frequencies to create a different distribution of symbols.
 export const FREQUENCY_REEL3 = {
   bar:        { frequency: 16.0 },
   clover:     { frequency: 16.0 },
@@ -91,12 +95,8 @@ export const FREQUENCY_REEL3 = {
   strawberry: { frequency:  4.0 },
 };
 
-// Star and Strawberry are only available on the last reel - excluded from reels 1-2's
-// weight pool via generateReel's `exclude` param.
-// export const REEL_STRIPS = REEL_SEEDS.map((seed, i) =>
-//   generateReel(PAYTABLE, REEL_LENGTH, seed, i < REELS_COUNT - 1 ? ['star', 'strawberry'] : [])
-// );
-
+// Generate the reel strips based on the frequency tables and seeds.
+// The generateReel function will create a random distribution of symbols for each reel based on the specified frequencies and seed values.
 export const REEL_STRIPS = [
   generateReel(FREQUENCY_REEL1, REEL_LENGTH, REEL_SEEDS[0]),
   generateReel(FREQUENCY_REEL2, REEL_LENGTH, REEL_SEEDS[1]),
