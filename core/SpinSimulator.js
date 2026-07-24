@@ -135,9 +135,10 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     if (winData.lineWins && winData.lineWins.length > 0) {
       winData.lineWins.forEach((lw, idx) => {
         results.detailedWins.push({
-          type: 'line',
+          type: lw.alone ? 'alone' : 'line',
           symbol: lw.symbol,
           count: lw.count,
+          wildUsed: !!lw.wildUsed,
           isFreeSpin: isFreeSpin,
           winAmount: lw.payout * betPerLine
         });

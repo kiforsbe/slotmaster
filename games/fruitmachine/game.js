@@ -23,26 +23,24 @@ export const PAYLINES = [
   [2, 1, 0], // Line 5: Diagonal, bottom-left to upper-right
 ];
 
-// Paytable. Frequencies were derived offline via a bisection tuning pass (see
-// docs/superpowers/plans/2026-07-24-fruitmachine-game.md, Task 8) to land near 96% RTP.
+// Paytable. Frequencies are ordered so that higher-paying symbols are rarer (standard
+// slot design), then must be re-tuned via TUNE FREQUENCIES to hit target RTP - with only
+// 5 lines on 3 reels and a payout ceiling of 10x, that pass will likely need to raise
+// several of these weights across the board to reach 96%.
 // `bar` is the sole `type: 'premium'` symbol - marking it that way is what lets TUNE
 // FREQUENCIES' premium/other reallocation actually move the needle for this paytable
 // (its scatter-tuning phase is a no-op here since there's no scatter symbol).
-// Note: with only 5 lines on 3 reels, no partial pays for most symbols, and a payout
-// ceiling of just 10x, hitting 96% RTP mathematically requires `bar` to appear far more
-// often than a "rare jackpot" symbol would in a wider-reel game - a real consequence of
-// the payout table's shape, not a bug.
 export const PAYTABLE = {
-  bar:        { payout: [0.00, 0.00, 10.00], frequency: 35.643, type: 'premium', friendlyName: 'Bar' },
-  clover:     { payout: [0.00, 0.00,  4.00], frequency:  3.611, type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
-  pear:       { payout: [0.00, 0.00,  3.00], frequency:  4.814, type: 'regular', friendlyName: 'Pear' },
-  melon:      { payout: [0.00, 0.00,  3.00], frequency:  4.814, type: 'regular', friendlyName: 'Watermelon' },
-  grapes:     { payout: [0.00, 0.00,  2.00], frequency:  6.018, type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
-  plum:       { payout: [0.00, 0.00,  2.00], frequency:  6.018, type: 'regular', friendlyName: 'Plum' },
+  bar:        { payout: [0.00, 0.00, 10.00], frequency:  0.806, type: 'premium', friendlyName: 'Bar' },
+  clover:     { payout: [0.00, 0.00,  4.00], frequency:  1.611, type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
+  pear:       { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Pear' },
+  melon:      { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Watermelon' },
+  grapes:     { payout: [0.00, 0.00,  2.00], frequency:  2.018, type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
+  plum:       { payout: [0.00, 0.00,  2.00], frequency:  8.018, type: 'regular', friendlyName: 'Plum' },
   orange:     { payout: [0.00, 0.00,  1.60], frequency:  8.425, type: 'regular', friendlyName: 'Orange' },
   cherries:   { payout: [0.40, 0.80,  1.60], frequency: 12.036, type: 'regular', friendlyName: 'Cherries' },
-  star:       { payout: [0.00, 0.00,  0.00], frequency:  3.611, type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries'] },
-  strawberry: { payout: [0.00, 0.00,  0.00], frequency:  3.009, type: 'wild',    friendlyName: 'Strawberry', wild: true, wildOnly: ['cherries'], aloneBonus: 0.80 },
+  star:       { payout: [0.00, 0.00,  0.00], frequency: 10.611, type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries'] },
+  strawberry: { payout: [0.00, 0.00,  0.00], frequency: 10.009, type: 'wild',    friendlyName: 'Strawberry', wild: true, wildOnly: ['cherries'], aloneBonus: 0.80 },
 };
 
 // Star and Strawberry are only available on the last reel - excluded from reels 1-2's

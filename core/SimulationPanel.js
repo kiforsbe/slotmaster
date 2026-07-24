@@ -37,7 +37,7 @@ function createSection(title, symbols, symbolStats, paytable) {
   sectionHtml += `<div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">`;
 
   symbols.forEach(symbol => {
-    const stats = symbolStats[symbol] || { counts: {}, expanding: { counts: {} } };
+    const stats = symbolStats[symbol] || { counts: {}, wildAssisted: { counts: {} }, alone: { counts: {} }, expanding: { counts: {} } };
     const friendlyName = paytable[symbol]?.friendlyName || symbol;
     const isScatter = paytable[symbol]?.type === 'scatter';
 
@@ -48,6 +48,26 @@ function createSection(title, symbols, symbolStats, paytable) {
     sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : 'Normal Wins'}</span>`;
     sectionHtml += renderWinTable(stats.counts, 'Hits', '#ccc', isScatter ? 'No scatter wins' : 'No standard line wins');
     sectionHtml += `</div>`;
+
+    // Wild-assisted matches (natural run one short of a full line, completed by a wild) are
+    // reported apart from natural hits above - otherwise a full-payout wild-completed win
+    // reads like a partial pay for symbols that don't actually have one.
+    if (stats.wildAssisted && Object.keys(stats.wildAssisted.counts).length > 0) {
+      sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
+      sectionHtml += `<span style="font-size: 0.7em; color: #7ec8ff; text-transform: uppercase;">Wild-Assisted Wins</span>`;
+      sectionHtml += renderWinTable(stats.wildAssisted.counts, 'Natural Hits', '#7ec8ff', '');
+      sectionHtml += `</div>`;
+    }
+
+    // A wild's standalone "alone bonus" pays out regardless of what's elsewhere on the
+    // line, so it's tallied under the wild symbol itself rather than whatever unrelated
+    // symbol happened to land in reel 1.
+    if (stats.alone && Object.keys(stats.alone.counts).length > 0) {
+      sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
+      sectionHtml += `<span style="font-size: 0.7em; color: #ffb27e; text-transform: uppercase;">Alone Bonus</span>`;
+      sectionHtml += renderWinTable(stats.alone.counts, 'Landed', '#ffb27e', '');
+      sectionHtml += `</div>`;
+    }
 
     if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
       sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
@@ -111,23 +131,26 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
       const pct = results.totalSpins > 0 ? (results.freeSpinsTriggered / results.totalSpins) * 100 : 0;
       simFreeSpinsDisplay.textContent = `${results.freeSpinsTriggered} (${pct.toFixed(2)}%)`;
 
+      function bump(bucket, key, amount) {
+        if (!bucket[key]) bucket[key] = { count: 0, totalAmount: 0 };
+        bucket[key].count += 1;
+        bucket[key].totalAmount += amount;
+      }
+
       const symbolStats = {};
       results.detailedWins.forEach(win => {
         if (!symbolStats[win.symbol]) {
-          symbolStats[win.symbol] = { counts: {}, expanding: { counts: {} } };
+          symbolStats[win.symbol] = { counts: {}, wildAssisted: { counts: {} }, alone: { counts: {} }, expanding: { counts: {} } };
         }
+        const stats = symbolStats[win.symbol];
         if (win.type === 'expanding') {
-          if (!symbolStats[win.symbol].expanding.counts[win.count]) {
-            symbolStats[win.symbol].expanding.counts[win.count] = { count: 0, totalAmount: 0 };
-          }
-          symbolStats[win.symbol].expanding.counts[win.count].count += 1;
-          symbolStats[win.symbol].expanding.counts[win.count].totalAmount += win.winAmount;
+          bump(stats.expanding.counts, win.count, win.winAmount);
+        } else if (win.type === 'alone') {
+          bump(stats.alone.counts, win.count, win.winAmount);
+        } else if (win.wildUsed) {
+          bump(stats.wildAssisted.counts, win.count, win.winAmount);
         } else {
-          if (!symbolStats[win.symbol].counts[win.count]) {
-            symbolStats[win.symbol].counts[win.count] = { count: 0, totalAmount: 0 };
-          }
-          symbolStats[win.symbol].counts[win.count].count += 1;
-          symbolStats[win.symbol].counts[win.count].totalAmount += win.winAmount;
+          bump(stats.counts, win.count, win.winAmount);
         }
       });
 

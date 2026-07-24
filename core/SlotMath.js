@@ -331,22 +331,39 @@ export function checkWildLineWins(grid, paytable, paylines, activeLinesCount) {
 
     const totalLinePayout = payout + aloneBonus;
     if (totalLinePayout > 0) {
-      const winningPositions = [];
-      for (let col = 0; col < run; col++) {
-        winningPositions.push([col, path[col]]);
-      }
-      if (aloneBonus > 0 && !winningPositions.some(p => p[0] === lastCol)) {
-        winningPositions.push([lastCol, path[lastCol]]);
-      }
+      // Reported as up to two separate wins rather than one combined entry under `s0` -
+      // a wild-completed match and an unrelated alone-bonus payout are different events
+      // that can co-occur on the same line, and folding them together previously made
+      // per-symbol win breakdowns misattribute the alone bonus to whatever symbol was on
+      // reel 1, and hid wild-assisted matches behind a "partial pay" looking count.
+      if (payout > 0) {
+        const winningPositions = [];
+        for (let col = 0; col < run; col++) {
+          winningPositions.push([col, path[col]]);
+        }
+        if (wildUsed) {
+          winningPositions.push([lastCol, path[lastCol]]);
+        }
 
-      lineWins.push({
-        lineIndex: lineIdx,
-        symbol: s0,
-        count: run,
-        payout: totalLinePayout,
-        winningPositions,
-        aloneBonus: aloneBonus > 0
-      });
+        lineWins.push({
+          lineIndex: lineIdx,
+          symbol: s0,
+          count: run,
+          payout,
+          winningPositions,
+          wildUsed
+        });
+      }
+      if (aloneBonus > 0) {
+        lineWins.push({
+          lineIndex: lineIdx,
+          symbol: lastSymbol,
+          count: 1,
+          payout: aloneBonus,
+          winningPositions: [[lastCol, path[lastCol]]],
+          alone: true
+        });
+      }
       totalLinePayoutMultiplier += totalLinePayout;
     }
   }
