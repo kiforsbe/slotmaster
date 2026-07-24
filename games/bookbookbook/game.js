@@ -9,7 +9,8 @@ import { PAYLINES, generateReel } from '../../core/SlotMath.js';
 const PAYTABLE = {
   book:     { payout: [0,  0,   2,   20,  200], frequency: 0.045, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
   explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.075, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
-  anubis:   { payout: [0,  5,  40,  400, 2000], frequency: 0.150, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
+  tut:      { payout: [0,  5,  40,  400, 2000], frequency: 0.150, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Tutankhamun' },
+  anubis:   { payout: [0,  5,  30,  100,  750], frequency: 0.224, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
   scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.224, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
   ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
   king:     { payout: [0,  0,   5,   40,  150], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
@@ -109,10 +110,39 @@ function runSimulation() {
 
       let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
 
+      // Renders a counts map ({ hitCount: { count, totalAmount } }) as a compact table:
+      // Hits | Wins | Avg Win | Total Win.
+      const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+      const renderWinTable = (counts, hitLabel, accentColor, emptyText) => {
+        const sortedKeys = Object.keys(counts).sort((a, b) => a - b);
+        if (sortedKeys.length === 0) {
+          return `<div style="color: #666; font-style: italic; font-size: 0.8em;">${emptyText}</div>`;
+        }
+        let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">`;
+        html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase;">
+                    <th style="text-align: left; font-weight: normal; padding: 2px 4px 4px 0;">${hitLabel}</th>
+                    <th style="text-align: right; font-weight: normal; padding: 2px 4px 4px;">Wins</th>
+                    <th style="text-align: right; font-weight: normal; padding: 2px 4px 4px;">Avg Win</th>
+                    <th style="text-align: right; font-weight: normal; padding: 2px 0 4px;">Total Win</th>
+                  </tr></thead><tbody>`;
+        sortedKeys.forEach(key => {
+          const data = counts[key];
+          const avg = data.totalAmount / data.count;
+          html += `<tr>
+                      <td style="padding: 2px 4px 2px 0; color: ${accentColor};">${key}</td>
+                      <td style="text-align: right; padding: 2px 4px;">${data.count}</td>
+                      <td style="text-align: right; padding: 2px 4px;">$${fmt(avg)}</td>
+                      <td style="text-align: right; padding: 2px 0; font-weight: bold;">$${fmt(data.totalAmount)}</td>
+                    </tr>`;
+        });
+        html += `</tbody></table>`;
+        return html;
+      };
+
       const createSection = (title, symbols) => {
         if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
         let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
-        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;">`;
+        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">`;
 
         symbols.forEach(symbol => {
           const stats = symbolStats[symbol] || { counts: {}, expanding: { counts: {} } };
@@ -125,38 +155,20 @@ function runSimulation() {
           // Normal (line) or Scatter Wins Sub-section
           sectionHtml += `<div style="margin-bottom: 8px;">`;
           sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : 'Normal Wins'}</span>`;
-          const sortedCounts = Object.keys(stats.counts).sort((a, b) => a - b);
-          if (sortedCounts.length > 0) {
-            sortedCounts.forEach(count => {
-              const data = stats.counts[count];
-              sectionHtml += `<div style="display: flex; justify-content: space-between; margin-bottom: 2px;">\
-                                <span style="color: #ccc;">${count} hits</span>\
-                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 0})})</span>\
-                              </div>`;
-            });
-          } else {
-            sectionHtml += `<div style="color: #666; font-style: italic; font-size: 0.8em;">${isScatter ? 'No scatter wins' : 'No standard line wins'}</div>`;
-          }
+          sectionHtml += renderWinTable(stats.counts, 'Hits', '#ccc', isScatter ? 'No scatter wins' : 'No standard line wins');
           sectionHtml += `</div>`;
 
           // Expanding Wins Sub-section
           if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
             sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
             sectionHtml += `<span style="font-size: 0.7em; color: #ffd700; text-transform: uppercase;">Expanding Wins</span>`;
-            const sortedExpCounts = Object.keys(stats.expanding.counts).sort((a, b) => a - b);
-            sortedExpCounts.forEach(count => {
-              const data = stats.expanding.counts[count];
-              sectionHtml += `<div style="display: flex; justify-content: space-between;">\
-                                <span style="color: #ffd700;">${count} reels</span>\
-                                <span style="font-weight: bold;">${data.count} wins ($${data.totalAmount.toLocaleString(undefined, {minimumFractionDigits: 0})})</span>\
-                              </div>`;
-            });
+            sectionHtml += renderWinTable(stats.expanding.counts, 'Reels', '#ffd700', '');
             sectionHtml += `</div>`;
           }
 
           sectionHtml += `</div>`;
         });
-        
+
         sectionHtml += `</div>`;
         return sectionHtml;
       };
