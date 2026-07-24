@@ -1,55 +1,42 @@
 // Core Slot Mathematics Engine
 
 /**
- * Payline definitions for 5-reel, 3-row slot machine.
- * Each array defines the row index (0=top, 1=middle, 2=bottom) for each column.
- * @type {Array<Array<number>>}
- */
-export const PAYLINES = [
-  [1, 1, 1, 1, 1], // Line 1: Horizontal Middle Row
-  [0, 0, 0, 0, 0], // Line 2: Horizontal Top Row
-  [2, 2, 2, 2, 2], // Line 3: Horizontal Bottom Row
-  [0, 1, 2, 1, 0], // Line 4: V-Shape
-  [2, 1, 0, 1, 2], // Line 5: Inverted V-Shape
-  [0, 0, 1, 2, 2], // Line 6: Step Down-Up
-  [2, 2, 1, 0, 0], // Line 7: Step Up-Down
-  [1, 2, 2, 2, 1], // Line 8: U-Shape Bottom
-  [1, 0, 0, 0, 1], // Line 9: U-Shape Top
-  [0, 1, 0, 1, 0]  // Line 10: Zigzag
-];
-
-/**
  * Check normal line wins and scatters for a slot grid.
- * Grid structure: grid[col][row], where col is 0..4 and row is 0..2.
- * @param {Array<Array<string>>} grid - 5x3 grid of symbol names
+ * Grid structure: grid[col][row], where col is 0..reelsCount-1 and row is 0..rowsCount-1.
+ * @param {Array<Array<string>>} grid - reelsCount x rowsCount grid of symbol names
  * @param {Object} paytable - Maps symbol names to payout arrays (indexed by hit count)
+ * @param {Array<Array<number>>} paylines - Payline definitions; each entry has one row index per reel
  * @param {number} activeLinesCount - Number of active paylines (default 10)
- * @param {string} wildSymbol - Symbol that acts as wild (default 'book')
- * @param {string} scatterSymbol - Symbol that acts as scatter (default 'book')
+ * @param {string|null} wildSymbol - Symbol that acts as wild (default none)
+ * @param {string|null} scatterSymbol - Symbol that acts as scatter (default none)
  * @param {number} scatterTriggerCount - Minimum scatter count to trigger free spins (default 3)
  * @returns {Object} Object containing lineWins, scatterWin, and total payouts
  */
-export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'book', scatterSymbol = 'book', scatterTriggerCount = 3) {
+export function checkWins(grid, paytable, paylines, activeLinesCount = 10, wildSymbol = null, scatterSymbol = null, scatterTriggerCount = 3) {
   // Input validation
-  if (!grid || grid.length !== 5 || grid[0].length !== 3) {
-    throw new Error('Grid must be 5 columns x 3 rows');
+  if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) {
+    throw new Error('Grid must be a non-empty reelsCount x rowsCount array');
   }
   if (!paytable || typeof paytable !== 'object') {
     throw new Error('Invalid paytable');
   }
-  activeLinesCount = Math.min(activeLinesCount, PAYLINES.length);
-  
+  if (!paylines || !Array.isArray(paylines) || paylines.length === 0) {
+    throw new Error('paylines must be a non-empty array');
+  }
+  const reelsCount = grid.length;
+  const rowsCount = grid[0].length;
+  activeLinesCount = Math.min(activeLinesCount, paylines.length);
 
   const lineWins = [];
   let totalLinePayoutMultiplier = 0;
 
   // 1. Evaluate Line Wins (Left to Right)
-  for (let lineIdx = 0; lineIdx < Math.min(activeLinesCount, PAYLINES.length); lineIdx++) {
-    const path = PAYLINES[lineIdx];
-    
+  for (let lineIdx = 0; lineIdx < Math.min(activeLinesCount, paylines.length); lineIdx++) {
+    const path = paylines[lineIdx];
+
     // Read symbols along the line path
     const lineSymbols = [];
-    for (let col = 0; col < 5; col++) {
+    for (let col = 0; col < reelsCount; col++) {
       const row = path[col];
       lineSymbols.push(grid[col][row]);
     }
@@ -59,9 +46,9 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
     let targetSymbol = null;
     const winningPositions = [];
 
-    for (let col = 0; col < 5; col++) {
+    for (let col = 0; col < reelsCount; col++) {
       const sym = lineSymbols[col];
-      
+
       if (col === 0) {
         targetSymbol = sym;
         matchCount = 1;
@@ -111,8 +98,8 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
   // 2. Evaluate Scatter Wins (Books anywhere)
   let scatterCount = 0;
   const scatterPositions = [];
-  for (let col = 0; col < 5; col++) {
-    for (let row = 0; row < 3; row++) {
+  for (let col = 0; col < reelsCount; col++) {
+    for (let row = 0; row < rowsCount; row++) {
       if (grid[col][row] === scatterSymbol) {
         scatterCount++;
         scatterPositions.push([col, row]);
@@ -163,29 +150,35 @@ export function checkWins(grid, paytable, activeLinesCount = 10, wildSymbol = 'b
  * Wins are evaluated on all active lines without needing to be adjacent.
  * Note: Expanding symbol pays on ALL active paylines, so 3 expanding reels
  * pays payout * numActiveLines. This is Book of Dead style behavior.
- * @param {Array<Array<string>>} grid - 5x3 grid of symbol names
+ * @param {Array<Array<string>>} grid - reelsCount x rowsCount grid of symbol names
  * @param {string} expandingSymbol - The symbol that expands during free spins
  * @param {Object} paytable - Maps symbol names to payout arrays (used for fallback)
+ * @param {Array<Array<number>>} paylines - Payline definitions; each entry has one row index per reel
  * @param {number} activeLinesCount - Number of active paylines (default 10)
  * @param {Object|null} expandingPaytable - Separate paytable for expanding wins; if null, falls back to paytable
  * @returns {Object|null} Expanding win data or null if no win
  */
-export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesCount = 10, expandingPaytable = null) {
+export function checkExpandingWins(grid, expandingSymbol, paytable, paylines, activeLinesCount = 10, expandingPaytable = null) {
   // Input validation
-  if (!grid || grid.length !== 5 || grid[0].length !== 3) {
-    throw new Error('Grid must be 5 columns x 3 rows');
+  if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) {
+    throw new Error('Grid must be a non-empty reelsCount x rowsCount array');
   }
   if (!paytable || typeof paytable !== 'object') {
     throw new Error('Invalid paytable');
   }
-  
+  if (!paylines || !Array.isArray(paylines) || paylines.length === 0) {
+    throw new Error('paylines must be a non-empty array');
+  }
+  const reelsCount = grid.length;
+  const rowsCount = grid[0].length;
+
   // Find which reels contain the expanding symbol
   const expandingReels = [];
   const expandedPositions = [];
 
-  for (let col = 0; col < 5; col++) {
+  for (let col = 0; col < reelsCount; col++) {
     let hasSymbol = false;
-    for (let row = 0; row < 3; row++) {
+    for (let row = 0; row < rowsCount; row++) {
       if (grid[col][row] === expandingSymbol) {
         hasSymbol = true;
         break;
@@ -193,8 +186,10 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
     }
     if (hasSymbol) {
       expandingReels.push(col);
-      // Once expanded, the symbol occupies row 0, 1, 2 of this column
-      expandedPositions.push([col, 0], [col, 1], [col, 2]);
+      // Once expanded, the symbol occupies every row of this column
+      for (let row = 0; row < rowsCount; row++) {
+        expandedPositions.push([col, row]);
+      }
     }
   }
 
@@ -202,7 +197,7 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
   // Use the dedicated expanding paytable when available (separate from normal-mode line payouts)
   const payouts = (expandingPaytable && expandingPaytable[expandingSymbol] && expandingPaytable[expandingSymbol].payout)
     || (paytable[expandingSymbol] && paytable[expandingSymbol].payout);
-  
+
   // High value symbols pay for 2 or more reels, low value for 3 or more.
   // We can determine this by checking if payout exists for count.
   // payout[i] is the payout for (i+1) expanded reels, same convention as line wins.
@@ -219,14 +214,14 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
   // In expanding mode, since the symbol covers all positions on the expanded reels,
   // it is active on all paylines on those reels. And since it doesn't need to be adjacent,
   // every active line gets a win of size equal to the number of expanding reels!
-  for (let lineIdx = 0; lineIdx < Math.min(activeLinesCount, PAYLINES.length); lineIdx++) {
+  for (let lineIdx = 0; lineIdx < Math.min(activeLinesCount, paylines.length); lineIdx++) {
     wins.push({
       lineIndex: lineIdx,
       symbol: expandingSymbol,
       count: count,
       payout: payoutPerLine,
       // The winning positions on this payline are the intersections of the payline and the expanded columns
-      winningPositions: PAYLINES[lineIdx].map((row, col) => {
+      winningPositions: paylines[lineIdx].map((row, col) => {
         if (expandingReels.includes(col)) {
           return [col, row];
         }
@@ -243,6 +238,120 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
     wins,
     totalPayoutMultiplier: totalPayout
   };
+}
+
+/**
+ * Check line wins where certain symbols act as wilds restricted to the LAST grid position
+ * of a line only, with optional per-target-symbol payout penalties and a flat "lands but
+ * doesn't complete a win" bonus for a wild symbol. Fully data-driven from paytable fields -
+ * no symbol names are hardcoded here, so this is reusable by any game with reel-restricted
+ * wilds, not just one specific paytable.
+ *
+ * Paytable fields read (all optional except payout):
+ *   payout: [pay-for-1, pay-for-2, ..., pay-for-reelsCount] per symbol, left-to-right from reel 1.
+ *   wild: true - this symbol can substitute in the LAST grid position of a line only.
+ *   wildExcludes: [symbols] - target symbols this wild can NOT substitute for.
+ *   wildOnly: [symbols] - if present, this wild substitutes ONLY for these target symbols.
+ *   wildPenalty: number - subtracted from the full-match payout when won via this wild.
+ *   aloneBonus: number - flat payout when this wild lands in the last position without
+ *     completing a win for that line.
+ *
+ * @param {Array<Array<string>>} grid - reelsCount x rowsCount grid of symbol names
+ * @param {Object} paytable - see field table above
+ * @param {Array<Array<number>>} paylines - payline definitions, one row index per reel
+ * @param {number} activeLinesCount - number of active paylines to evaluate
+ * @returns {Object} { lineWins, totalLinePayoutMultiplier }
+ */
+export function checkWildLineWins(grid, paytable, paylines, activeLinesCount) {
+  if (!grid || grid.length === 0 || !grid[0] || grid[0].length === 0) {
+    throw new Error('Grid must be a non-empty reelsCount x rowsCount array');
+  }
+  if (!paytable || typeof paytable !== 'object') {
+    throw new Error('Invalid paytable');
+  }
+  if (!paylines || !Array.isArray(paylines) || paylines.length === 0) {
+    throw new Error('paylines must be a non-empty array');
+  }
+
+  const reelsCount = grid.length;
+  const isWildFor = (wildSymbolName, targetSymbol) => {
+    const meta = paytable[wildSymbolName];
+    if (!meta || !meta.wild) return false;
+    if (meta.wildOnly) return meta.wildOnly.includes(targetSymbol);
+    if (meta.wildExcludes) return !meta.wildExcludes.includes(targetSymbol);
+    return true;
+  };
+
+  const lineWins = [];
+  let totalLinePayoutMultiplier = 0;
+
+  for (let lineIdx = 0; lineIdx < Math.min(activeLinesCount, paylines.length); lineIdx++) {
+    const path = paylines[lineIdx];
+    const lineSymbols = [];
+    for (let col = 0; col < reelsCount; col++) {
+      lineSymbols.push(grid[col][path[col]]);
+    }
+
+    const s0 = lineSymbols[0];
+    const lastCol = reelsCount - 1;
+    const lastSymbol = lineSymbols[lastCol];
+    const s0Meta = paytable[s0];
+
+    // 1. Natural contiguous run length from reel 1
+    let run = 1;
+    for (let col = 1; col < reelsCount; col++) {
+      if (lineSymbols[col] === s0) run++;
+      else break;
+    }
+
+    let payout = 0;
+    let wildUsed = false;
+
+    if (run === reelsCount) {
+      // Natural full match
+      payout = (s0Meta && s0Meta.payout && s0Meta.payout[run - 1]) || 0;
+    } else if (run === reelsCount - 1 && isWildFor(lastSymbol, s0)) {
+      // A wild in the last position completes the match
+      const fullPayout = (s0Meta && s0Meta.payout && s0Meta.payout[reelsCount - 1]) || 0;
+      const penalty = (s0Meta && s0Meta.wildPenalty) || 0;
+      payout = Math.max(0, fullPayout - penalty);
+      wildUsed = true;
+    } else if (s0Meta && s0Meta.payout && s0Meta.payout[run - 1] > 0) {
+      // Partial match - only symbols with a nonzero partial payout (e.g. cherries) pay here
+      payout = s0Meta.payout[run - 1];
+    }
+
+    // 2. Alone bonus: the last symbol has one defined, and it wasn't already used above
+    // to complete a win (using it for both would double-pay the same wild).
+    const lastMeta = paytable[lastSymbol];
+    let aloneBonus = 0;
+    if (lastMeta && lastMeta.aloneBonus && !wildUsed) {
+      aloneBonus = lastMeta.aloneBonus;
+    }
+
+    const totalLinePayout = payout + aloneBonus;
+    if (totalLinePayout > 0) {
+      const winningPositions = [];
+      for (let col = 0; col < run; col++) {
+        winningPositions.push([col, path[col]]);
+      }
+      if (aloneBonus > 0 && !winningPositions.some(p => p[0] === lastCol)) {
+        winningPositions.push([lastCol, path[lastCol]]);
+      }
+
+      lineWins.push({
+        lineIndex: lineIdx,
+        symbol: s0,
+        count: run,
+        payout: totalLinePayout,
+        winningPositions,
+        aloneBonus: aloneBonus > 0
+      });
+      totalLinePayoutMultiplier += totalLinePayout;
+    }
+  }
+
+  return { lineWins, totalLinePayoutMultiplier };
 }
 
 /**
