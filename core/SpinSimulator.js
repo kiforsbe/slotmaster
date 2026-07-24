@@ -212,6 +212,119 @@ function computeValueRanks(paytable, symbols) {
   return rankOf;
 }
 
+// Two tiers only: 'premium'-typed symbols (tier 0) vs everything else (tier 1). Coarser
+// than computeValueRanks, but built on the exact same tieredRawWeights/t>=1 mechanism,
+// so it's structurally guaranteed to never let a premium symbol end up more frequent than
+// a non-premium one - unlike the bespoke premium/other bisection this replaces.
+function computePremiumTiers(paytable, symbols) {
+  const tierOf = {};
+  symbols.forEach(s => { tierOf[s] = paytable[s].type === 'premium' ? 0 : 1; });
+  return tierOf;
+}
+
+// weight(s) = baseFreq(s) * t^tierOf(s), before renormalization. Non-decreasing as
+// tierOf(s) increases whenever t >= 1 - this is what makes "higher-tier symbols end up no
+// more frequent" hold by construction rather than by chance, for rankTilt/premiumSplit.
+function tieredRawWeights(valueSymbols, baseFreq, tierOf, t) {
+  const raw = {};
+  valueSymbols.forEach(s => { raw[s] = baseFreq[s] * Math.pow(t, tierOf[s]); });
+  return raw;
+}
+
+// Scales any positive per-symbol raw-weight map so it sums to valueBudget - shared by
+// every Phase 2 mode (tieredRawWeights' t^tier construction, and randomSearch's jittered
+// tier sampling) so they all scale into the same fixed budget Phase 1's trigger-rate share
+// depends on, regardless of how the raw weights themselves were produced.
+function renormalizeWeights(raw, valueBudget) {
+  const rawTotal = Object.values(raw).reduce((a, b) => a + b, 0);
+  const scale = valueBudget / rawTotal;
+  const out = {};
+  Object.keys(raw).forEach(s => { out[s] = raw[s] * scale; });
+  return out;
+}
+
+/**
+ * Generic 1D root-finder for tuning a single parameter against a target scalar metric,
+ * replacing bisection with a gradient-informed step: at each iteration, the local
+ * derivative of the metric with respect to the (log-space) parameter is estimated via a
+ * finite difference, then the parameter is moved directly toward the target by an amount
+ * proportional to (targetGap / estimatedSlope) - equivalent to a gradient descent step on
+ * the squared-error loss (metric - target)^2, with the step size self-normalized by the
+ * local slope instead of a fixed learning rate. That self-normalization is what keeps it
+ * numerically stable across metrics with very different natural scales (a trigger rate
+ * near 1% vs an RTP near 100%) without per-phase learning-rate tuning.
+ *
+ * Parameterized in log-space (x = ln(param)) since every tuned parameter here is a
+ * positive multiplicative scale factor - a fixed step in x is a fixed *relative* change
+ * in param regardless of its current magnitude.
+ *
+ * Uses common random numbers for the finite difference: both probe points in a step share
+ * the same seed, so the estimated slope reflects the parameter change, not two independent
+ * noisy Monte Carlo draws (measure() is stochastic unless given a fixed seed).
+ *
+ * Costs up to 2 simulated measurements per iteration (vs 1 for plain bisection) - the
+ * probe measurement is skipped once tolerance is met or on the final iteration.
+ *
+ * @param {Object} args
+ * @param {number} args.initialParam - Starting parameter value (> 0).
+ * @param {number} args.minParam - Lower clamp (> 0).
+ * @param {number} args.maxParam - Upper clamp (>= minParam).
+ * @param {number} args.target - Target value for the metric.
+ * @param {number} args.tolerance - Stop early once |metric - target| <= tolerance.
+ * @param {(param: number) => Object} args.buildTrial - Builds a trial from a parameter value.
+ * @param {(measureResult: Object) => number} args.metricOf - Extracts the scalar metric from a measure() result.
+ * @param {(trial: Object, rngSeed: number) => Object} args.measure - Measures a trial (seeded, for CRN).
+ * @param {number} args.maxIterations - Number of gradient steps.
+ * @param {number} args.seedBase - Base seed for this phase's steps (offset per phase/mode to avoid correlated noise between phases).
+ * @param {(i: number, param: number, result: Object & {error: number}, best: Object) => (void|Promise<void>)} [args.onProgress]
+ * @param {() => Promise<void>} args.yieldToEventLoop
+ * @param {number} [args.trustFactor=0.8] - Fraction of the suggested step actually taken each
+ *   iteration (damping against noisy slope estimates); decays each step.
+ * @param {number} [args.trustFactorDecay=0.9]
+ * @param {number} [args.epsilon=0.05] - Finite-difference probe distance in log-space.
+ * @returns {Promise<{ mult: number, error: number, result: Object, paytable: Object }>}
+ */
+export async function gradientDescent1D({
+  initialParam, minParam, maxParam, target, tolerance,
+  buildTrial, metricOf, measure, maxIterations, seedBase,
+  onProgress, yieldToEventLoop,
+  trustFactor = 0.8, trustFactorDecay = 0.9, epsilon = 0.05,
+}) {
+  const minX = Math.log(minParam);
+  const maxX = Math.log(maxParam);
+  let x = Math.min(maxX, Math.max(minX, Math.log(initialParam)));
+  let trust = trustFactor;
+  let best = null;
+
+  for (let i = 0; i < maxIterations; i++) {
+    const stepSeed = seedBase + i * 7919;
+    const param = Math.exp(x);
+    const trial = buildTrial(param);
+    const result = measure(trial, stepSeed);
+    const metric = metricOf(result);
+    const error = Math.abs(metric - target);
+    const resultWithError = { ...result, error };
+    if (!best || error < best.error) best = { mult: param, error, result, paytable: trial };
+    if (onProgress) await onProgress(i, param, resultWithError, best);
+    await yieldToEventLoop();
+    if (error <= tolerance || i === maxIterations - 1) break;
+
+    const xProbe = Math.min(maxX, x + epsilon);
+    const dx = xProbe - x;
+    if (dx > 0) {
+      const probeResult = measure(buildTrial(Math.exp(xProbe)), stepSeed);
+      const slope = (metricOf(probeResult) - metric) / dx;
+      if (slope !== 0) {
+        const step = ((target - metric) / slope) * trust;
+        x = Math.min(maxX, Math.max(minX, x + step));
+      }
+    }
+    trust *= trustFactorDecay;
+  }
+
+  return best;
+}
+
 /**
  * Automatically tunes symbol `frequency` values in a paytable to hit a target RTP and a
  * target free-spin trigger rate - without touching any payout values. Runs the real
