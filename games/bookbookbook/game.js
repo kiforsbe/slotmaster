@@ -1,6 +1,7 @@
 // Game Coordinator for Book of Book Book Slot Machine
 import { SlotEngine } from '../../core/SlotEngine.js';
 import { PAYLINES, generateReel } from '../../core/SlotMath.js';
+import { tuneFrequencies } from '../../core/SpinSimulator.js';
 
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Frequencies tuned (with SlotMath's now-fixed payout math and generateReel's scatter
@@ -8,15 +9,15 @@ import { PAYLINES, generateReel } from '../../core/SlotMath.js';
 // around 0.5% of spins (~1 in 200), with 4+ books rare and 5+ books effectively astronomical.
 const PAYTABLE = {
   book:     { payout: [0,  0,   2,   20,  200], frequency: 0.045, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
-  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.075, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
-  tut:      { payout: [0,  5,  40,  400, 2000], frequency: 0.150, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Tutankhamun' },
-  anubis:   { payout: [0,  5,  30,  100,  750], frequency: 0.224, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
-  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.224, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
-  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
-  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
-  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
-  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
-  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.208, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
+  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.079, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
+  tut:      { payout: [0,  5,  40,  400, 2000], frequency: 0.157, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Tutankhamun' },
+  anubis:   { payout: [0,  5,  30,  100,  750], frequency: 0.235, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
+  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.235, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
+  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
+  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
+  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
+  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
+  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
 };
 
 // Symbols eligible to be picked as the free spins expanding symbol - anything that
@@ -35,7 +36,7 @@ const REEL_STRIPS = [
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let themeSelect, displayBalance, betValue, betMinus, betPlus, gameTicker;
-let btnSim, simModal, btnCloseSim;
+let btnSim, simModal, btnCloseSim, btnTune;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable, modalFsTrigger, modalFsSummary, btnStartFs, btnCloseFsSummary;
 let fsPanel, fsCounter, fsSymbolName, fsSymbolThumbnail;
@@ -105,7 +106,9 @@ function runSimulation() {
 
       // Always list every paytable symbol, even ones with zero recorded wins in this run,
       // so the breakdown reflects the full paytable rather than only what happened to hit.
-      const premiumSymbols = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type === 'premium');
+      // Book leads the Premium section even though its paytable type is 'scatter', since
+      // it's the game's headline symbol.
+      const premiumSymbols = ['book', ...Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type === 'premium')];
       const nonPremiumSymbols = Object.keys(PAYTABLE).filter(s => !premiumSymbols.includes(s));
 
       let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
@@ -142,7 +145,7 @@ function runSimulation() {
       const createSection = (title, symbols) => {
         if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
         let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
-        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">`;
+        sectionHtml += `<div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">`;
 
         symbols.forEach(symbol => {
           const stats = symbolStats[symbol] || { counts: {}, expanding: { counts: {} } };
@@ -182,7 +185,7 @@ function runSimulation() {
       detailsContainer.innerHTML = detailsHtml;
 
       simModal.style.display = 'block';
-      simModal.style.maxWidth = '900px';
+      simModal.style.maxWidth = '1200px';
       simModal.style.width = '95%';
     } catch (error) {
       console.error('Simulation failed:', error);
@@ -190,6 +193,88 @@ function runSimulation() {
     } finally {
       btnSim.textContent = 'RUN SIMULATION';
       btnSim.disabled = false;
+    }
+  }, 50);
+}
+
+// Runs the frequency auto-balancer (core/SpinSimulator.js: tuneFrequencies) against the
+// live PAYTABLE and shows the suggested frequencies side by side with the current ones.
+// This only reports a suggestion - it does not mutate PAYTABLE or the live reels, since
+// applying it means regenerating REEL_STRIPS and is a deliberate code change, not a runtime toggle.
+function runFrequencyTuner() {
+  if (!btnTune) return;
+
+  btnTune.textContent = 'TUNING...';
+  btnTune.disabled = true;
+
+  setTimeout(() => {
+    try {
+      const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = tuneFrequencies(PAYTABLE, {
+        targetRtp: 96,
+        targetTriggerRatePct: 0.6,
+        trialSpins: 300000,
+        trialsPerPoint: 2,
+        maxIterations: 10,
+        // tuneFrequencies runs fully synchronously, so the browser can't repaint between
+        // iterations - this only shows up in the console, not the (frozen) button label.
+        onProgress: (phase, i, mult, r) => {
+          console.log(`  [tuner ${phase} ${i}] mult=${mult.toFixed(4)} -> RTP=${r.rtp.toFixed(2)}% trigger=${r.triggerRate.toFixed(3)}%`);
+        }
+      });
+
+      let tuneContainer = document.getElementById('tune-details');
+      if (!tuneContainer) {
+        tuneContainer = document.createElement('div');
+        tuneContainer.id = 'tune-details';
+        tuneContainer.style.marginTop = '20px';
+        tuneContainer.style.padding = '15px';
+        tuneContainer.style.background = 'rgba(255, 255, 255, 0.1)';
+        tuneContainer.style.borderRadius = '12px';
+        tuneContainer.style.fontSize = '0.9em';
+        simModal.appendChild(tuneContainer);
+      } else {
+        tuneContainer.innerHTML = '';
+      }
+
+      let html = `<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner Suggestion</h3>`;
+      html += `<p style="font-size: 0.85em; color: #ccc; margin: 8px 0;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+      html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em; margin-top: 10px;">`;
+      html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
+                  <th style="text-align: left; padding: 4px;">Symbol</th>
+                  <th style="text-align: left; padding: 4px;">Type</th>
+                  <th style="text-align: right; padding: 4px;">Current Freq</th>
+                  <th style="text-align: right; padding: 4px;">Suggested Freq</th>
+                  <th style="text-align: right; padding: 4px;">Δ</th>
+                </tr></thead><tbody>`;
+      Object.keys(PAYTABLE).forEach(symbol => {
+        const current = PAYTABLE[symbol].frequency;
+        const suggested = tunedPaytable[symbol].frequency;
+        const delta = suggested - current;
+        const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
+        html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 4px;">${PAYTABLE[symbol].friendlyName || symbol}</td>
+                    <td style="padding: 4px; color: #999;">${PAYTABLE[symbol].type}</td>
+                    <td style="text-align: right; padding: 4px;">${current.toFixed(4)}</td>
+                    <td style="text-align: right; padding: 4px; font-weight: bold;">${suggested.toFixed(4)}</td>
+                    <td style="text-align: right; padding: 4px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
+                  </tr>`;
+      });
+      html += `</tbody></table>`;
+      html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by editing PAYTABLE's frequency values in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
+
+      tuneContainer.innerHTML = html;
+
+      simModal.style.display = 'block';
+      simModal.style.maxWidth = '900px';
+      simModal.style.width = '95%';
+
+      console.log('Frequency tuner diagnostics:', diagnostics);
+    } catch (error) {
+      console.error('Frequency tuning failed:', error);
+      alert('Error running frequency tuner');
+    } finally {
+      btnTune.textContent = 'TUNE FREQUENCIES';
+      btnTune.disabled = false;
     }
   }, 50);
 }
@@ -243,6 +328,7 @@ window.addEventListener('load', async () => {
   gameTicker = document.getElementById('game-ticker');
 
   btnSim = document.getElementById('btn-sim');
+  btnTune = document.getElementById('btn-tune');
   simModal = document.getElementById('sim-modal');
   btnCloseSim = document.getElementById('btn-close-sim');
 
@@ -280,6 +366,9 @@ window.addEventListener('load', async () => {
   // Setup Simulation Handlers
   if (btnSim) {
     btnSim.addEventListener('click', runSimulation);
+  }
+  if (btnTune) {
+    btnTune.addEventListener('click', runFrequencyTuner);
   }
   if (btnCloseSim) {
     btnCloseSim.addEventListener('click', () => {

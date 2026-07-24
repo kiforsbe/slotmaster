@@ -2,7 +2,7 @@
  * A pure functional simulator for the SlotMachine game logic.
  * It models spins without any visual or audio side effects.
  */
-import { checkWins, checkExpandingWins } from './SlotMath.js';
+import { checkWins, checkExpandingWins, generateReel } from './SlotMath.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis.
@@ -180,4 +180,178 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
 
     return { spinWin, winData, expandingResults };
   }
+}
+
+/**
+ * Automatically tunes symbol `frequency` values in a paytable to hit a target RTP and a
+ * target free-spin trigger rate - without touching any payout values. Runs the real
+ * simulator against candidate paytables, so it stays accurate to whatever SlotMath.js's
+ * actual win logic does at the time it's run (it doesn't hardcode any game-specific math).
+ *
+ * Strategy (mirrors manual balancing): symbols are grouped by `paytable[symbol].type`.
+ *  1. Scale every 'scatter' symbol's frequency together (bisection) until the free-spin
+ *     trigger rate lands on target, holding all other frequencies fixed.
+ *  2. Reallocate weight between 'premium' symbols and everything else non-scatter (a single
+ *     multiplier, bisected against RTP) while holding total non-scatter weight constant -
+ *     so the trigger rate found in step 1 is preserved exactly. If the paytable has no
+ *     'premium'-tagged symbols, every non-scatter symbol is scaled together instead.
+ *
+ * Both phases track the best candidate seen (not just the final bisection midpoint):
+ * generateReel() rounds symbol counts to whole numbers per reel, so the achievable trigger
+ * rate / RTP is quantized with occasional jumps rather than a smooth dial - plain bisection
+ * can straddle a jump without any single point landing inside the tolerance band.
+ *
+ * @param {Object} paytable - Paytable to tune (not mutated; a tuned clone is returned).
+ * @param {Object} [options]
+ * @param {number} [options.reelsCount=5]
+ * @param {number} [options.rowsCount=3]
+ * @param {number} [options.reelLength=220] - Virtual reel strip length passed to generateReel.
+ * @param {number[]} [options.reelSeeds] - Base seeds, one per reel (reused/offset if fewer than reelsCount).
+ * @param {number} [options.betPerLine=1]
+ * @param {number} [options.linesCount=10]
+ * @param {number} [options.targetRtp=96] - Target RTP as a percent (e.g. 96 for 96%).
+ * @param {number} [options.rtpTolerancePct=1.5] - Acceptable +/- band around targetRtp.
+ * @param {number} [options.targetTriggerRatePct=0.6] - Target % of spins that trigger free spins.
+ * @param {number} [options.triggerRateTolerancePct=0.15] - Acceptable +/- band around that.
+ * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
+ * @param {number} [options.trialsPerPoint=3] - Independent trials averaged per candidate (reduces rare-event noise).
+ * @param {number} [options.maxIterations=14] - Bisection steps per phase.
+ * @param {(phase: 'scatter'|'rtp', iteration: number, multiplier: number, result: {rtp:number, triggerRate:number}) => void} [options.onProgress]
+ * @returns {{ paytable: Object, rtp: number, triggerRatePct: number, diagnostics: Object }}
+ */
+export function tuneFrequencies(paytable, options = {}) {
+  const {
+    reelsCount = 5,
+    rowsCount = 3,
+    reelLength = 220,
+    reelSeeds = [1234, 567, 89, 765, 3321],
+    betPerLine = 1,
+    linesCount = 10,
+    targetRtp = 96,
+    rtpTolerancePct = 1.5,
+    targetTriggerRatePct = 0.6,
+    triggerRateTolerancePct = 0.15,
+    trialSpins = 800000,
+    trialsPerPoint = 3,
+    maxIterations = 14,
+    onProgress = null,
+  } = options;
+
+  if (!paytable || typeof paytable !== 'object') {
+    throw new Error('tuneFrequencies requires a paytable');
+  }
+
+  const basePaytable = JSON.parse(JSON.stringify(paytable));
+  const scatterSymbols = Object.keys(basePaytable).filter(s => basePaytable[s].type === 'scatter');
+  const premiumSymbols = Object.keys(basePaytable).filter(s => basePaytable[s].type === 'premium');
+  const otherSymbols = Object.keys(basePaytable)
+    .filter(s => !scatterSymbols.includes(s) && !premiumSymbols.includes(s));
+  const hasPremiumSplit = premiumSymbols.length > 0 && otherSymbols.length > 0;
+
+  function buildReelStrips(pt) {
+    const strips = [];
+    for (let i = 0; i < reelsCount; i++) {
+      strips.push(generateReel(pt, reelLength, reelSeeds[i % reelSeeds.length] + i * 100000));
+    }
+    return strips;
+  }
+
+  function measure(pt) {
+    const reelStrips = buildReelStrips(pt);
+    const config = { reelsCount, rowsCount, paytable: pt, reelStrips };
+    let rtpSum = 0, triggerSum = 0;
+    for (let i = 0; i < trialsPerPoint; i++) {
+      const results = simulateSpins(config, trialSpins, betPerLine, linesCount);
+      rtpSum += results.rtpRaw * 100;
+      triggerSum += (results.freeSpinsTriggered / results.baseSpins) * 100;
+    }
+    return { rtp: rtpSum / trialsPerPoint, triggerRate: triggerSum / trialsPerPoint };
+  }
+
+  // ---- Phase 1: scale scatter symbol(s) to hit the target trigger rate ----
+  let pt1 = basePaytable;
+  let scatterPhase = null;
+  if (scatterSymbols.length > 0) {
+    const scatterBaseFreq = {};
+    scatterSymbols.forEach(s => { scatterBaseFreq[s] = basePaytable[s].frequency; });
+
+    let lo = 0.05, hi = 8, best = null;
+    for (let i = 0; i < maxIterations; i++) {
+      // Geometric midpoint: trigger rate is a highly nonlinear (roughly power-law) function
+      // of scatter frequency, so bisecting in log-space converges much faster than linear.
+      const mid = Math.sqrt(lo * hi);
+      const trial = JSON.parse(JSON.stringify(basePaytable));
+      scatterSymbols.forEach(s => { trial[s].frequency = scatterBaseFreq[s] * mid; });
+      const result = measure(trial);
+      const error = Math.abs(result.triggerRate - targetTriggerRatePct);
+      if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
+      if (onProgress) onProgress('scatter', i, mid, result);
+      if (error <= triggerRateTolerancePct) break;
+      if (result.triggerRate < targetTriggerRatePct) lo = mid; else hi = mid;
+    }
+    scatterPhase = best;
+    pt1 = best.paytable;
+  }
+
+  // ---- Phase 2: reallocate premium vs. other non-scatter weight to hit the target RTP ----
+  // Total non-scatter weight is held fixed throughout, so scatter's share (and therefore
+  // the trigger rate locked in above) doesn't drift while RTP is being tuned.
+  const nonScatterSymbols = Object.keys(pt1).filter(s => !scatterSymbols.includes(s));
+  const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
+  let rtpPhase = null;
+
+  if (hasPremiumSplit) {
+    const premiumBaseTotal = premiumSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
+    const otherBaseTotal = otherSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
+    const premiumBaseFreq = {}; premiumSymbols.forEach(s => { premiumBaseFreq[s] = pt1[s].frequency; });
+    const otherBaseFreq = {}; otherSymbols.forEach(s => { otherBaseFreq[s] = pt1[s].frequency; });
+
+    // regularScale must stay positive - cap the multiplier short of consuming the whole budget.
+    const maxMult = (nonScatterTotal / premiumBaseTotal) * 0.98;
+    let lo = 0.1, hi = Math.max(maxMult, 0.11), best = null;
+    for (let i = 0; i < maxIterations; i++) {
+      const mid = (lo + hi) / 2;
+      const trial = JSON.parse(JSON.stringify(pt1));
+      const newPremiumTotal = premiumBaseTotal * mid;
+      const otherScale = Math.max((nonScatterTotal - newPremiumTotal) / otherBaseTotal, 0.001);
+      premiumSymbols.forEach(s => { trial[s].frequency = premiumBaseFreq[s] * mid; });
+      otherSymbols.forEach(s => { trial[s].frequency = otherBaseFreq[s] * otherScale; });
+      const result = measure(trial);
+      const error = Math.abs(result.rtp - targetRtp);
+      if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
+      if (onProgress) onProgress('rtp', i, mid, result);
+      if (error <= rtpTolerancePct) break;
+      if (result.rtp < targetRtp) lo = mid; else hi = mid;
+    }
+    rtpPhase = best;
+  } else if (nonScatterSymbols.length > 0) {
+    // No premium/other split available - scale every non-scatter symbol together instead.
+    const baseFreq = {}; nonScatterSymbols.forEach(s => { baseFreq[s] = pt1[s].frequency; });
+    let lo = 0.2, hi = 5, best = null;
+    for (let i = 0; i < maxIterations; i++) {
+      const mid = Math.sqrt(lo * hi);
+      const trial = JSON.parse(JSON.stringify(pt1));
+      nonScatterSymbols.forEach(s => { trial[s].frequency = baseFreq[s] * mid; });
+      const result = measure(trial);
+      const error = Math.abs(result.rtp - targetRtp);
+      if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
+      if (onProgress) onProgress('rtp', i, mid, result);
+      if (error <= rtpTolerancePct) break;
+      if (result.rtp < targetRtp) lo = mid; else hi = mid;
+    }
+    rtpPhase = best;
+  }
+
+  const finalPaytable = rtpPhase ? rtpPhase.paytable : pt1;
+  const finalResult = rtpPhase ? rtpPhase.result : measure(finalPaytable);
+
+  return {
+    paytable: finalPaytable,
+    rtp: finalResult.rtp,
+    triggerRatePct: finalResult.triggerRate,
+    diagnostics: {
+      scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, ...scatterPhase.result } : null,
+      rtpPhase: rtpPhase ? { multiplier: rtpPhase.mult, ...rtpPhase.result } : null,
+    }
+  };
 }
