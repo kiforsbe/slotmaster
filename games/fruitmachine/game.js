@@ -9,7 +9,7 @@ import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/Sim
 export const REELS_COUNT = 3;
 export const ROWS_COUNT = 3;
 export const REEL_LENGTH = 500;
-export const REEL_SEEDS = [1234, 567, 89];
+export const REEL_SEEDS = [123, 456, 789];
 // Paytable payouts (e.g. bar's 10x) were designed against a $1 total bet spread across
 // all 5 lines - i.e. 20 cents per line, not $1 per line - so the default/minimum
 // per-line bet is set to match that unit.
@@ -40,17 +40,16 @@ export const PAYLINES = [
 // multiplier gives a real $0.40 win at the default bet, matching the original cents-based
 // design (40c/80c/$1.60 for 1/2/3 cherries, $10 for 3 bars, etc. at a 20-cent line bet).
 export const PAYTABLE = {
-  bar:        { payout: [0.00, 0.00, 50.00], frequency:  5.806, type: 'premium', friendlyName: 'Bar' },
-  clover:     { payout: [0.00, 0.00, 20.00], frequency:  1.611, type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
-  pear:       { payout: [0.00, 0.00, 15.00], frequency:  1.814, type: 'regular', friendlyName: 'Pear',       wildPenalty: 1 },
-  melon:      { payout: [0.00, 0.00, 15.00], frequency:  1.814, type: 'regular', friendlyName: 'Watermelon', wildPenalty: 1 },
-  grapes:     { payout: [0.00, 0.00, 10.00], frequency:  2.018, type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
-  plum:       { payout: [0.00, 0.00, 10.00], frequency:  8.018, type: 'regular', friendlyName: 'Plum' },
-  orange:     { payout: [0.00, 0.00,  8.00], frequency:  8.425, type: 'regular', friendlyName: 'Orange' },
-  cherries:   { payout: [2.00, 4.00,  8.00], frequency: 12.036, type: 'regular', friendlyName: 'Cherries' },
-  star:       { payout: [0.00, 0.00,  0.00], frequency: 16.611, type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries', 'bar'] },
-  // Not a wild - always pays aloneBonus on reel 3 regardless of what's on reels 1-2.
-  strawberry: { payout: [0.00, 0.00,  0.00], frequency: 16.009, type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 4.00 },
+  bar:        { payout: [0.00, 0.00, 50.00], type: 'premium', friendlyName: 'Bar' },
+  clover:     { payout: [0.00, 0.00, 20.00], type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
+  pear:       { payout: [0.00, 0.00, 15.00], type: 'regular', friendlyName: 'Pear',       wildPenalty: 1 },
+  melon:      { payout: [0.00, 0.00, 15.00], type: 'regular', friendlyName: 'Watermelon', wildPenalty: 1 },
+  grapes:     { payout: [0.00, 0.00, 10.00], type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
+  plum:       { payout: [0.00, 0.00, 10.00], type: 'regular', friendlyName: 'Plum' },
+  orange:     { payout: [0.00, 0.00,  8.00], type: 'regular', friendlyName: 'Orange' },
+  cherries:   { payout: [2.00, 4.00,  8.00], type: 'regular', friendlyName: 'Cherries' },
+  star:       { payout: [0.00, 0.00,  0.00], type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries', 'bar'] },
+  strawberry: { payout: [0.00, 0.00,  0.00], type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 4.00 },
 };
 
 export const FREQUENCY_REEL1 = {
@@ -99,9 +98,9 @@ export const FREQUENCY_REEL3 = {
 // );
 
 export const REEL_STRIPS = [
-  generateReel(FREQUENCY_REEL1, 24, REEL_SEEDS[0]),
-  generateReel(FREQUENCY_REEL2, 24, REEL_SEEDS[1]),
-  generateReel(FREQUENCY_REEL3, 24, REEL_SEEDS[2]),
+  generateReel(FREQUENCY_REEL1, REEL_LENGTH, REEL_SEEDS[0]),
+  generateReel(FREQUENCY_REEL2, REEL_LENGTH, REEL_SEEDS[1]),
+  generateReel(FREQUENCY_REEL3, REEL_LENGTH, REEL_SEEDS[2]),
 ];
 
 // UI Dom Selectors - initialized in load handler
