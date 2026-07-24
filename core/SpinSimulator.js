@@ -186,6 +186,36 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   }
 }
 
+// Deterministic PRNG (mulberry32) so a given searchSeed always explores the same sequence
+// of candidate distributions - reproducible tuning runs, same as generateReel's seeding.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Ranks symbols by descending payout (highest single-line payout = rank 0), tying symbols
+// with equal payout to the same rank so their relative weight is preserved as a group.
+function computeValueRanks(paytable, symbols) {
+  const payoutOf = (s) => {
+    const arr = paytable[s].payout;
+    return arr && arr.length ? arr[arr.length - 1] : 0;
+  };
+  const sorted = [...symbols].sort((a, b) => payoutOf(b) - payoutOf(a));
+  const rankOf = {};
+  let rank = -1, lastPayout = null;
+  for (const s of sorted) {
+    const p = payoutOf(s);
+    if (p !== lastPayout) { rank++; lastPayout = p; }
+    rankOf[s] = rank;
+  }
+  return rankOf;
+}
+
 /**
  * Automatically tunes symbol `frequency` values in a paytable to hit a target RTP and a
  * target free-spin trigger rate - without touching any payout values. Runs the real
@@ -195,12 +225,25 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
  * Strategy (mirrors manual balancing): symbols are grouped by `paytable[symbol].type`.
  *  1. Scale every 'scatter' symbol's frequency together (bisection) until the free-spin
  *     trigger rate lands on target, holding all other frequencies fixed.
- *  2. Reallocate weight between 'premium' symbols and everything else non-scatter (a single
- *     multiplier, bisected against RTP) while holding total non-scatter weight constant -
- *     so the trigger rate found in step 1 is preserved exactly. If the paytable has no
- *     'premium'-tagged symbols, every non-scatter symbol is scaled together instead.
+ *  2. Reallocate non-scatter weight to hit the target RTP, holding total non-scatter weight
+ *     constant so the trigger rate found in step 1 is preserved exactly. `options.frequencyMode`
+ *     picks the reallocation strategy:
+ *       - 'premiumSplit' (default): a single multiplier moves weight between 'premium'-typed
+ *         symbols and everything else. Simple, but for paytables where the premium symbol is
+ *         the only one with a payout meaningfully above the rest, hitting a high target RTP
+ *         can force that symbol to become common - the exact "highest payer, most frequent"
+ *         outcome slot design usually avoids. If there's no 'premium' type, every non-scatter
+ *         symbol is scaled together instead.
+ *       - 'rankTilt': symbols (excluding wilds by default) are ranked by payout and a single
+ *         bisected tilt parameter shifts weight toward the lower-paying tiers as it grows -
+ *         guaranteed by construction to never make a higher-paying symbol more frequent than
+ *         a lower-paying one. May not reach the target RTP if the paytable's payout ceilings
+ *         are too low for common symbols to carry it alone (see diagnostics.rtpPhase.error).
+ *       - 'randomSearch': samples many random monotonic (by payout) weight distributions
+ *         and keeps the one closest to target RTP, so the search isn't limited to a single
+ *         tilt shape. Reports its best few attempts in diagnostics.rtpPhase.topCandidates.
  *
- * Both phases track the best candidate seen (not just the final bisection midpoint):
+ * Both bisection phases track the best candidate seen (not just the final bisection midpoint):
  * generateReel() rounds symbol counts to whole numbers per reel, so the achievable trigger
  * rate / RTP is quantized with occasional jumps rather than a smooth dial - plain bisection
  * can straddle a jump without any single point landing inside the tolerance band.
@@ -219,8 +262,18 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
  * @param {number} [options.triggerRateTolerancePct=0.15] - Acceptable +/- band around that.
  * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
  * @param {number} [options.trialsPerPoint=3] - Independent trials averaged per candidate (reduces rare-event noise).
- * @param {number} [options.maxIterations=14] - Bisection steps per phase.
- * @param {(phase: 'scatter'|'rtp', iteration: number, multiplier: number, result: {rtp:number, triggerRate:number}, best: {mult:number, error:number, result:Object, paytable:Object}) => (void|Promise<void>)} [options.onProgress] -
+ * @param {number} [options.maxIterations=14] - Bisection steps (or random trials) per phase.
+ * @param {'premiumSplit'|'rankTilt'|'randomSearch'} [options.frequencyMode='premiumSplit'] - RTP reallocation strategy, see above.
+ * @param {string[]} [options.valueOrderExcludeTypes=['wild']] - Symbol `type`s excluded from the
+ *   payout-order ranking in 'rankTilt'/'randomSearch' (held fixed at their post-scatter-phase
+ *   frequency instead) - wilds don't "pay" in the normal sense, so ranking them by payout would
+ *   nonsensically treat them as the cheapest, most-common tier.
+ * @param {[number, number]} [options.tiltBounds=[1, 40]] - Search bounds for the tilt parameter shared by
+ *   'rankTilt' (bisected) and 'randomSearch' (sampled log-uniformly). Values below 1 are clamped up to 1 -
+ *   the tilt is a per-tier growth multiplier, and anything below 1 would shrink lower-paying tiers'
+ *   share back below the top tier's, inverting the ordering guarantee these modes exist to provide.
+ * @param {number} [options.searchSeed=12345] - PRNG seed for 'randomSearch', for reproducible runs.
+ * @param {(phase: 'scatter'|'rtp'|'shape', iteration: number, multiplier: number|null, result: {rtp:number, triggerRate:number}, best: {mult:number, error:number, result:Object, paytable:Object}) => (void|Promise<void>)} [options.onProgress] -
  *   Called (and awaited, if it returns a promise) after each candidate is measured, before yielding to the
  *   event loop - a caller can safely touch the DOM here and see it rendered before the next (heavier) candidate runs.
  * @returns {Promise<{ paytable: Object, rtp: number, triggerRatePct: number, diagnostics: Object }>}
@@ -244,6 +297,10 @@ export async function tuneFrequencies(paytable, options = {}) {
     trialSpins = 800000,
     trialsPerPoint = 3,
     maxIterations = 14,
+    frequencyMode = 'premiumSplit',
+    valueOrderExcludeTypes = ['wild'],
+    tiltBounds = [1, 40],
+    searchSeed = 12345,
     onProgress = null,
   } = options;
 
@@ -310,14 +367,108 @@ export async function tuneFrequencies(paytable, options = {}) {
     pt1 = best.paytable;
   }
 
-  // ---- Phase 2: reallocate premium vs. other non-scatter weight to hit the target RTP ----
+  // ---- Phase 2: reallocate non-scatter weight to hit the target RTP ----
   // Total non-scatter weight is held fixed throughout, so scatter's share (and therefore
   // the trigger rate locked in above) doesn't drift while RTP is being tuned.
   const nonScatterSymbols = Object.keys(pt1).filter(s => !scatterSymbols.includes(s));
   const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
   let rtpPhase = null;
 
-  if (hasPremiumSplit) {
+  if (frequencyMode === 'rankTilt' || frequencyMode === 'randomSearch') {
+    const fixedShapeSymbols = nonScatterSymbols.filter(s => valueOrderExcludeTypes.includes(pt1[s].type));
+    const valueSymbols = nonScatterSymbols.filter(s => !valueOrderExcludeTypes.includes(pt1[s].type));
+    const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
+    const valueBudget = nonScatterTotal - fixedShapeTotal;
+
+    if (valueSymbols.length > 0 && valueBudget > 0) {
+      const rankOf = computeValueRanks(pt1, valueSymbols);
+      const baseFreq = {}; valueSymbols.forEach(s => { baseFreq[s] = pt1[s].frequency; });
+
+      // Renormalizes a set of per-symbol raw weights to valueBudget, applied to a clone of
+      // pt1 with the excluded types (e.g. wilds) left untouched at their Phase 1 frequency.
+      function buildTrial(raw) {
+        const rawTotal = Object.values(raw).reduce((a, b) => a + b, 0);
+        const scale = valueBudget / rawTotal;
+        const trial = JSON.parse(JSON.stringify(pt1));
+        valueSymbols.forEach(s => { trial[s].frequency = raw[s] * scale; });
+        return trial;
+      }
+
+      // Tilt values below 1 would shrink higher-rank (lower-paying) tiers' multiplier below
+      // the top tier's fixed 1x, pulling weight back toward the top and inverting the very
+      // ordering guarantee these two modes exist to provide - so 1 is a hard floor
+      // regardless of what tiltBounds is passed.
+      const tiltLo = Math.max(1, tiltBounds[0]);
+      const tiltHi = Math.max(tiltLo, tiltBounds[1]);
+
+      if (frequencyMode === 'rankTilt') {
+        // A single tilt parameter t: at t=1, the original per-tier shape is preserved
+        // (just renormalized to valueBudget). As t grows, weight shifts toward higher-rank
+        // (lower-paying) tiers exponentially faster than lower-rank ones, so a higher-paying
+        // symbol can never end up more frequent than a lower-paying one - unlike premiumSplit,
+        // which only has two groups to trade weight between.
+        let lo = tiltLo, hi = tiltHi, best = null;
+        for (let i = 0; i < maxIterations; i++) {
+          const mid = Math.sqrt(lo * hi);
+          const raw = {}; valueSymbols.forEach(s => { raw[s] = baseFreq[s] * Math.pow(mid, rankOf[s]); });
+          const trial = buildTrial(raw);
+          const result = measure(trial);
+          const error = Math.abs(result.rtp - targetRtp);
+          if (!best || error < best.error) best = { mult: mid, error, result, paytable: trial };
+          if (onProgress) await onProgress('shape', i, mid, result, best);
+          await yieldToEventLoop();
+          if (error <= rtpTolerancePct) break;
+          if (result.rtp < targetRtp) lo = mid; else hi = mid;
+        }
+        rtpPhase = best;
+      } else {
+        // randomSearch: sample many candidate distributions instead of committing to one
+        // tilt shape. Each trial draws its own log-uniform tilt across the full [tiltLo,
+        // tiltHi] range (so the same fully-concentrated extremes rankTilt can reach are
+        // reachable here too) plus independent per-tier jitter - jitter is bounded to
+        // [1, 1.5] so every per-tier growth step is still >=1x, preserving the same
+        // "higher payout, lower frequency" guarantee on every single sampled candidate.
+        const maxRank = Math.max(...Object.values(rankOf));
+        const tiers = [];
+        for (let r = 0; r <= maxRank; r++) tiers.push(valueSymbols.filter(s => rankOf[s] === r));
+        const rng = mulberry32(searchSeed);
+
+        let best = null;
+        const attempts = [];
+        for (let i = 0; i < maxIterations; i++) {
+          const tilt = tiltLo * Math.pow(tiltHi / tiltLo, rng());
+          const tierWeight = new Array(maxRank + 1);
+          tierWeight[0] = 1;
+          for (let r = 1; r <= maxRank; r++) {
+            const jitter = 1 + rng() * 0.5;
+            tierWeight[r] = tierWeight[r - 1] * tilt * jitter;
+          }
+          const raw = {};
+          tiers.forEach((tierSymbols, r) => {
+            const tierBaseTotal = tierSymbols.reduce((sum, s) => sum + baseFreq[s], 0) || 1;
+            tierSymbols.forEach(s => { raw[s] = tierWeight[r] * (baseFreq[s] / tierBaseTotal); });
+          });
+          const trial = buildTrial(raw);
+          const result = measure(trial);
+          const error = Math.abs(result.rtp - targetRtp);
+          const candidate = { mult: tilt, error, result, paytable: trial };
+          if (!best || error < candidate.error) best = candidate;
+          attempts.push(candidate);
+          if (onProgress) await onProgress('shape', i, tilt, result, best);
+          await yieldToEventLoop();
+          if (error <= rtpTolerancePct) break;
+        }
+        attempts.sort((a, b) => a.error - b.error);
+        best.topCandidates = attempts.slice(0, 5).map(c => ({
+          rtp: c.result.rtp,
+          triggerRate: c.result.triggerRate,
+          error: c.error,
+          frequencies: Object.fromEntries(valueSymbols.map(s => [s, c.paytable[s].frequency])),
+        }));
+        rtpPhase = best;
+      }
+    }
+  } else if (hasPremiumSplit) {
     const premiumBaseTotal = premiumSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
     const otherBaseTotal = otherSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
     const premiumBaseFreq = {}; premiumSymbols.forEach(s => { premiumBaseFreq[s] = pt1[s].frequency; });
@@ -370,7 +521,11 @@ export async function tuneFrequencies(paytable, options = {}) {
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
       scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, ...scatterPhase.result } : null,
-      rtpPhase: rtpPhase ? { multiplier: rtpPhase.mult, ...rtpPhase.result } : null,
+      rtpPhase: rtpPhase ? {
+        multiplier: rtpPhase.mult,
+        ...rtpPhase.result,
+        ...(rtpPhase.topCandidates ? { topCandidates: rtpPhase.topCandidates } : {}),
+      } : null,
     }
   };
 }

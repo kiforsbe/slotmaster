@@ -290,7 +290,20 @@ export function openTuneFrequenciesPanel({ paytable, tuneConfig, domRefs }) {
         <label style="font-size: 0.8em; color: #ccc;">Max Iterations / Phase<br>
           <input id="tune-max-iterations" type="number" value="10" step="1" min="3" max="30" style="width: 100%; margin-top: 4px;">
         </label>
+        <label style="font-size: 0.8em; color: #ccc;">Frequency Mode<br>
+          <select id="tune-frequency-mode" style="width: 100%; margin-top: 4px;">
+            <option value="premiumSplit">Premium / Other Split</option>
+            <option value="rankTilt">Rank Tilt (value-ordered)</option>
+            <option value="randomSearch">Random Search (value-ordered)</option>
+          </select>
+        </label>
       </div>
+      <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
+        Premium/Other Split can make the highest-paying symbol the most frequent one if that's the only way
+        to hit target RTP. Rank Tilt and Random Search instead guarantee every symbol stays no more frequent
+        than any lower-paying one - but for some paytables the target RTP may not be reachable under that
+        constraint (achieved RTP will fall short; see the result below).
+      </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
@@ -316,6 +329,7 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     trialSpins: tuneContainer.querySelector('#tune-trial-spins'),
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
+    frequencyMode: tuneContainer.querySelector('#tune-frequency-mode'),
   };
 
   const options = {
@@ -334,6 +348,7 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 10,
+    frequencyMode: inputs.frequencyMode.value,
   };
 
   Object.values(inputs).forEach(el => { el.disabled = true; });
@@ -354,8 +369,9 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(paytable, {
       ...options,
       onProgress: (phase, i, mult, r, best) => {
-        const label = phase === 'scatter' ? 'Scatter frequency' : 'Premium/regular split';
-        appendLog(`[${label} ${i + 1}] RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  (best so far: err=${best.error.toFixed(4)})`);
+        const labels = { scatter: 'Scatter frequency', shape: `Frequency shape (${options.frequencyMode})`, rtp: 'Premium/regular split' };
+        const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
+        appendLog(`[${labels[phase] || phase} ${i + 1}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  (best so far: err=${best.error.toFixed(4)})`);
       }
     });
 
@@ -363,6 +379,35 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     console.log('Frequency tuner diagnostics:', diagnostics);
 
     let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+
+    const targetRtp = options.targetRtp;
+    if (Math.abs(rtp - targetRtp) > (options.rtpTolerancePct ?? 1.5)) {
+      html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
+                 Target RTP (${targetRtp}%) wasn't reached under the "${options.frequencyMode}" ordering constraint - this paytable's
+                 payout ceilings may not allow ${targetRtp}% RTP while keeping every symbol no more frequent than a lower-paying one.
+                 This is the closest distribution found, not an error.
+               </p>`;
+    }
+
+    const topCandidates = diagnostics.rtpPhase?.topCandidates;
+    if (topCandidates && topCandidates.length > 0) {
+      html += `<div style="margin-bottom: 12px;">
+                 <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Other distributions tried (best 5)</span>
+                 <table style="width: 100%; border-collapse: collapse; font-size: 0.8em; margin-top: 4px;">
+                   <thead><tr style="color: #888; font-size: 0.85em;">
+                     <th style="text-align: left; padding: 2px 4px;">#</th>
+                     <th style="text-align: right; padding: 2px 4px;">RTP</th>
+                     <th style="text-align: right; padding: 2px 4px;">Trigger</th>
+                   </tr></thead><tbody>`;
+      topCandidates.forEach((c, idx) => {
+        html += `<tr><td style="padding: 2px 4px;">${idx + 1}</td>
+                     <td style="text-align: right; padding: 2px 4px;">${c.rtp.toFixed(2)}%</td>
+                     <td style="text-align: right; padding: 2px 4px;">${c.triggerRate.toFixed(3)}%</td>
+                   </tr>`;
+      });
+      html += `</tbody></table></div>`;
+    }
+
     html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">`;
     html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
                 <th style="text-align: left; padding: 4px;">Symbol</th>
