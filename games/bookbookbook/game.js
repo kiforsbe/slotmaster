@@ -252,13 +252,45 @@ function openTunePanel() {
 }
 
 // Renders a tuned paytable back out as a paste-ready `const PAYTABLE = { ... }` literal,
-// in the same shape/key order game.js already uses, so the only thing that visibly changes
-// versus the current source is each symbol's frequency value.
+// column-aligned the same way the hand-written PAYTABLE in this file is: keys padded so
+// every `{` lines up, each payout column right-aligned to its own width, and every other
+// field padded so the next field's key starts in the same column on every row.
 function formatPaytableForCopy(pt) {
-  const lines = Object.entries(pt).map(([symbol, data]) => {
-    const payoutStr = `[${data.payout.join(', ')}]`;
-    return `  ${symbol}: { payout: ${payoutStr}, frequency: ${data.frequency.toFixed(4)}, type: '${data.type}', paymode: '${data.paymode}', wild: ${data.wild}, triggerFreeSpins: ${data.triggerFreeSpins}, friendlyName: '${data.friendlyName}' },`;
+  const symbols = Object.keys(pt);
+  if (symbols.length === 0) return 'const PAYTABLE = {};';
+
+  const keyWidth = Math.max(...symbols.map(s => s.length + 1)); // +1 for the colon
+
+  const payoutLen = pt[symbols[0]].payout.length;
+  const payoutColWidths = Array.from({ length: payoutLen }, (_, col) =>
+    Math.max(...symbols.map(s => String(pt[s].payout[col]).length))
+  );
+  const fmtPayout = (arr) =>
+    '[' + arr.map((v, i) => String(v).padStart(payoutColWidths[i])).join(', ') + ']';
+
+  // Renders one `key: value,` field for every symbol, then pads each to the widest
+  // rendering so the field that follows starts in the same column on every line.
+  const fmtField = (renderFn) => {
+    const rendered = {};
+    symbols.forEach(s => { rendered[s] = renderFn(s); });
+    const width = Math.max(...symbols.map(s => rendered[s].length));
+    const padded = {};
+    symbols.forEach(s => { padded[s] = rendered[s].padEnd(width); });
+    return padded;
+  };
+
+  const freqField = fmtField(s => `frequency: ${pt[s].frequency.toFixed(3)},`);
+  const typeField = fmtField(s => `type: '${pt[s].type}',`);
+  const paymodeField = fmtField(s => `paymode: '${pt[s].paymode}',`);
+  const wildField = fmtField(s => `wild: ${pt[s].wild},`);
+  const triggerField = fmtField(s => `triggerFreeSpins: ${pt[s].triggerFreeSpins},`);
+
+  const lines = symbols.map(symbol => {
+    const data = pt[symbol];
+    const keyPart = `${symbol}:`.padEnd(keyWidth);
+    return `  ${keyPart} { payout: ${fmtPayout(data.payout)}, ${freqField[symbol]} ${typeField[symbol]} ${paymodeField[symbol]} ${wildField[symbol]} ${triggerField[symbol]} friendlyName: '${data.friendlyName}' },`;
   });
+
   return `const PAYTABLE = {\n${lines.join('\n')}\n};`;
 }
 
