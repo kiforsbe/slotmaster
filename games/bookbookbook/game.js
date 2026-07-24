@@ -18,7 +18,7 @@ const LINES_COUNT = 10;
 // min-gap enforcement) to land near 96% RTP while keeping the book/scatter trigger rate
 // around 0.5% of spins (~1 in 200), with 4+ books rare and 5+ books effectively astronomical.
 const PAYTABLE = {
-  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.046, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
+  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.051, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
   explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.079, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
   tut:      { payout: [0,  5,  40,  400, 2000], frequency: 0.157, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Tutankhamun' },
   anubis:   { payout: [0,  5,  30,  100,  750], frequency: 0.234, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
