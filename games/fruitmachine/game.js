@@ -10,7 +10,12 @@ export const REELS_COUNT = 3;
 export const ROWS_COUNT = 3;
 export const REEL_LENGTH = 300;
 export const REEL_SEEDS = [1234, 567, 89];
-export const BET_PER_LINE = 1;
+// Paytable payouts (e.g. bar's 10x) were designed against a $1 total bet spread across
+// all 5 lines - i.e. 20 cents per line, not $1 per line - so the default/minimum
+// per-line bet is set to match that unit.
+export const BET_PER_LINE = 0.20;
+export const BET_PER_LINE_STEP = 0.20;
+export const BET_PER_LINE_MAX = 20;
 export const LINES_COUNT = 5;
 
 // Payline definitions - 3 reels x 3 rows: the three horizontal rows, plus the two true
@@ -180,7 +185,7 @@ async function initGame() {
 function updateUI() {
   if (!engine) return;
   displayBalance.textContent = `$${engine.balance.toFixed(2)}`;
-  betValue.textContent = engine.betPerLine;
+  betValue.textContent = engine.betPerLine.toFixed(2);
   linesValue.textContent = `${engine.linesCount} / ${LINES_COUNT}`;
   displayTotalBet.textContent = `$${engine.totalBet.toFixed(2)}`;
 }
@@ -220,8 +225,9 @@ function setupUIHandlers() {
 
   betMinus.addEventListener('click', () => {
     if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
-    if (engine.betPerLine > 1) {
-      engine.betPerLine--;
+    if (engine.betPerLine > BET_PER_LINE_STEP + 1e-9) {
+      // Round to 2dp - repeated 0.20 steps otherwise drift (e.g. 0.6000000000000001).
+      engine.betPerLine = Math.round((engine.betPerLine - BET_PER_LINE_STEP) * 100) / 100;
       engine.updateBet();
       updateUI();
     }
@@ -229,9 +235,9 @@ function setupUIHandlers() {
 
   betPlus.addEventListener('click', () => {
     if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
-    const newBetPerLine = engine.betPerLine + 1;
+    const newBetPerLine = Math.round((engine.betPerLine + BET_PER_LINE_STEP) * 100) / 100;
     const newTotalBet = newBetPerLine * engine.linesCount;
-    if (newBetPerLine <= 100 && engine.balance >= newTotalBet) {
+    if (newBetPerLine <= BET_PER_LINE_MAX + 1e-9 && engine.balance >= newTotalBet) {
       engine.betPerLine = newBetPerLine;
       engine.updateBet();
       updateUI();
