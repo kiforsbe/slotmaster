@@ -1,5 +1,5 @@
 // Core Slot Game Engine Renderer & State Controller
-import { checkWins, checkExpandingWins, PAYLINES } from './SlotMath.js';
+import { checkWins, checkExpandingWins, PAYLINES, createSeededRng, generateTargetGrid } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
 
@@ -128,12 +128,13 @@ export class SlotEngine {
       this.reels.push({
         symbols: symbols,           // Array of symbol names (e.g. ['tut', 'jack', 'ace', ...])
         offsetY: 0,                 // Vertical scrolling pixel offset
-        speed: 0,                   // Speed in pixels/frame
-        state: 'idle',              // idle, spinning, stopping, bounce
+        speed: 0,                   // Speed in pixels/frame - cosmetic, only used while 'spinning'
+        state: 'idle',              // idle, spinning, landing, bounce
         strip: strip,               // The reel strip configuration
         targetStopIndex: 0,         // Index of strip where it should stop
-        stopDelay: 0,               // Millisecond delay before stopping
-        feedIndex: 0,
+        landStartTime: 0,           // Date.now()-scale timestamp when landing begins (set by spin())
+        landElapsedStart: 0,        // Date.now()-scale timestamp when landing actually started
+        landDuration: 0,            // ms the landing tween takes; set per-spin (turbo vs normal)
         bounceProgress: 0,          // For reel stop bounce animation
         bounceDirection: 1          // 1 down, -1 up
       });
@@ -226,7 +227,6 @@ export class SlotEngine {
     //     state: r.state,
     //     speed: r.speed.toFixed(1),
     //     offsetY: r.offsetY.toFixed(1),
-    //     feedIdx: r.feedIndex,
     //     visible: [r.symbols[1], r.symbols[2], r.symbols[3]]
     //   }));
     //   console.log(`[STATE] engine.state=${this.state}, spinStart=${this.spinStart}, elapsed=${(now - this.spinStart).toFixed(0)}ms, reels:`, JSON.stringify(reelStates));
@@ -250,97 +250,74 @@ export class SlotEngine {
       
       if (reel.state === 'spinning') {
         allStopped = false;
-        
-        // Acceleration
+
+        // Acceleration - cosmetic only. Correctness never depends on speed/timing here:
+        // landing is scheduled for a precomputed instant below, not detected by watching
+        // this physics converge, so it can never overshoot or undershoot the target.
         const maxSpeed = this.turboMode ? 80 : 50;
         if (reel.speed < maxSpeed) {
           reel.speed += 3;
         }
-        
+
         reel.offsetY += reel.speed;
-        
-        // Wrap offset around symbol boundary
+
+        // Wrap offset around symbol boundary, feeding random decorative symbols while spinning
         if (reel.offsetY >= this.symbolHeight) {
           const shiftCount = Math.floor(reel.offsetY / this.symbolHeight);
           reel.offsetY = reel.offsetY % this.symbolHeight;
-          
-          // Shift symbols down, generate new at the top
+
           for (let s = 0; s < shiftCount; s++) {
             reel.symbols.pop();
             reel.symbols.unshift(this.getRandomSymbol(reel.strip));
           }
         }
-        
-        // Check if it's time to stop this reel
-        const spinTimeElapsed = now - this.spinStart;
-        if (spinTimeElapsed > reel.stopDelay) {
-          if (this.debugMode) console.log(`[Debug] Reel ${r} transitioning to stopping at ${now}`);
-          reel.state = 'stopping';
-          // Set engine state to 'stopping' when first reel starts stopping
+
+        // Landing begins at a precomputed instant (set in spin()): reel.landStartTime =
+        // spinStart + stopDelay - landDuration. The moment it begins, the final symbols are
+        // set once, directly - not fed in incrementally based on distance traveled - so
+        // there's nothing left to detect and nothing that can overshoot.
+        if (now >= reel.landStartTime) {
+          if (this.debugMode) console.log(`[Debug] Reel ${r} entering landing at ${now}`);
+          reel.symbols = [
+            this.getRandomSymbol(reel.strip),
+            this.targetGrid[r][0],
+            this.targetGrid[r][1],
+            this.targetGrid[r][2],
+            this.getRandomSymbol(reel.strip),
+            this.getRandomSymbol(reel.strip)
+          ];
+          reel.offsetY = this.symbolHeight;
+          reel.speed = 0;
+          reel.state = 'landing';
+          reel.landElapsedStart = now;
+
+          // Set engine state to 'stopping' when the first reel starts landing
           if (this.state === 'spinning') {
             this.state = 'stopping';
             this.config.onStateChange(this.state);
           }
         }
-      } 
-      else if (reel.state === 'stopping') {
+      }
+      else if (reel.state === 'landing') {
         allStopped = false;
 
-        // Decelerate slowly
-        const minSpeed = 8;
-        if (reel.speed > minSpeed) {
-          reel.speed *= 0.90;
-        } else {
-          reel.speed = minSpeed;
-        }
+        const elapsed = now - reel.landElapsedStart;
+        const progress = Math.min(elapsed / reel.landDuration, 1);
+        reel.offsetY = this.symbolHeight * (1 - this.easeOutCubic(progress));
 
-        reel.offsetY += reel.speed;
-
-        if (reel.offsetY >= this.symbolHeight) {
-          const rawShiftCount = Math.floor(reel.offsetY / this.symbolHeight);
-          // Filling the visible window (indices 1..rowsCount) takes rowsCount unshifts to feed
-          // the target column in, PLUS one more "settle" shift to carry that freshly-fed run
-          // out of the hidden index-0 slot and into the visible window - so the correct total is
-          // rowsCount + 1, not rowsCount. (Capping at rowsCount alone leaves the visible window
-          // permanently one shift short of matching - it never resolves, at any speed.)
-          // Beyond that point, any further shift pushes a NEW symbol to index 0 and shoves the
-          // already-correct visible symbols out of alignment again, so it still must be capped:
-          // a high enough reel speed (turbo's maxSpeed in particular) can travel more than
-          // rowsCount+1 symbol-heights while decelerating, corrupting the match indefinitely.
-          const totalShiftsNeeded = this.config.rowsCount + 1;
-          const remaining = Math.max(totalShiftsNeeded - reel.feedIndex, 0);
-          const shiftCount = Math.min(rawShiftCount, remaining);
-          reel.offsetY = reel.offsetY % this.symbolHeight;
-
-          for (let s = 0; s < shiftCount; s++) {
-            reel.symbols.pop();
-            const targetIdx = this.config.rowsCount - 1 - reel.feedIndex;
-            // The final settle shift (targetIdx < 0) lands in the hidden above-buffer slot,
-            // so its content doesn't matter - any filler symbol works.
-            const targetSymbol = targetIdx >= 0 ? this.targetGrid[r][targetIdx] : this.getRandomSymbol(reel.strip);
-            reel.feedIndex++;
-            reel.symbols.unshift(targetSymbol);
-          }
-        }
-
-        // Check if we reached the final alignment spot (offsetY near 0, symbols align)
-        // We match when we have exactly the final symbols loaded on the display reels.
-        const visibleSymbols = [reel.symbols[1], reel.symbols[2], reel.symbols[3]];
-        const targetSymbols = this.targetGrid[r];
-        const matchesTarget = this.checkReelMatchesTarget(r);
         if (this.debugMode && r === 0 && this.frameCount % 60 === 0) {
-          console.log(`[STOP] Reel ${r}: state=stopping, speed=${reel.speed.toFixed(1)}, offsetY=${reel.offsetY.toFixed(1)}, feedIdx=${reel.feedIndex}, visible=${JSON.stringify(visibleSymbols)}, target=${JSON.stringify(targetSymbols)}, matches=${matchesTarget}`);
+          console.log(`[LAND] Reel ${r}: progress=${progress.toFixed(2)}, offsetY=${reel.offsetY.toFixed(1)}`);
         }
-        if (matchesTarget && reel.speed < 10) {
-          if (this.debugMode) console.log(`[Debug] Reel ${r} reached target and bouncing at ${now}`);
+
+        if (progress >= 1) {
+          if (this.debugMode) console.log(`[Debug] Reel ${r} landed, bouncing at ${now}`);
           reel.offsetY = 0;
-          reel.speed = 0;
           reel.state = 'bounce';
           reel.bounceProgress = 0;
           reel.bounceDirection = 1; // Start bounce downward
           audio.playReelStop(r);
         }
-      } 
+      }
       else if (reel.state === 'bounce') {
         allStopped = false;
         
@@ -464,16 +441,11 @@ export class SlotEngine {
     }
   }
 
-  checkReelMatchesTarget(reelIdx) {
-    const reel = this.reels[reelIdx];
-    // Check if the current 3 visible symbols match the target grid
-    // Visible symbols are at index 1, 2, 3 of the array
-    for (let r = 0; r < this.config.rowsCount; r++) {
-      if (reel.symbols[r + 1] !== this.targetGrid[reelIdx][r]) {
-        return false;
-      }
-    }
-    return true;
+  // Standard ease-out-cubic: fast start, gentle settle. Drives the landing-phase tween
+  // as a pure function of elapsed time - there is no "does it match" question anymore,
+  // landing is guaranteed correct by construction the instant it begins (see update()).
+  easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
   }
 
   // --- Spin Controllers ---
@@ -507,7 +479,7 @@ export class SlotEngine {
     }
   }
 
-  spin() {
+  spin(seed) {
     if (this.state !== 'idle' && this.state !== 'showing_wins') return;
     
     // Stop audio loops
@@ -539,50 +511,39 @@ export class SlotEngine {
 
     this.config.onStateChange(this.state);
 
-    // Pre-calculate Spin Result (skip if forceWinResult already set targetGrid)
+    // Pre-calculate Spin Result (skip if forceWinResult already set targetGrid).
+    // The seed is captured on the engine so the exact same outcome can be replayed
+    // later via engine.spin(engine.lastSpinSeed) - no separate replay subsystem needed.
     if (!this.forcedTargetGrid) {
-      this.targetGrid = this.generateTargetGrid();
+      const spinSeed = seed !== undefined ? seed : ((Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0);
+      this.lastSpinSeed = spinSeed;
+      this.targetGrid = generateTargetGrid(this.config.reelStrips, this.config.rowsCount, createSeededRng(spinSeed));
+      if (this.debugMode) console.log(`[SPIN] seed=${spinSeed}`);
     }
     this.forcedTargetGrid = false; // Reset flag
     if (this.debugMode) console.log(`[SPIN] targetGrid:`, JSON.stringify(this.targetGrid));
     if (this.debugMode) console.log(`[SPIN] spinDuration=${this.spinDuration}, turbo=${this.turboMode}, symbolHeight=${this.symbolHeight}`);
-    
+
     // Trigger Spin Sound
     audio.playSpin();
 
     // Setup spin timers
     this.spinStart = Date.now();
-    
+
     const stopInterval = this.turboMode ? 100 : this.reelDelay;
+    const landDuration = this.turboMode ? 150 : 450;
     for (let r = 0; r < this.reels.length; r++) {
       const reel = this.reels[r];
       reel.state = 'spinning';
       reel.speed = 20;
-      reel.stopDelay = (this.turboMode ? 500 : this.spinDuration) + (r * stopInterval);
-      reel.feedIndex = 0;
-      if (this.debugMode) console.log(`[SPIN] Reel ${r}: stopDelay=${reel.stopDelay}ms, strip=${reel.strip.length} symbols`);
+      const stopDelay = (this.turboMode ? 500 : this.spinDuration) + (r * stopInterval);
+      reel.landDuration = landDuration;
+      // The reel is guaranteed fully landed by spinStart + stopDelay: landing itself begins
+      // landDuration ms before that instant, so it always finishes exactly on time regardless
+      // of frame rate or any speed/acceleration constant used while 'spinning'.
+      reel.landStartTime = this.spinStart + stopDelay - landDuration;
+      if (this.debugMode) console.log(`[SPIN] Reel ${r}: lands ${stopDelay}ms after spin start, strip=${reel.strip.length} symbols`);
     }
-  }
-
-  generateTargetGrid() {
-    const grid = [];
-    
-    // Determine if we will force a scatter trigger for testing or generate randomly
-    // A regular strip generation:
-    for (let col = 0; col < this.config.reelsCount; col++) {
-      const reelCol = [];
-      const strip = this.config.reelStrips[col];
-      
-      // Select a random stop position on the strip
-      const stopIndex = Math.floor(Math.random() * strip.length);
-      for (let row = 0; row < this.config.rowsCount; row++) {
-        const symbol = strip[(stopIndex + row) % strip.length];
-        reelCol.push(symbol);
-      }
-      grid.push(reelCol);
-    }
-    
-    return grid;
   }
 
   // Cheat method to test features
@@ -633,9 +594,15 @@ export class SlotEngine {
     
     const now = Date.now();
     for (let r = 0; r < this.reels.length; r++) {
-      this.reels[r].state = 'stopping';
-      this.reels[r].stopDelay = now - this.spinStart + (r * 100);
-      if (this.debugMode) console.log(`[Debug] Reel ${r} stopDelay set to ${this.reels[r].stopDelay}`);
+      const reel = this.reels[r];
+      if (reel.state === 'spinning') {
+        // Compress the remaining spin time: this reel begins landing almost immediately,
+        // still slightly staggered per reel so an early stop doesn't feel like every reel
+        // freezes at once. Reels already 'landing' (or 'bounce') are left alone - their
+        // tween is already short and guaranteed-correct, nothing to compress.
+        reel.landStartTime = now + (r * 80);
+      }
+      if (this.debugMode) console.log(`[Debug] Reel ${r} landStartTime compressed to ${reel.landStartTime - this.spinStart}ms after spin start`);
     }
   }
 
