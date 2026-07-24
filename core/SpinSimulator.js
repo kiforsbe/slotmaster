@@ -37,7 +37,9 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   simConfig.linesCount = linesCount;
   simConfig.betPerLine = betPerLine;
   simConfig.totalBet = betPerLine * linesCount;
-  
+
+  const winEvaluator = simConfig.winEvaluator || checkWins;
+
   // Get configuration values with defaults
   const freeSpinsCount = simConfig.freeSpinsCount || 10;
   let expandingSymbol = simConfig.expandingSymbol || 'anubis';
@@ -98,13 +100,14 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
       targetGrid.push(reelCol);
     }
 
-    // Evaluate wins using the existing math logic
-    let winData = checkWins(
+    // Evaluate wins using this config's win evaluator (defaults to checkWins above)
+    let winData = winEvaluator(
       targetGrid,
       simConfig.paytable,
+      simConfig.paylines,
       linesCount,
-      null, // no wild symbol - book is scatter only
-      'book'  // Scatter symbol for this specific game
+      simConfig.wildSymbol ?? null,
+      simConfig.scatterSymbol ?? null
     );
 
     let spinWin = 0;
@@ -149,7 +152,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     let expandingResults = null;
     if (isFreeSpin) {
       // Check for expanding wins using the configured expanding symbol and paytable
-      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, linesCount);
+      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, simConfig.paylines, linesCount);
     }
 
     if (expandingResults) {
@@ -229,6 +232,10 @@ export async function tuneFrequencies(paytable, options = {}) {
     reelSeeds = [1234, 567, 89, 765, 3321],
     betPerLine = 1,
     linesCount = 10,
+    paylines,
+    winEvaluator,
+    wildSymbol = null,
+    scatterSymbol = null,
     targetRtp = 96,
     rtpTolerancePct = 1.5,
     targetTriggerRatePct = 0.6,
@@ -266,7 +273,7 @@ export async function tuneFrequencies(paytable, options = {}) {
 
   function measure(pt) {
     const reelStrips = buildReelStrips(pt);
-    const config = { reelsCount, rowsCount, paytable: pt, reelStrips };
+    const config = { reelsCount, rowsCount, paytable: pt, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol };
     let rtpSum = 0, triggerSum = 0;
     for (let i = 0; i < trialsPerPoint; i++) {
       const results = simulateSpins(config, trialSpins, betPerLine, linesCount);

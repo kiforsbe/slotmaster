@@ -1,5 +1,5 @@
 // Core Slot Game Engine Renderer & State Controller
-import { checkWins, checkExpandingWins, PAYLINES, createSeededRng, generateTargetGrid } from './SlotMath.js';
+import { checkWins, checkExpandingWins, createSeededRng, generateTargetGrid } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
 
@@ -14,6 +14,10 @@ export class SlotEngine {
       rowsCount: 3,
       paytable: {},
       reelStrips: [],
+      // paylines has no default - every game must supply its own (see core/SlotMath.js).
+      wildSymbol: null,
+      scatterSymbol: null,
+      winEvaluator: checkWins,
       onStateChange: () => {},
       onFreeSpinsTriggered: () => {},
       onScatterTrigger: (scatterCount) => {},
@@ -552,7 +556,8 @@ export class SlotEngine {
 
     this.targetGrid = [];
     if (winType === 'scatter') {
-      // Force 3 books on reels 1, 3, 5
+      // Book-of-dead-specific: assumes a 5-reel layout with a scatter symbol named 'book'.
+      // Only meaningful for games that configure one; fruit machine never calls this.
       for (let col = 0; col < 5; col++) {
         const strip = this.config.reelStrips[col];
         const colSymbols = [this.getRandomSymbol(strip), this.getRandomSymbol(strip), this.getRandomSymbol(strip)];
@@ -562,7 +567,8 @@ export class SlotEngine {
         this.targetGrid.push(colSymbols);
       }
     } else if (winType === 'expanding') {
-      // Force selected expanding symbol on 3 reels (e.g. 'tut' on 1, 3, 4)
+      // Book-of-dead-specific: assumes a 5-reel layout with an expanding symbol.
+      // Only meaningful for games that configure one; fruit machine never calls this.
       const sym = this.expandingSymbol || 'tut';
       for (let col = 0; col < 5; col++) {
         const strip = this.config.reelStrips[col];
@@ -573,9 +579,11 @@ export class SlotEngine {
         this.targetGrid.push(colSymbols);
       }
     } else if (winType === 'bigwin') {
-      // Force line of 'tut'
-      for (let col = 0; col < 5; col++) {
-        this.targetGrid.push(['tut', 'tut', 'tut']);
+      // Works for any grid shape: force every visible symbol to a single symbol picked
+      // from reel 1's own strip, so it's guaranteed to actually exist on every reel.
+      const firstLineSymbol = this.getRandomSymbol(this.config.reelStrips[0]);
+      for (let col = 0; col < this.config.reelsCount; col++) {
+        this.targetGrid.push(Array(this.config.rowsCount).fill(firstLineSymbol));
       }
     }
     
@@ -610,12 +618,13 @@ export class SlotEngine {
     this.state = 'evaluating';
     this.config.onStateChange(this.state);
 
-    const results = checkWins(
-      this.targetGrid, 
-      this.config.paytable, 
-      this.linesCount, 
-      null,  // no wild symbol - book is scatter only
-      'book'
+    const results = this.config.winEvaluator(
+      this.targetGrid,
+      this.config.paytable,
+      this.config.paylines,
+      this.linesCount,
+      this.config.wildSymbol,
+      this.config.scatterSymbol
     );
 
     this.winData = results;
@@ -657,6 +666,7 @@ export class SlotEngine {
         this.targetGrid,
         this.expandingSymbol,
         this.config.paytable,
+        this.config.paylines,
         this.linesCount,
         this.config.paytable
       );
@@ -1032,19 +1042,19 @@ export class SlotEngine {
       const isActive = (this.winCycleIndex === -1) || (idx === this.winCycleIndex && this.activeWinLineIndex === win.lineIndex);
       if (!isActive) return;
 
-      const path = PAYLINES[win.lineIndex];
+      const path = this.config.paylines[win.lineIndex];
       this.ctx.save();
       this.ctx.strokeStyle = this.getNeonColorForLine(win.lineIndex);
       this.ctx.lineWidth = 4;
       this.ctx.lineCap = 'round';
       this.ctx.lineJoin = 'round';
-      
+
       // Shadow glow
       this.ctx.shadowColor = this.ctx.strokeStyle;
       this.ctx.shadowBlur = 12;
 
       this.ctx.beginPath();
-      for (let col = 0; col < 5; col++) {
+      for (let col = 0; col < this.config.reelsCount; col++) {
         const row = path[col];
         const cx = this.reelsX + (col * this.symbolWidth) + (this.symbolWidth / 2);
         const cy = this.reelsY + (row * this.symbolHeight) + (this.symbolHeight / 2);
@@ -1055,10 +1065,11 @@ export class SlotEngine {
         }
       }
       this.ctx.stroke();
-      
+
       // Draw Line Tag numbers at start and end
+      const lastReel = this.config.reelsCount - 1;
       const startY = this.reelsY + (path[0] * this.symbolHeight) + (this.symbolHeight / 2);
-      const endY = this.reelsY + (path[4] * this.symbolHeight) + (this.symbolHeight / 2);
+      const endY = this.reelsY + (path[lastReel] * this.symbolHeight) + (this.symbolHeight / 2);
       this.drawTag(win.lineIndex + 1, this.reelsX - 15, startY, this.ctx.strokeStyle);
       this.drawTag(win.lineIndex + 1, this.reelsX + this.reelsWidth + 15, endY, this.ctx.strokeStyle);
 
