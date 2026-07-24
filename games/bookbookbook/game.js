@@ -36,7 +36,7 @@ const REEL_STRIPS = [
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let themeSelect, displayBalance, betValue, betMinus, betPlus, gameTicker;
-let btnSim, simModal, btnCloseSim, btnTune;
+let btnSim, simModal, btnCloseSim, btnTune, simStats;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable, modalFsTrigger, modalFsSummary, btnStartFs, btnCloseFsSummary;
 let fsPanel, fsCounter, fsSymbolName, fsSymbolThumbnail;
@@ -57,7 +57,8 @@ function runSimulation() {
   setTimeout(() => {
     try {
       const results = engine.runSimulation(1000000);
-      
+
+      if (simStats) simStats.style.display = '';
       simRtpDisplay.textContent = results.rtp;
       simTotalSpinsDisplay.textContent = results.totalSpins;
       simMaxWinDisplay.textContent = `$${results.maxWin}`;
@@ -240,9 +241,25 @@ function openTunePanel() {
     document.getElementById('tune-start-btn').addEventListener('click', startTuning);
   }
 
+  // The RTP/Total Spins/Max Win/Free Spins stat boxes are populated by RUN SIMULATION and
+  // don't map onto a tuning run - showing them here would just sit at "-" looking broken,
+  // so hide them; the tuner panel has its own "Achieved RTP / trigger rate" summary line.
+  if (simStats) simStats.style.display = 'none';
+
   simModal.style.display = 'block';
   simModal.style.maxWidth = '900px';
   simModal.style.width = '95%';
+}
+
+// Renders a tuned paytable back out as a paste-ready `const PAYTABLE = { ... }` literal,
+// in the same shape/key order game.js already uses, so the only thing that visibly changes
+// versus the current source is each symbol's frequency value.
+function formatPaytableForCopy(pt) {
+  const lines = Object.entries(pt).map(([symbol, data]) => {
+    const payoutStr = `[${data.payout.join(', ')}]`;
+    return `  ${symbol}: { payout: ${payoutStr}, frequency: ${data.frequency.toFixed(4)}, type: '${data.type}', paymode: '${data.paymode}', wild: ${data.wild}, triggerFreeSpins: ${data.triggerFreeSpins}, friendlyName: '${data.friendlyName}' },`;
+  });
+  return `const PAYTABLE = {\n${lines.join('\n')}\n};`;
 }
 
 async function startTuning() {
@@ -315,7 +332,32 @@ async function startTuning() {
     });
     html += `</tbody></table>`;
     html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by editing PAYTABLE's frequency values in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
+
+    html += `<div style="margin-top: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Copy-paste ready PAYTABLE</span>
+                  <button id="tune-copy-btn" class="btn-icon btn-sim-btn" style="padding: 4px 10px; font-size: 0.75em;">COPY</button>
+                </div>
+                <textarea id="tune-paytable-output" readonly style="width: 100%; height: 200px; box-sizing: border-box; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.4); color: #ddd; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;"></textarea>
+              </div>`;
+
     resultsEl.innerHTML = html;
+
+    const paytableOutput = document.getElementById('tune-paytable-output');
+    paytableOutput.value = formatPaytableForCopy(tunedPaytable);
+
+    const copyBtn = document.getElementById('tune-copy-btn');
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(paytableOutput.value);
+      } catch (err) {
+        // Clipboard API can fail (permissions, insecure context) - fall back to manual select.
+        paytableOutput.select();
+      }
+      const original = copyBtn.textContent;
+      copyBtn.textContent = 'COPIED!';
+      setTimeout(() => { copyBtn.textContent = original; }, 1500);
+    });
   } catch (error) {
     console.error('Frequency tuning failed:', error);
     appendLog(`Error: ${error.message}`);
@@ -378,6 +420,7 @@ window.addEventListener('load', async () => {
   btnTune = document.getElementById('btn-tune');
   simModal = document.getElementById('sim-modal');
   btnCloseSim = document.getElementById('btn-close-sim');
+  simStats = document.getElementById('sim-stats');
 
   simRtpDisplay = document.getElementById('sim-rtp');
   simTotalSpinsDisplay = document.getElementById('sim-total-spins');
