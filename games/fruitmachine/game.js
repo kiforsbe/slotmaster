@@ -53,6 +53,7 @@ export const REEL_STRIPS = REEL_SEEDS.map((seed, i) =>
 // UI Dom Selectors - initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let displayBalance, betValue, betMinus, betPlus, gameTicker;
+let displayTotalBet, linesValue, linesMinus, linesPlus;
 let btnSim, simModal, btnCloseSim, btnTune, simStats;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable;
@@ -92,6 +93,10 @@ async function initGame() {
   betValue = document.getElementById('bet-value');
   betMinus = document.getElementById('bet-minus');
   betPlus = document.getElementById('bet-plus');
+  displayTotalBet = document.getElementById('display-total-bet');
+  linesValue = document.getElementById('lines-value');
+  linesMinus = document.getElementById('lines-minus');
+  linesPlus = document.getElementById('lines-plus');
   gameTicker = document.getElementById('game-ticker');
 
   btnSim = document.getElementById('btn-sim');
@@ -160,6 +165,8 @@ async function initGame() {
     winEvaluator: checkWildLineWins,
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
+    betPerLine: BET_PER_LINE,
+    linesCount: LINES_COUNT,
 
     onStateChange: (state) => handleStateChange(state),
     onWin: (winInfo) => handleWin(winInfo),
@@ -174,6 +181,8 @@ function updateUI() {
   if (!engine) return;
   displayBalance.textContent = `$${engine.balance.toFixed(2)}`;
   betValue.textContent = engine.betPerLine;
+  linesValue.textContent = `${engine.linesCount} / ${LINES_COUNT}`;
+  displayTotalBet.textContent = `$${engine.totalBet.toFixed(2)}`;
 }
 
 function handleStateChange(state) {
@@ -224,6 +233,26 @@ function setupUIHandlers() {
     const newTotalBet = newBetPerLine * engine.linesCount;
     if (newBetPerLine <= 100 && engine.balance >= newTotalBet) {
       engine.betPerLine = newBetPerLine;
+      engine.updateBet();
+      updateUI();
+    }
+  });
+
+  linesMinus.addEventListener('click', () => {
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
+    if (engine.linesCount > 1) {
+      engine.linesCount--;
+      engine.updateBet();
+      updateUI();
+    }
+  });
+
+  linesPlus.addEventListener('click', () => {
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
+    const newLinesCount = engine.linesCount + 1;
+    const newTotalBet = engine.betPerLine * newLinesCount;
+    if (newLinesCount <= LINES_COUNT && engine.balance >= newTotalBet) {
+      engine.linesCount = newLinesCount;
       engine.updateBet();
       updateUI();
     }

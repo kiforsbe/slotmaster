@@ -61,6 +61,26 @@
         </div>
       </div>
 
+      <!-- Lines Selector -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Lines</span>
+          <div class="bet-adjuster">
+            <button id="lines-minus" class="btn-adjust">-</button>
+            <span id="lines-value" class="bet-display-value">5 / 5</span>
+            <button id="lines-plus" class="btn-adjust">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Total Bet Panel -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Total Bet</span>
+          <span id="display-total-bet" class="dashboard-value">$5.00</span>
+        </div>
+      </div>
+
       <!-- Spin Button -->
       <div class="spin-section">
         <button id="btn-spin" class="btn-spin">SPIN</button>
@@ -89,7 +109,7 @@
     <div class="modal-content" style="max-width: 600px;">
       <button class="btn-modal-close">×</button>
       <h2 style="font-family: 'Cinzel', serif; color: var(--gold); margin-bottom: 10px;">LUCKY FRUITS PAYTABLE</h2>
-      <p style="font-size: 13px; color: #d9a891;">3-in-a-row pays left-to-right on 5 lines. A Star on reel 3 acts as a wild for most symbols. A Strawberry on reel 3 substitutes for Cherries, and always pays 0.80 on its own.</p>
+      <p style="font-size: 13px; color: #d9a891;">3-in-a-row pays left-to-right on 5 lines. A Star on reel 3 acts as a wild for most symbols (not Bar or Cherries). A Strawberry on reel 3 always pays 0.80 on its own, regardless of the other two reels.</p>
 
       <div class="paytable-grid" id="paytable-grid-content">
         <!-- Rendered dynamically in game.js -->

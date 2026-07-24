@@ -32,9 +32,9 @@ export class SlotEngine {
     // State Variables
     this.state = 'idle'; // idle, spinning, stopping, evaluating, free_spins_intro, expanding, showing_wins, game_over
     this.balance = 1000;
-    this.betPerLine = 1;
-    this.linesCount = 10;
-    this.totalBet = 10;
+    this.betPerLine = config.betPerLine ?? 1;
+    this.linesCount = config.linesCount ?? 10;
+    this.totalBet = this.betPerLine * this.linesCount;
     this.lastWin = 0;
     
     // Free Spins State

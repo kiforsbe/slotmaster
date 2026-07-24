@@ -129,7 +129,7 @@ canvas {
 
 .dashboard {
   display: grid;
-  grid-template-columns: 2fr 1.2fr 2fr 1fr;
+  grid-template-columns: 1.5fr 1.1fr 1fr 1.2fr 1.8fr 1fr;
   align-items: center;
   padding: 16px 24px;
   background: rgba(26, 5, 5, 0.92);
