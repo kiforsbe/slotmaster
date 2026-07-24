@@ -2,7 +2,7 @@
  * A pure functional simulator for the SlotMachine game logic.
  * It models spins without any visual or audio side effects.
  */
-import { checkWins, checkExpandingWins, generateReel } from './SlotMath.js';
+import { checkWins, checkExpandingWins, generateReel, generateTargetGrid } from './SlotMath.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis.
@@ -10,9 +10,12 @@ import { checkWins, checkExpandingWins, generateReel } from './SlotMath.js';
  * @param {number} numBaseSpins - Number of base spins to simulate (default 100000)
  * @param {number} betPerLine - Bet per line (default 1)
  * @param {number} linesCount - Number of active paylines (default 10)
+ * @param {() => number} [rng=Math.random] - Random source for spin outcomes. Pass a seeded
+ *   rng (e.g. createSeededRng(seed) from SlotMath.js) for a reproducible run; defaults to
+ *   Math.random for today's non-deterministic behavior.
  * @returns {Object} Simulation results including RTP, win distribution, etc.
  */
-export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, linesCount = 10) {
+export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, linesCount = 10, rng = Math.random) {
   // Input validation
   if (!config || !config.reelStrips || !config.paytable) {
     throw new Error('Invalid config: reelStrips and paytable required');
@@ -56,7 +59,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
       const eligibleSymbols = Object.keys(simConfig.paytable || {})
         .filter(s => simConfig.paytable[s].type !== 'scatter');
       expandingSymbol = eligibleSymbols.length > 0
-        ? eligibleSymbols[Math.floor(Math.random() * eligibleSymbols.length)]
+        ? eligibleSymbols[Math.floor(rng() * eligibleSymbols.length)]
         : expandingSymbol;
 
       for (let j = 0; j < freeSpinsCount; j++) {
@@ -88,17 +91,10 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     if (!isFreeSpin) results.totalBets += totalSpinBet;
     results.totalSimulatedSpins++;
 
-    // Simulate target grid generation
-    const targetGrid = [];
-    for (let col = 0; col < simConfig.reelsCount; col++) {
-      const reelCol = [];
-      const strip = simConfig.reelStrips[col];
-      const stopIndex = Math.floor(Math.random() * strip.length);
-      for (let row = 0; row < simConfig.rowsCount; row++) {
-        reelCol.push(strip[(stopIndex + row) % strip.length]);
-      }
-      targetGrid.push(reelCol);
-    }
+    // Target grid generation - pure/seeded via generateTargetGrid (SlotMath.js), so a
+    // caller can pass a seeded rng (e.g. tuneFrequencies' common-random-numbers gradient
+    // steps) for a reproducible run; defaults to Math.random for today's behavior.
+    const targetGrid = generateTargetGrid(simConfig.reelStrips, simConfig.rowsCount, rng);
 
     // Evaluate wins using this config's win evaluator (defaults to checkWins above)
     let winData = winEvaluator(
