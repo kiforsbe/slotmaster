@@ -245,16 +245,45 @@ export function checkExpandingWins(grid, expandingSymbol, paytable, activeLinesC
   };
 }
 
-export function generateReel(paytable, targetLength, seed, exclude=[], minScatterGap=3) {
-  function _mulberry32(seed) {
-    return function() {
-      let t = seed += 0x6D2B79F5;
-      t = Math.imul(t ^ t >>> 15, t | 1);
-      t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    }
+/**
+ * Deterministic PRNG (mulberry32). The same seed always produces the same sequence of
+ * floats in [0, 1) - this determinism is what makes a spin outcome seedable/replayable.
+ * @param {number} seed
+ * @returns {function(): number} rng function; call repeatedly for the next float
+ */
+export function createSeededRng(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
   }
+}
 
+/**
+ * Pick a random stop position on each reel strip and read off the visible window.
+ * Pure function: the same rng sequence always produces the same grid, which is what
+ * makes a spin outcome reproducible from a seed (see SlotEngine.spin()).
+ * @param {Array<Array<string>>} reelStrips - one strip (array of symbol names) per reel
+ * @param {number} rowsCount - visible rows per reel
+ * @param {function(): number} rng - rng function as returned by createSeededRng()
+ * @returns {Array<Array<string>>} grid[col][row] of symbol names
+ */
+export function generateTargetGrid(reelStrips, rowsCount, rng) {
+  const grid = [];
+  for (let col = 0; col < reelStrips.length; col++) {
+    const strip = reelStrips[col];
+    const reelCol = [];
+    const stopIndex = Math.floor(rng() * strip.length);
+    for (let row = 0; row < rowsCount; row++) {
+      reelCol.push(strip[(stopIndex + row) % strip.length]);
+    }
+    grid.push(reelCol);
+  }
+  return grid;
+}
+
+export function generateReel(paytable, targetLength, seed, exclude=[], minScatterGap=3) {
   function _shuffle(array, rng) {
     for (let i = array.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
@@ -323,7 +352,7 @@ export function generateReel(paytable, targetLength, seed, exclude=[], minScatte
   }
 
   // Step 4: Shuffle with seed
-  const rng = _mulberry32(seed);
+  const rng = createSeededRng(seed);
   _shuffle(reel, rng);
 
   // Step 5: Guarantee scatter symbols (e.g. book) can never double up inside one visible window
