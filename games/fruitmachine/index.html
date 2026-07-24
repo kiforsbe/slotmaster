@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lucky Fruits - Classic Slot Machine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --gold: #ffd23f;
+      --gold-glow: rgba(255, 210, 63, 0.4);
+      --cabinet: #4a0e0e;
+      --cabinet-light: #6b1414;
+      --red: #c0392b;
+      --text: #fff3d6;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+
+    body {
+      background-color: #1a0505;
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, #3a0f0f 0%, #100303 100%);
+    }
+
+    .cabinet-container {
+      position: relative;
+      width: 100%;
+      max-width: 820px;
+      height: 100%;
+      max-height: 640px;
+      display: flex;
+      flex-direction: column;
+      border: 4px solid var(--gold);
+      border-radius: 16px;
+      background: var(--cabinet);
+      box-shadow: 0 0 40px rgba(0,0,0,0.8), 0 0 20px var(--gold-glow);
+      overflow: hidden;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 24px;
+      background: linear-gradient(180deg, rgba(74,14,14,0.9) 0%, rgba(26,5,5,0.9) 100%);
+      border-bottom: 2px solid rgba(255, 210, 63, 0.3);
+      z-index: 10;
+    }
+
+    .title-logo {
+      font-family: 'Cinzel', serif;
+      font-size: 26px;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 10px var(--gold), 0 0 20px var(--gold-glow);
+      letter-spacing: 2px;
+    }
+
+    .title-logo span { color: var(--gold); }
+
+    .top-controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+
+    .btn-icon {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 210, 63, 0.3);
+      color: var(--text);
+      padding: 8px 14px;
+      font-size: 14px;
+      font-weight: 600;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-icon:hover {
+      background: var(--gold-glow);
+      color: #fff;
+      border-color: var(--gold);
+      box-shadow: 0 0 8px var(--gold-glow);
+    }
+
+    .btn-icon.active {
+      background: var(--gold);
+      color: #000;
+      border-color: #fff;
+      box-shadow: 0 0 10px var(--gold-glow);
+    }
+
+    .btn-sim-btn {
+      border-color: var(--red) !important;
+      color: #ff8a7a !important;
+    }
+
+    .btn-sim-btn:hover {
+      background: rgba(192, 57, 43, 0.2) !important;
+      border-color: var(--red) !important;
+      color: #fff !important;
+    }
+
+    .game-viewport {
+      flex: 1;
+      position: relative;
+      background-color: #100303;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .dashboard {
+      display: grid;
+      grid-template-columns: 2fr 1.2fr 2fr 1fr;
+      align-items: center;
+      padding: 16px 24px;
+      background: rgba(26, 5, 5, 0.92);
+      border-top: 2px solid rgba(255, 210, 63, 0.3);
+      gap: 16px;
+      z-index: 10;
+      backdrop-filter: blur(12px);
+    }
+
+    .dashboard-panel {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .bet-container {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .dashboard-label {
+      font-size: 11px;
+      color: #d9a891;
+      text-transform: uppercase;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+
+    .dashboard-value {
+      font-size: 20px;
+      font-weight: 800;
+      color: #fff;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .bet-adjuster {
+      display: flex;
+      align-items: center;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .btn-adjust {
+      background: transparent;
+      border: none;
+      color: var(--gold);
+      width: 36px;
+      height: 36px;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn-adjust:hover {
+      background: rgba(255, 210, 63, 0.15);
+    }
+
+    .bet-display-value {
+      width: 60px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .spin-section {
+      display: flex;
+      justify-content: center;
+    }
+
+    .btn-spin {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 4px solid var(--gold);
+      background: radial-gradient(circle, #ffe27a 0%, #d99a1e 100%);
+      color: #000;
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 0 15px var(--gold-glow), inset 0 2px 5px rgba(255,255,255,0.6);
+      transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      outline: none;
+    }
+
+    .btn-spin:hover {
+      transform: scale(1.08);
+      box-shadow: 0 0 25px var(--gold), inset 0 2px 5px rgba(255,255,255,0.6);
+    }
+
+    .btn-spin:active {
+      transform: scale(0.95);
+    }
+
+    .btn-spin.spinning {
+      background: radial-gradient(circle, #ff6b6b 0%, #c92a2a 100%);
+      border-color: #ffa8a8;
+      box-shadow: 0 0 20px rgba(255, 107, 107, 0.6);
+      color: #fff;
+      font-size: 13px;
+    }
+
+    .auto-turbo-container {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    /* MODAL OVERLAYS */
+    .modal-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(10, 3, 3, 0.85);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+      backdrop-filter: blur(5px);
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .modal-content {
+      background: linear-gradient(135deg, #3a0f0f 0%, #1a0505 100%);
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 30px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.8), 0 0 20px var(--gold-glow);
+      text-align: center;
+      position: relative;
+    }
+
+    .paytable-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin: 20px 0;
+      max-height: 280px;
+      overflow-y: auto;
+      padding-right: 5px;
+    }
+
+    .paytable-grid::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    .paytable-grid::-webkit-scrollbar-thumb {
+      background-color: var(--gold);
+      border-radius: 3px;
+    }
+
+    .paytable-item {
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255, 210, 63, 0.2);
+      border-radius: 8px;
+      padding: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .paytable-symbol-name {
+      font-size: 12px;
+      font-weight: bold;
+      color: var(--gold);
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .paytable-payouts {
+      font-size: 11px;
+      color: #d9a891;
+      line-height: 1.4;
+      text-align: left;
+    }
+
+    .btn-modal-close {
+      position: absolute;
+      top: 15px;
+      right: 15px;
+      background: transparent;
+      border: none;
+      color: #b57d6c;
+      font-size: 24px;
+      cursor: pointer;
+    }
+
+    .btn-modal-close:hover {
+      color: #fff;
+    }
+
+    .btn-primary {
+      background: var(--gold);
+      color: #000;
+      font-family: 'Cinzel', serif;
+      font-weight: 900;
+      padding: 12px 28px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      margin-top: 20px;
+      transition: all 0.2s;
+      box-shadow: 0 4px 10px var(--gold-glow);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 15px var(--gold);
+    }
+
+    .game-ticker {
+      position: absolute;
+      top: 10px;
+      left: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--gold);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      background: rgba(0,0,0,0.6);
+      padding: 4px 12px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+
+    /* Simulation Results Modal */
+    .sim-modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(26, 5, 5, 0.98);
+      border: 3px solid var(--gold);
+      padding: 30px;
+      border-radius: 20px;
+      z-index: 100;
+      max-width: 500px;
+      width: 90%;
+      max-height: 85vh;
+      overflow-y: auto;
+      box-shadow: 0 0 50px rgba(0,0,0,1), 0 0 30px var(--gold-glow);
+      backdrop-filter: blur(10px);
+    }
+
+    .sim-modal h2 {
+      font-family: 'Cinzel', serif;
+      color: var(--gold);
+      margin-bottom: 20px;
+      text-align: center;
+      font-size: 24px;
+    }
+
+    .sim-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-bottom: 25px;
+    }
+
+    .stat-box {
+      background: rgba(255,255,255,0.05);
+      padding: 15px;
+      border-radius: 10px;
+      text-align: center;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: #d9a891;
+      display: block;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #fff;
+    }
+
+    .btn-close-sim {
+      width: 100%;
+      padding: 12px;
+      background: var(--gold);
+      border: none;
+      color: #000;
+      font-weight: bold;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+
+    .btn-close-sim:hover {
+      transform: scale(1.05);
+    }
+
+  </style>
+</head>
+<body>
+
+  <div class="cabinet-container">
+
+    <!-- Header -->
+    <header>
+      <div class="title-logo">LUCKY <span>FRUITS</span></div>
+
+      <div class="top-controls">
+        <button id="btn-paytable" class="btn-icon">
+          📋 Paytable
+        </button>
+        <button id="btn-mute" class="btn-icon">
+          🔊 Sound ON
+        </button>
+      </div>
+    </header>
+
+    <!-- Game Viewport (Canvas) -->
+    <div class="game-viewport">
+
+      <!-- Live Game Ticker -->
+      <div id="game-ticker" class="game-ticker">IDLE</div>
+
+      <!-- Canvas Renderer -->
+      <canvas id="game-canvas"></canvas>
+
+    </div>
+
+    <!-- Glassmorphic Controls Dashboard -->
+    <div class="dashboard">
+
+      <!-- Balance Panel -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Balance</span>
+          <span id="display-balance" class="dashboard-value">$1,000.00</span>
+        </div>
+      </div>
+
+      <!-- Bet Size Selector -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Bet Per Line</span>
+          <div class="bet-adjuster">
+            <button id="bet-minus" class="btn-adjust">-</button>
+            <span id="bet-value" class="bet-display-value">1</span>
+            <button id="bet-plus" class="btn-adjust">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Spin Button -->
+      <div class="spin-section">
+        <button id="btn-spin" class="btn-spin">SPIN</button>
+      </div>
+
+      <!-- Turbo / Auto -->
+      <div class="auto-turbo-container">
+        <button id="btn-turbo" class="btn-icon">⚡ Turbo</button>
+        <button id="btn-auto" class="btn-icon">🔄 Auto</button>
+      </div>
+
+    </div>
+
+    <!-- Simulation Controls -->
+    <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px;">
+      <button id="btn-tune" class="btn-icon btn-sim-btn">TUNE FREQUENCIES</button>
+      <button id="btn-sim" class="btn-icon btn-sim-btn">RUN SIMULATION</button>
+    </div>
+
+  </div>
+
+  <!-- MODALS -->
+
+  <!-- Paytable Modal -->
+  <div id="modal-paytable" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <button class="btn-modal-close">×</button>
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); margin-bottom: 10px;">LUCKY FRUITS PAYTABLE</h2>
+      <p style="font-size: 13px; color: #d9a891;">3-in-a-row pays left-to-right on 5 lines. A Star on reel 3 acts as a wild for most symbols. A Strawberry on reel 3 substitutes for Cherries, and always pays 0.80 on its own.</p>
+
+      <div class="paytable-grid" id="paytable-grid-content">
+        <!-- Rendered dynamically in game.js -->
+      </div>
+
+      <h3 style="font-family: 'Cinzel', serif; color: #fff; font-size: 14px; margin: 15px 0 10px 0;">ACTIVE PAYLINES (5 LINES)</h3>
+      <div style="display: flex; gap: 4px; justify-content: center; flex-wrap: wrap;" id="paylines-preview">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <button id="btn-paytable-ok" class="btn-primary">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Simulation Results Modal -->
+  <div id="sim-modal" class="sim-modal" style="display: none;">
+    <button class="btn-modal-close">×</button>
+    <h2>Simulation Results</h2>
+    <div id="sim-stats" class="sim-stats">
+      <div class="stat-box">
+        <span class="stat-label">Return to Player (RTP)</span>
+        <div id="sim-rtp" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Total Spins</span>
+        <div id="sim-total-spins" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Max Win</span>
+        <div id="sim-max-win" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Free Spins Triggered</span>
+        <div id="sim-free-spins" class="stat-value">-</div>
+      </div>
+    </div>
+    <button id="btn-close-sim" class="btn-close-sim">CLOSE</button>
+  </div>
+
+  <!-- Core Javascript modules -->
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
