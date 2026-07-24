@@ -33,14 +33,15 @@ export const PAYLINES = [
 export const PAYTABLE = {
   bar:        { payout: [0.00, 0.00, 10.00], frequency:  0.806, type: 'premium', friendlyName: 'Bar' },
   clover:     { payout: [0.00, 0.00,  4.00], frequency:  1.611, type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
-  pear:       { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Pear' },
-  melon:      { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Watermelon' },
+  pear:       { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Pear',       wildPenalty: 1 },
+  melon:      { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Watermelon', wildPenalty: 1 },
   grapes:     { payout: [0.00, 0.00,  2.00], frequency:  2.018, type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
   plum:       { payout: [0.00, 0.00,  2.00], frequency:  8.018, type: 'regular', friendlyName: 'Plum' },
   orange:     { payout: [0.00, 0.00,  1.60], frequency:  8.425, type: 'regular', friendlyName: 'Orange' },
   cherries:   { payout: [0.40, 0.80,  1.60], frequency: 12.036, type: 'regular', friendlyName: 'Cherries' },
-  star:       { payout: [0.00, 0.00,  0.00], frequency: 10.611, type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries'] },
-  strawberry: { payout: [0.00, 0.00,  0.00], frequency: 10.009, type: 'wild',    friendlyName: 'Strawberry', wild: true, wildOnly: ['cherries'], aloneBonus: 0.80 },
+  star:       { payout: [0.00, 0.00,  0.00], frequency: 10.611, type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries', 'bar'] },
+  // Not a wild - always pays aloneBonus on reel 3 regardless of what's on reels 1-2.
+  strawberry: { payout: [0.00, 0.00,  0.00], frequency: 10.009, type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 0.80 },
 };
 
 // Star and Strawberry are only available on the last reel - excluded from reels 1-2's
@@ -171,7 +172,7 @@ async function initGame() {
 
 function updateUI() {
   if (!engine) return;
-  displayBalance.textContent = `$${engine.balance.toFixed(0)}`;
+  displayBalance.textContent = `$${engine.balance.toFixed(2)}`;
   betValue.textContent = engine.betPerLine;
 }
 
@@ -192,7 +193,7 @@ function handleStateChange(state) {
 
     if (state === 'showing_wins') {
       const winVal = engine.lastWin;
-      gameTicker.textContent = `WIN: $${winVal.toFixed(0)}!`;
+      gameTicker.textContent = `WIN: $${winVal.toFixed(2)}!`;
     } else {
       gameTicker.textContent = 'IDLE';
     }
@@ -284,9 +285,9 @@ function buildPaytableContent() {
     if (meta.wild) {
       const target = meta.wildOnly ? meta.wildOnly.join(', ') : 'most symbols';
       content += `<em style="color:#ffd23f; font-size:10px;">Wild for ${target} (reel 3 only)</em><br>`;
-      if (meta.aloneBonus) {
-        content += `<em style="color:#ffd23f; font-size:10px;">Pays ${meta.aloneBonus}x alone on reel 3</em>`;
-      }
+    }
+    if (meta.aloneBonus) {
+      content += `<em style="color:#ffd23f; font-size:10px;">Pays ${meta.aloneBonus}x on reel 3, regardless of reels 1-2</em>`;
     }
     if (meta.wildPenalty) {
       content += `<em style="color:#d9a891; font-size:10px;">-${meta.wildPenalty} when won via wild</em>`;
