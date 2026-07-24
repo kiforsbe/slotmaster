@@ -16,8 +16,8 @@ export const LINES_COUNT = 5;
 // Payline definitions - 3 reels x 3 rows: the three horizontal rows, plus the two true
 // diagonals (not V-shapes - see docs/superpowers/specs design doc).
 export const PAYLINES = [
-  [0, 0, 0], // Line 1: Top Row
-  [1, 1, 1], // Line 2: Middle Row
+  [1, 1, 1], // Line 1: Middle Row
+  [0, 0, 0], // Line 2: Top Row
   [2, 2, 2], // Line 3: Bottom Row
   [0, 1, 2], // Line 4: Diagonal, upper-left to bottom-right
   [2, 1, 0], // Line 5: Diagonal, bottom-left to upper-right
