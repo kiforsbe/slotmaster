@@ -35,18 +35,22 @@ export const PAYLINES = [
 // `bar` is the sole `type: 'premium'` symbol - marking it that way is what lets TUNE
 // FREQUENCIES' premium/other reallocation actually move the needle for this paytable
 // (its scatter-tuning phase is a no-op here since there's no scatter symbol).
+// Payout values are multipliers of betPerLine. They're calibrated against the game's
+// actual 20-cent per-line bet (BET_PER_LINE above) - e.g. cherries' 2.00 single-symbol
+// multiplier gives a real $0.40 win at the default bet, matching the original cents-based
+// design (40c/80c/$1.60 for 1/2/3 cherries, $10 for 3 bars, etc. at a 20-cent line bet).
 export const PAYTABLE = {
-  bar:        { payout: [0.00, 0.00, 10.00], frequency:  0.806, type: 'premium', friendlyName: 'Bar' },
-  clover:     { payout: [0.00, 0.00,  4.00], frequency:  1.611, type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
-  pear:       { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Pear',       wildPenalty: 1 },
-  melon:      { payout: [0.00, 0.00,  3.00], frequency:  1.814, type: 'regular', friendlyName: 'Watermelon', wildPenalty: 1 },
-  grapes:     { payout: [0.00, 0.00,  2.00], frequency:  2.018, type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
-  plum:       { payout: [0.00, 0.00,  2.00], frequency:  8.018, type: 'regular', friendlyName: 'Plum' },
-  orange:     { payout: [0.00, 0.00,  1.60], frequency:  8.425, type: 'regular', friendlyName: 'Orange' },
-  cherries:   { payout: [0.40, 0.80,  1.60], frequency: 12.036, type: 'regular', friendlyName: 'Cherries' },
+  bar:        { payout: [0.00, 0.00, 50.00], frequency:  0.806, type: 'premium', friendlyName: 'Bar' },
+  clover:     { payout: [0.00, 0.00, 20.00], frequency:  1.611, type: 'regular', friendlyName: 'Clover',     wildPenalty: 1 },
+  pear:       { payout: [0.00, 0.00, 15.00], frequency:  1.814, type: 'regular', friendlyName: 'Pear',       wildPenalty: 1 },
+  melon:      { payout: [0.00, 0.00, 15.00], frequency:  1.814, type: 'regular', friendlyName: 'Watermelon', wildPenalty: 1 },
+  grapes:     { payout: [0.00, 0.00, 10.00], frequency:  2.018, type: 'regular', friendlyName: 'Grapes',     wildPenalty: 1 },
+  plum:       { payout: [0.00, 0.00, 10.00], frequency:  8.018, type: 'regular', friendlyName: 'Plum' },
+  orange:     { payout: [0.00, 0.00,  8.00], frequency:  8.425, type: 'regular', friendlyName: 'Orange' },
+  cherries:   { payout: [2.00, 4.00,  8.00], frequency: 12.036, type: 'regular', friendlyName: 'Cherries' },
   star:       { payout: [0.00, 0.00,  0.00], frequency: 10.611, type: 'wild',    friendlyName: 'Star',       wild: true, wildExcludes: ['cherries', 'bar'] },
   // Not a wild - always pays aloneBonus on reel 3 regardless of what's on reels 1-2.
-  strawberry: { payout: [0.00, 0.00,  0.00], frequency: 10.009, type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 0.80 },
+  strawberry: { payout: [0.00, 0.00,  0.00], frequency: 10.009, type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 4.00 },
 };
 
 // Star and Strawberry are only available on the last reel - excluded from reels 1-2's
