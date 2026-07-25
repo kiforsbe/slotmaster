@@ -281,6 +281,82 @@ test('tuneFrequencies diagnostics.rtpPhase includes numeric error and boolean co
   assert.equal(diagnostics.scatterPhase, null);
 });
 
+test('tuneFrequencies gives up early and stays deterministic on a genuinely infeasible target', async () => {
+  const opts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    // 100000% RTP is unreachable for this paytable no matter how frequencies are shuffled -
+    // renormalization conserves each reel's total weight budget and every symbol needs at
+    // least 1 occurrence, so there's a hard ceiling far below this. orderingBiasByReel: [0,0,0]
+    // disables the ordering preference for this test specifically - ordering-violation totals
+    // are computed deterministically from the exact reel weights (not sampled, unlike RTP), so
+    // they keep ratcheting down for a long time as the simplex moves even once RTP itself has
+    // hit its structural ceiling; that's correct per-component behavior (an RTP plateau alone
+    // shouldn't restart the search while another front is still genuinely improving - see
+    // 'exhausted' in the design doc), but it means a *reliable* 'stalled' test needs RTP
+    // isolated as the only active front. Mirrors the barfruits case that motivated this (a
+    // scatter payout that made 96% unreachable at a 1% trigger rate).
+    targetRtp: 100000, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 100,
+    stallWindowIterations: 8, maxStallRestarts: 3, orderingBiasByReel: [0, 0, 0],
+  };
+  const result = await tuneFrequencies(PAYTABLE, REEL_TABLES, opts);
+  const rp = result.diagnostics.rtpPhase;
+  assert.equal(rp.reason, 'stalled', `expected 'stalled', got '${rp.reason}' (error=${rp.error})`);
+  assert.ok(rp.restarts > 0, `expected at least one restart, got ${rp.restarts}`);
+  assert.ok(rp.iterationsRun < rp.iterationsBudget,
+    `expected to give up before exhausting the ${rp.iterationsBudget}-iteration budget, used ${rp.iterationsRun}`);
+
+  // Determinism: an identical second call reproduces exactly, including restart count -
+  // the seed-shifting on restart must still be a pure function of the original searchSeed.
+  const result2 = await tuneFrequencies(PAYTABLE, REEL_TABLES, opts);
+  assert.deepEqual(result.reelFrequencyTables, result2.reelFrequencyTables);
+  assert.equal(result.diagnostics.rtpPhase.restarts, result2.diagnostics.rtpPhase.restarts);
+});
+
+test('tuneFrequencies stops early once already essentially resolved (reason: converged)', async () => {
+  const result = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 30000, trialsPerPoint: 2, maxIterations: 150,
+    // Loose on purpose - REEL_TABLES is already close to 96%, but not necessarily within
+    // 0.01 points of it. If this doesn't produce 'converged', check the actual measured RTP
+    // via a throwaway script and either loosen this further or tighten trialSpins' noise.
+    // orderingBiasByReel: [0,0,0] disables the ordering preference - "fully resolved" requires
+    // both ordering and limit penalty totals to hit exactly 0, and REEL_TABLES' real baseline
+    // (verified via a throwaway script) has small persistent ordering violations under the
+    // default preference that a soft-penalty search doesn't fully eliminate, which would keep
+    // this stuck at 'converged-with-violations' instead - not what this test is checking.
+    earlyAcceptErrorPct: 3, orderingBiasByReel: [0, 0, 0],
+  });
+  const rp = result.diagnostics.rtpPhase;
+  assert.equal(rp.reason, 'converged', `expected 'converged', got '${rp.reason}' (error=${rp.error})`);
+  assert.ok(rp.iterationsRun < rp.iterationsBudget,
+    `expected to stop early, used ${rp.iterationsRun} of ${rp.iterationsBudget}`);
+});
+
+test('tuneFrequencies reports converged-with-violations when RTP is reachable but an ordering conflict is not', async () => {
+  const conflictedTables = [
+    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, min: FREQUENCY_REEL1.symbols.cherries.frequency * 5 } } },
+    FREQUENCY_REEL2,
+    FREQUENCY_REEL3,
+  ];
+  const result = await tuneFrequencies(PAYTABLE, conflictedTables, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    // maxIterations: 120, not 60 - the forced conflict needs more than a single 60-iteration
+    // budget for the ordering front to actually plateau (verified via a throwaway script); at
+    // 60 it's still gradually improving, which is correctly NOT what 'stillImproving.ordering
+    // === false' should assert against.
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 120,
+    limitPenaltyWeight: 20, orderingPenaltyWeight: 0.5, stallWindowIterations: 8, maxStallRestarts: 3,
+  });
+  const rp = result.diagnostics.rtpPhase;
+  assert.equal(rp.reason, 'converged-with-violations', `expected 'converged-with-violations', got '${rp.reason}' (error=${rp.error}, orderingPenaltyRemaining=${rp.orderingPenaltyRemaining})`);
+  assert.ok(rp.orderingPenaltyRemaining > 0,
+    `expected a remaining ordering violation forced by bar's artificially high min, got ${rp.orderingPenaltyRemaining}`);
+  assert.equal(rp.stillImproving.ordering, false, 'expected ordering to be reported as no longer improving once genuinely stuck');
+});
+
 test('tuneFrequencies throws if reelFrequencyTables.length does not match reelsCount', async () => {
   await assert.rejects(
     () => tuneFrequencies(PAYTABLE, [FREQUENCY_REEL1, FREQUENCY_REEL2], {

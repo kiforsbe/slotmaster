@@ -449,6 +449,12 @@ export async function nelderMead({
  *     (held fixed / left at 0). `fixed` lives on the reel data itself, per (symbol, reel) -
  *     not derived from the paytable's `type` - so it's independent per reel: a symbol can be
  *     fixed on one reel and freely tuned on another.
+ *     Phase 2 itself runs in short rounds rather than one long search: a round that fails to
+ *     improve RTP error, the ordering-violation total, and the limit-violation total (each
+ *     tracked independently) restarts from the best point found so far with a wider step and
+ *     a different search seed, and gives up early after several such stalls rather than
+ *     grinding through the rest of the iteration budget on a target that was never reachable -
+ *     see `diagnostics.rtpPhase.reason` for why a given run stopped.
  *
  * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
  *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
@@ -498,6 +504,18 @@ export async function nelderMead({
  * @param {number} [options.searchSeed=12345] - Base PRNG seed for the common-random-numbers
  *   gradient/simplex estimates - a given seed always explores the same sequence, for
  *   reproducible runs.
+ * @param {number} [options.stallWindowIterations=15] - Phase 2 runs nelderMead() in rounds of
+ *   this many iterations, checking after each round whether RTP error, the ordering-violation
+ *   total, or the limit-violation total improved by at least 2% relative to its own
+ *   best-so-far. A round where none of the three improved is a stall.
+ * @param {number} [options.stallWidenFactor=1.5] - Multiplier applied to the Nelder-Mead initial
+ *   step size each time a stall triggers a restart.
+ * @param {number} [options.maxStallRestarts=4] - Consecutive stalled rounds before Phase 2
+ *   gives up early (rather than spending the rest of maxIterations on a dead end) and reports
+ *   `diagnostics.rtpPhase.reason` as `'stalled'` or `'converged-with-violations'`.
+ * @param {number} [options.earlyAcceptErrorPct=0.01] - RTP error threshold (in percentage
+ *   points) below which Phase 2 stops immediately if ordering/limit violations are also fully
+ *   resolved - no reason to spend more budget refining an already-essentially-exact result.
  * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: Object) => (void|Promise<void>)} [options.onProgress] -
  *   Called (and awaited, if it returns a promise) after each candidate is measured.
  *   `multiplier` is always `null` during phase 'shape' (Phase 2 moves every dimension
@@ -538,6 +556,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchSeed = 12345,
+    stallWindowIterations = 15,
+    stallWidenFactor = 1.5,
+    maxStallRestarts = 4,
+    earlyAcceptErrorPct = 0.01,
     onProgress = null,
   } = options;
 
@@ -737,46 +759,137 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return { total, violations };
     }
 
-    // One fixed seed for the entire Nelder-Mead call (rather than one per iteration like
-    // gradientDescent1D's probes): every point evaluated - old simplex vertices or new
-    // candidates - needs to stay directly comparable for the whole run, not just within one
-    // iteration, since a vertex from iteration 3 may still be in play at iteration 50.
-    // measure()'s own trialsPerPoint averaging keeps a single seed's estimate reasonably
-    // stable per point.
-    const nmSeed = searchSeed + 700000;
+    // Base seed for Phase 2's common-random-numbers comparability - every point evaluated
+    // within one round needs to stay directly comparable. A stalled restart shifts this by a
+    // large offset per restart (see the round loop below) so it explores under genuinely
+    // different Monte Carlo noise, not just a wider step at the same noisy seed - the whole
+    // sequence is still a pure function of `searchSeed`, so tuneFrequencies stays
+    // deterministic end-to-end (verified by a dedicated regression test).
+    const baseNmSeed = searchSeed + 700000;
 
     let rtpMin = Infinity, rtpMax = -Infinity;
 
-    function evaluate(x) {
-      const reelTables = projectPoint(x);
-      const measured = measure(reelTables, nmSeed);
-      const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
-      const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
-      const error = Math.abs(measured.rtp - targetRtp);
-      if (measured.rtp < rtpMin) rtpMin = measured.rtp;
-      if (measured.rtp > rtpMax) rtpMax = measured.rtp;
-      return {
-        loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty,
-        rtp: measured.rtp,
-        triggerRate: measured.triggerRate,
-        error,
-        orderingViolations,
-        limitViolations,
-        trial: reelTables,
+    function makeEvaluate(nmSeed) {
+      return function evaluate(x) {
+        const reelTables = projectPoint(x);
+        const measured = measure(reelTables, nmSeed);
+        const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
+        const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
+        const error = Math.abs(measured.rtp - targetRtp);
+        if (measured.rtp < rtpMin) rtpMin = measured.rtp;
+        if (measured.rtp > rtpMax) rtpMax = measured.rtp;
+        return {
+          loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty,
+          rtp: measured.rtp,
+          triggerRate: measured.triggerRate,
+          error,
+          orderingPenalty: orderPenalty,
+          limitPenalty: boundsPenalty,
+          orderingViolations,
+          limitViolations,
+          trial: reelTables,
+        };
       };
     }
 
-    const nm = await nelderMead({
-      initialPoint,
-      initialStepSize,
-      evaluate,
-      maxIterations,
-      onProgress: onProgress ? (i, point, result, best) => onProgress('shape', i, null, result, best) : null,
-      yieldToEventLoop,
-    });
+    // A value only counts as "improved" if it beat its own best-so-far by more than 2%
+    // relative - a small, fixed threshold isn't used since RTP error, ordering-penalty
+    // totals, and limit-penalty totals live on completely different scales across games.
+    function improved(newValue, prevBest) {
+      if (prevBest <= 0) return false; // already at zero - nothing left to improve
+      return (prevBest - newValue) > prevBest * 0.02;
+    }
 
-    currentReelTables = nm.result.trial;
-    rtpPhaseResult = { ...nm.result, iterations: nm.iterations, rtpRange: { min: rtpMin, max: rtpMax }, fixedSymbols };
+    // Phase 2 runs nelderMead() in rounds of `stallWindowIterations` iterations rather than
+    // one long call. A round that improves none of RTP error, the ordering-violation total,
+    // or the limit-violation total (each tracked against its own best-so-far, not blended
+    // into one number - this is what lets "RTP is stuck but ordering is still improving" keep
+    // the search going instead of restarting) is a stall: the next round restarts from the
+    // best point found so far, with a wider step and a shifted seed, rather than continuing
+    // to grind at the same spot. After `maxStallRestarts` consecutive stalls, the search gives
+    // up early rather than spending the rest of `maxIterations` on a dead end - see the design
+    // doc for the barfruits case (a genuinely infeasible target that used to run the full
+    // budget with no way to notice or explain that) that motivated this.
+    let point = initialPoint;
+    let stepSize = initialStepSize;
+    let restarts = 0;
+    let iterationsUsed = 0;
+    let best = null; // best-ever vertex across all rounds, by RTP error
+    let bestOrderingPenalty = Infinity;
+    let bestLimitPenalty = Infinity;
+    let stallStreak = 0;
+    let stalledOut = false;
+    let stillImproving = { rtp: true, ordering: true, limits: true };
+
+    do {
+      const roundIterations = Math.min(stallWindowIterations, maxIterations - iterationsUsed);
+      const nmSeed = baseNmSeed + restarts * 1300021;
+      const roundStartIterations = iterationsUsed;
+      const nm = await nelderMead({
+        initialPoint: point,
+        initialStepSize: stepSize,
+        evaluate: makeEvaluate(nmSeed),
+        maxIterations: roundIterations,
+        onProgress: onProgress
+          ? (i, pt, result, roundBest) => onProgress('shape', roundStartIterations + i, null, result, roundBest)
+          : null,
+        yieldToEventLoop,
+      });
+      iterationsUsed += nm.iterations;
+
+      const prevBestError = best ? best.error : Infinity;
+      const prevBestOrdering = bestOrderingPenalty;
+      const prevBestLimit = bestLimitPenalty;
+
+      if (!best || nm.result.loss < best.loss) best = nm.result;
+      if (nm.result.orderingPenalty < bestOrderingPenalty) bestOrderingPenalty = nm.result.orderingPenalty;
+      if (nm.result.limitPenalty < bestLimitPenalty) bestLimitPenalty = nm.result.limitPenalty;
+
+      stillImproving = {
+        rtp: improved(best.error, prevBestError),
+        ordering: improved(bestOrderingPenalty, prevBestOrdering),
+        limits: improved(bestLimitPenalty, prevBestLimit),
+      };
+
+      const fullyResolved = best.error <= earlyAcceptErrorPct && bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
+      if (fullyResolved) break;
+
+      if (stillImproving.rtp || stillImproving.ordering || stillImproving.limits) {
+        stallStreak = 0;
+        point = nm.point;
+      } else {
+        stallStreak++;
+        restarts++;
+        point = best.point;
+        stepSize *= stallWidenFactor;
+        if (stallStreak >= maxStallRestarts) {
+          stalledOut = true;
+          break;
+        }
+      }
+    } while (iterationsUsed < maxIterations);
+
+    currentReelTables = best.trial;
+    const reason = (() => {
+      const rtpOk = best.error <= rtpTolerancePct;
+      const violationsOk = bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
+      if (rtpOk && violationsOk) return 'converged';
+      if (rtpOk) return 'converged-with-violations';
+      if (stalledOut) return 'stalled';
+      return 'exhausted';
+    })();
+
+    rtpPhaseResult = {
+      ...best,
+      iterations: iterationsUsed,
+      restarts,
+      reason,
+      rtpRange: { min: rtpMin, max: rtpMax },
+      orderingPenaltyRemaining: bestOrderingPenalty,
+      limitPenaltyRemaining: bestLimitPenalty,
+      stillImproving,
+      fixedSymbols,
+    };
   }
 
   const finalReelTables = currentReelTables;
@@ -793,12 +906,18 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       rtpPhase: rtpPhaseResult ? {
         error: rtpPhaseResult.error,
         converged: rtpPhaseResult.error <= rtpTolerancePct,
+        reason: rtpPhaseResult.reason,
         rtp: rtpPhaseResult.rtp,
         triggerRate: rtpPhaseResult.triggerRate,
         iterationsRun: rtpPhaseResult.iterations,
-        orderingViolations: rtpPhaseResult.orderingViolations,
-        limitViolations: rtpPhaseResult.limitViolations,
+        iterationsBudget: maxIterations,
+        restarts: rtpPhaseResult.restarts,
         rtpRange: rtpPhaseResult.rtpRange,
+        orderingViolations: rtpPhaseResult.orderingViolations,
+        orderingPenaltyRemaining: rtpPhaseResult.orderingPenaltyRemaining,
+        limitViolations: rtpPhaseResult.limitViolations,
+        limitPenaltyRemaining: rtpPhaseResult.limitPenaltyRemaining,
+        stillImproving: rtpPhaseResult.stillImproving,
         fixedSymbols: rtpPhaseResult.fixedSymbols,
       } : null,
     }
