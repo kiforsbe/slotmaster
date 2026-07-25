@@ -588,3 +588,26 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
 
   return reel;
 }
+
+/**
+ * Resolves a symbol's soft frequency bounds on one reel: symbol-level override -> reel
+ * `defaults` -> unconstrained (`null`). Each bound resolves independently - a symbol can
+ * override only `maxFrequency` while still inheriting the reel's default `minFrequency`, for
+ * example. Used by both `tuneFrequencies` (Phase 2's per-dimension search bounds) and the TUNE
+ * FREQUENCIES panel's live view (showing each symbol's configured range next to its
+ * live-updating current value) - `generateReel` itself never needs this, since these bounds
+ * guide the search, they don't affect how a reel strip is built.
+ *
+ * @param {Object} reelTable - One reel's `{ defaults?, symbols }` table, or a flat legacy
+ *   `{ symbol: {...} }` map (auto-detected by the presence of `.symbols`, same as `generateReel`).
+ * @param {string} symbol
+ * @returns {{ minFrequency: number|null, maxFrequency: number|null }}
+ */
+export function resolveFrequencyBounds(reelTable, symbol) {
+  const symbolsTable = reelTable.symbols || reelTable;
+  const defaults = reelTable.defaults || {};
+  const entry = symbolsTable[symbol] || {};
+  const minFrequency = entry.minFrequency ?? defaults.minFrequency ?? null;
+  const maxFrequency = entry.maxFrequency ?? defaults.maxFrequency ?? null;
+  return { minFrequency, maxFrequency };
+}

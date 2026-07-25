@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkWins, checkExpandingWins, checkWildLineWins, generateReel } from '../core/SlotMath.js';
+import { checkWins, checkExpandingWins, checkWildLineWins, generateReel, resolveFrequencyBounds } from '../core/SlotMath.js';
 
 test('generateReel never places a symbol whose frequency is explicitly 0', () => {
   const paytable = {
@@ -138,6 +138,39 @@ test('generateReel treats a table with no .symbols key as a flat legacy symbol m
   const reel = generateReel(flat, 50, 5);
   assert.ok(reel.includes('a'));
   assert.ok(reel.includes('b'));
+});
+
+test('resolveFrequencyBounds returns null for both when neither symbol nor reel defaults set them', () => {
+  const reelTable = { defaults: {}, symbols: { bar: { frequency: 10 } } };
+  const bounds = resolveFrequencyBounds(reelTable, 'bar');
+  assert.deepEqual(bounds, { minFrequency: null, maxFrequency: null });
+});
+
+test('resolveFrequencyBounds reads a per-symbol override', () => {
+  const reelTable = { defaults: {}, symbols: { bar: { frequency: 10, minFrequency: 2, maxFrequency: 20 } } };
+  const bounds = resolveFrequencyBounds(reelTable, 'bar');
+  assert.deepEqual(bounds, { minFrequency: 2, maxFrequency: 20 });
+});
+
+test('resolveFrequencyBounds falls back to the reel-level default when the symbol has no override', () => {
+  const reelTable = { defaults: { minFrequency: 1, maxFrequency: 50 }, symbols: { bar: { frequency: 10 } } };
+  const bounds = resolveFrequencyBounds(reelTable, 'bar');
+  assert.deepEqual(bounds, { minFrequency: 1, maxFrequency: 50 });
+});
+
+test('resolveFrequencyBounds lets a per-symbol override win over the reel default, independently per bound', () => {
+  const reelTable = {
+    defaults: { minFrequency: 1, maxFrequency: 50 },
+    symbols: { bar: { frequency: 10, maxFrequency: 20 } }, // only overrides max, not min
+  };
+  const bounds = resolveFrequencyBounds(reelTable, 'bar');
+  assert.deepEqual(bounds, { minFrequency: 1, maxFrequency: 20 });
+});
+
+test('resolveFrequencyBounds treats a table with no .symbols key as a flat legacy symbol map', () => {
+  const flat = { bar: { frequency: 10, minFrequency: 3 } };
+  const bounds = resolveFrequencyBounds(flat, 'bar');
+  assert.deepEqual(bounds, { minFrequency: 3, maxFrequency: null });
 });
 
 test('checkWins accepts arbitrary grid shapes (3x3)', () => {
