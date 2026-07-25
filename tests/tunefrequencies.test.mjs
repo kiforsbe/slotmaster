@@ -201,7 +201,7 @@ test('tuneFrequencies leaves a symbol untouched on a reel where its own entry se
 test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limitPenaltyWeight)', async () => {
   const cap = FREQUENCY_REEL1.symbols.bar.frequency / 2;
   const cappedTables = [
-    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, max: cap } } },
+    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, maxFrequency: cap } } },
     FREQUENCY_REEL2,
     FREQUENCY_REEL3,
   ];
@@ -213,6 +213,27 @@ test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limi
   });
   assert.ok(reelFrequencyTables[0].symbols.bar.frequency <= cap + 2,
     `expected bar's frequency to stay close to its soft cap of ${cap}, got ${reelFrequencyTables[0].symbols.bar.frequency}`);
+  assert.ok(Array.isArray(diagnostics.rtpPhase.limitViolations), 'limitViolations must be reported (possibly empty), never omitted');
+});
+
+test('tuneFrequencies applies a reel-level default maxFrequency to a symbol without its own override', async () => {
+  const cap = FREQUENCY_REEL1.symbols.bar.frequency / 2;
+  const cappedByDefault = [
+    { ...FREQUENCY_REEL1, defaults: { ...FREQUENCY_REEL1.defaults, maxFrequency: cap } },
+    FREQUENCY_REEL2,
+    FREQUENCY_REEL3,
+  ];
+  const { reelFrequencyTables, diagnostics } = await tuneFrequencies(PAYTABLE, cappedByDefault, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
+    limitPenaltyWeight: 10,
+  });
+  // bar has no per-symbol maxFrequency of its own here - only the reel-level default should
+  // constrain it, exactly as if it had been set directly on bar (mirrors the existing
+  // per-symbol-override test's own tolerance).
+  assert.ok(reelFrequencyTables[0].symbols.bar.frequency <= cap + 2,
+    `expected bar's frequency to stay close to the reel-default cap of ${cap} (no per-symbol override), got ${reelFrequencyTables[0].symbols.bar.frequency}`);
   assert.ok(Array.isArray(diagnostics.rtpPhase.limitViolations), 'limitViolations must be reported (possibly empty), never omitted');
 });
 
@@ -336,7 +357,7 @@ test('tuneFrequencies stops early once already essentially resolved (reason: con
 
 test('tuneFrequencies reports converged-with-violations when RTP is reachable but an ordering conflict is not', async () => {
   const conflictedTables = [
-    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, min: FREQUENCY_REEL1.symbols.cherries.frequency * 5 } } },
+    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, minFrequency: FREQUENCY_REEL1.symbols.cherries.frequency * 5 } } },
     FREQUENCY_REEL2,
     FREQUENCY_REEL3,
   ];

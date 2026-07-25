@@ -2,7 +2,7 @@
  * A pure functional simulator for the SlotMachine game logic.
  * It models spins without any visual or audio side effects.
  */
-import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, createSeededRng } from './SlotMath.js';
+import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis.
@@ -459,11 +459,14 @@ export async function nelderMead({
  * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
  *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
  * @param {Object[]} reelFrequencyTables - One table per reel, each
- *   `{ defaults?: { minGap?, maxStack? }, symbols: { symbol: { frequency, fixed?, min?, max?,
- *   minGap?, maxStack? } } }` (see generateReel's own doc in core/SlotMath.js for the shape
- *   and its `minGap`/`maxStack` fields - `tuneFrequencies` itself only reads/writes
- *   `.symbols[symbol].frequency`, `.fixed`, `.min`, `.max`; `.defaults` and any
- *   `.symbols[symbol].minGap`/`.maxStack` pass through untouched). `fixed: true` is optional
+ *   `{ defaults?: { minGap?, maxStack?, minStack?, minFrequency?, maxFrequency? }, symbols: {
+ *   symbol: { frequency, fixed?, minFrequency?, maxFrequency?, minGap?, maxStack?, minStack? } } }`
+ *   (see generateReel's own doc in core/SlotMath.js for the shape and its `minGap`/`maxStack`/
+ *   `minStack` fields - `tuneFrequencies` itself only reads/writes `.symbols[symbol].frequency`,
+ *   `.fixed`, `.minFrequency`, `.maxFrequency` (both resolved via `resolveFrequencyBounds`, so a
+ *   reel-level `defaults.minFrequency`/`.maxFrequency` applies to any symbol that doesn't
+ *   override it); `.defaults` and any `.symbols[symbol].minGap`/`.maxStack`/`.minStack` pass
+ *   through untouched). `fixed: true` is optional
  *   (defaults to falsy/tunable) and excludes that symbol from Phase 2 on that specific reel
  *   only - its frequency is left exactly as passed in. `min` and/or `max` are optional soft
  *   bounds (same units as `frequency`) on that symbol's frequency on that specific reel -
@@ -668,7 +671,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
     fixedShapeSymbols.forEach(s => fixedSymbols.push({ reel: r, symbol: s }));
     if (valueSymbols.length > 0 && valueBudget > 0) {
-      valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s, min: symbolsTable[s].min, max: symbolsTable[s].max }));
+      valueSymbols.forEach(s => {
+        const bounds = resolveFrequencyBounds(reelTable, s);
+        dims.push({ reelIndex: r, symbol: s, min: bounds.minFrequency, max: bounds.maxFrequency });
+      });
     }
   });
 

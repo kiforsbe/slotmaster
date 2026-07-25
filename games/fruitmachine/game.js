@@ -102,8 +102,8 @@ export const FREQUENCY_REEL3 = {
     plum:       { frequency: 9.079 },
     orange:     { frequency: 4.235 },
     cherries:   { frequency: 3.401 },
-    star:       { frequency: 29.17, minGap: 3, maxStack: 1, min: 20, max: 30 },
-    strawberry: { frequency: 5.813, minGap: 3, maxStack: 1, min: 2, max: 6 },
+    star:       { frequency: 29.17, minGap: 3, maxStack: 1, minFrequency: 20, maxFrequency: 30 },
+    strawberry: { frequency: 5.813, minGap: 3, maxStack: 1, minFrequency: 2, maxFrequency: 6 },
   },
 };
 
