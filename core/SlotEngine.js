@@ -4,6 +4,7 @@ import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
 import { computeGridLayout } from './GridLayout.js';
+import { drawSpriteSymbol } from './SpriteDrawer.js';
 
 // Caps SlotEngine.spinLog's size (see its own doc) - generous for a dev-tooling export, small
 // enough that an unattended autoplay/turbo session doesn't grow memory usage without bound.
@@ -955,40 +956,7 @@ export class SlotEngine {
   }
 
   drawSymbol(name, x, y, width, height, blurSpeed = 0) {
-    const tile = this.symbolsConfig[name];
-    if (!tile) return;
-
-    const destX = x;
-    const destY = y;
-    const destW = width;
-    const destH = height;
-
-    this.ctx.save();
-    
-    if (blurSpeed > 0) {
-      // Motion blur effect using vertical scaling and alpha blending
-      const stretch = Math.min(2.0, 1 + (blurSpeed / 50));
-      const blurCount = 3;
-      
-      this.ctx.globalAlpha = 0.35;
-      for (let i = 0; i < blurCount; i++) {
-        const offset = (i - (blurCount - 1) / 2) * (blurSpeed * 0.15);
-        this.ctx.drawImage(
-          this.spritesheet,
-          tile.x, tile.y, tile.w, tile.h,
-          destX, destY + offset - (destH * (stretch - 1) / 2), destW, destH * stretch
-        );
-      }
-    } else {
-      // Standard crystal clear draw
-      this.ctx.drawImage(
-        this.spritesheet,
-        tile.x, tile.y, tile.w, tile.h,
-        destX, destY, destW, destH
-      );
-    }
-
-    this.ctx.restore();
+    drawSpriteSymbol(this.ctx, this.spritesheet, this.symbolsConfig[name], x, y, width, height, blurSpeed);
   }
 
   renderExpandingAnimation() {
