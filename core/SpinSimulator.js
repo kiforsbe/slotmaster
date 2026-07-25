@@ -200,16 +200,6 @@ function computeValueRanks(paytable, symbols) {
   return rankOf;
 }
 
-// Two tiers only: 'premium'-typed symbols (tier 0) vs everything else (tier 1). Coarser
-// than computeValueRanks, but built on the exact same tieredRawWeights/t>=1 mechanism,
-// so it's structurally guaranteed to never let a premium symbol end up more frequent than
-// a non-premium one - unlike the bespoke premium/other bisection this replaces.
-function computePremiumTiers(paytable, symbols) {
-  const tierOf = {};
-  symbols.forEach(s => { tierOf[s] = paytable[s].type === 'premium' ? 0 : 1; });
-  return tierOf;
-}
-
 // weight(s) = baseFreq(s) * t^tierOf(s), before renormalization. Non-decreasing as
 // tierOf(s) increases whenever t >= 1 - this is what makes "higher-tier symbols end up no
 // more frequent" hold by construction rather than by chance, for rankTilt/premiumSplit.
@@ -229,6 +219,30 @@ function renormalizeWeights(raw, valueBudget) {
   const out = {};
   Object.keys(raw).forEach(s => { out[s] = raw[s] * scale; });
   return out;
+}
+
+// The smallest t >= 1 that satisfies the ordering guarantee for every present pair on this
+// reel, independent of any RTP target. weight(s) = baseFreq(s) * t^tierOf(s) is only
+// non-decreasing-by-tier once t clears each pair's own crossover point - a lower-tier
+// (higher-paying) symbol a with baseFreq(a) > baseFreq(b) for some higher-tier (lower-paying)
+// b needs t^(tierOf(b)-tierOf(a)) >= baseFreq(a)/baseFreq(b), i.e.
+// t >= (baseFreq(a)/baseFreq(b))^(1/(tierOf(b)-tierOf(a))). Renormalization (a shared
+// positive scale factor across all symbols) never changes pairwise ordering, so this can be
+// computed on raw baseFreq values directly. Needed because gradientDescent1D stops once its
+// RTP metric is within tolerance (or iterations run out) - neither condition has any direct
+// connection to whether every tier pair has individually crossed over yet, so the search
+// alone cannot be trusted to reach an order-safe t on its own.
+function minOrderSafeTilt(valueSymbols, baseFreq, tierOf) {
+  let minT = 1;
+  for (const a of valueSymbols) {
+    for (const b of valueSymbols) {
+      if (tierOf[a] < tierOf[b] && baseFreq[a] > baseFreq[b]) {
+        const neededT = Math.pow(baseFreq[a] / baseFreq[b], 1 / (tierOf[b] - tierOf[a]));
+        if (neededT > minT) minT = neededT;
+      }
+    }
+  }
+  return minT;
 }
 
 /**
@@ -270,7 +284,7 @@ function renormalizeWeights(raw, valueBudget) {
  *   iteration (damping against noisy slope estimates); decays each step.
  * @param {number} [args.trustFactorDecay=0.9]
  * @param {number} [args.epsilon=0.05] - Finite-difference probe distance in log-space.
- * @returns {Promise<{ mult: number, error: number, result: Object, paytable: Object, converged: boolean }>} -
+ * @returns {Promise<{ mult: number, error: number, result: Object, trial: Object, converged: boolean }>} -
  *   `converged` is true iff the best candidate found landed within `tolerance` of `target`;
  *   false means the search exhausted its iterations (or every direction was a flat
  *   plateau) without reaching the target - callers should surface this rather than
@@ -296,7 +310,7 @@ export async function gradientDescent1D({
     const metric = metricOf(result);
     const error = Math.abs(metric - target);
     const resultWithError = { ...result, error };
-    if (!best || error < best.error) best = { mult: param, error, result, paytable: trial };
+    if (!best || error < best.error) best = { mult: param, error, result, trial };
     if (onProgress) await onProgress(i, param, resultWithError, best);
     await yieldToEventLoop();
     if (error <= tolerance || i === maxIterations - 1) break;
@@ -335,40 +349,43 @@ export async function gradientDescent1D({
 }
 
 /**
- * Automatically tunes symbol `frequency` values in a paytable to hit a target RTP and a
- * target free-spin trigger rate - without touching any payout values. Runs the real
- * simulator against candidate paytables, so it stays accurate to whatever SlotMath.js's
- * actual win logic does at the time it's run (it doesn't hardcode any game-specific math).
+ * Automatically tunes each reel's own `frequency` values (one table per reel - see
+ * `reelFrequencyTables`) to hit a target RTP and a target free-spin trigger rate, without
+ * touching any payout values or the paytable itself. Runs the real simulator against
+ * candidate reel tables, so it stays accurate to whatever SlotMath.js's actual win logic
+ * does at the time it's run.
  *
- * Strategy: symbols are grouped by `paytable[symbol].type`.
- *  1. Scale every 'scatter' symbol's frequency together (gradientDescent1D) until the
- *     free-spin trigger rate lands on target, holding all other frequencies fixed.
- *  2. Reallocate non-scatter weight to hit the target RTP, holding total non-scatter weight
- *     constant so the trigger rate found in step 1 is preserved exactly. `options.frequencyMode`
- *     picks how weight is grouped into tiers - but every mode shares the same underlying
- *     guarantee: weight(s) = baseFreq(s) * t^tier(s) with t clamped >= 1, so a higher-paying
- *     symbol can never end up more frequent than a lower-paying one.
- *       - 'rankTilt' (default): tiers = one per distinct payout value (fine-grained).
- *       - 'premiumSplit': tiers = 'premium'-typed symbols (tier 0) vs everything else (tier 1) -
- *         a coarser, 2-tier version of the same mechanism, kept for continuity with the
- *         original "move weight between premium and the rest" behavior. Order *within* the
- *         non-premium tier still depends on the base paytable already being ordered there.
- *       - 'randomSearch': samples many random monotonic (by payout) weight distributions
- *         and keeps the one closest to target RTP, so the search isn't limited to a single
- *         tilt shape. Reports its best few attempts in diagnostics.rtpPhase.topCandidates.
- *     If every candidate symbol lands in the same tier (e.g. 'premiumSplit' requested on a
- *     paytable with no 'premium'-typed symbols), falls back to scaling every non-scatter
- *     symbol together instead.
+ * Frequencies live only on the per-reel tables, never on `paytable` - `paytable` is used
+ * only for payout-based tier ranking and type lookups (wild/scatter/exclusions), and is
+ * returned unchanged (not included in the return value at all).
  *
- * Both phases use gradientDescent1D (see above) rather than bisection, with common random
- * numbers reducing simulation noise in the gradient estimate, and track the best candidate
- * seen (not just the final step): generateReel() rounds symbol counts to whole numbers per
- * reel, so the achievable trigger rate / RTP is quantized with occasional jumps rather than
- * a smooth dial - a single step can straddle a jump without landing inside the tolerance band.
+ * Strategy:
+ *  1. Scale every 'scatter'-typed symbol's frequency by one shared multiplier, applied
+ *     identically to every reel's table (gradientDescent1D), until the free-spin trigger
+ *     rate lands on target. A symbol with frequency 0 on a given reel stays 0 (0 * mult = 0).
+ *  2. Tune each reel's own value-symbol weights independently via coordinate descent: for
+ *     `options.rounds` rounds, visit reel 0, then reel 1, ... then reel N-1 in turn. Each
+ *     reel's turn runs the existing gradientDescent1D (unmodified) to find that reel's own
+ *     tilt `t_r`, holding every other reel's table fixed at its current value - so this is
+ *     coordinate descent over reels, not true multi-dimensional gradient descent.
+ *     Within one reel's turn: weight(s) = baseFreq_r(s) * t_r^tierOf(s), t_r clamped >= 1,
+ *     tierOf from computeValueRanks(paytable, ...) over the symbols actually present
+ *     (nonzero base frequency) on that reel - so a higher-paying symbol present on a given
+ *     reel can never end up more frequent than a lower-paying symbol also present on that
+ *     same reel. If a reel has no tunable tiers (e.g. every present value-symbol shares one
+ *     payout, or the reel has no non-excluded symbols at all), that reel is scaled uniformly
+ *     instead (no ordering concern - a uniform multiplier never changes relative proportions).
+ *  A global best (full reel-table combination + its measured RTP) is tracked across every
+ *  sub-call in both phases, not just the final one: generateReel() rounds symbol counts to
+ *  whole numbers per reel, so achievable trigger rate / RTP is quantized with occasional
+ *  jumps rather than a smooth dial.
  *
- * @param {Object} paytable - Paytable to tune (not mutated; a tuned clone is returned).
+ * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
+ *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
+ * @param {Object[]} reelFrequencyTables - One table per reel, each `{ symbol: { frequency } }`
+ *   (same shape generateReel already accepts). Not mutated; a tuned clone is returned.
  * @param {Object} [options]
- * @param {number} [options.reelsCount=5]
+ * @param {number} [options.reelsCount=reelFrequencyTables.length]
  * @param {number} [options.rowsCount=3]
  * @param {number} [options.reelLength=220] - Virtual reel strip length passed to generateReel.
  * @param {number[]} [options.reelSeeds] - Base seeds, one per reel (reused/offset if fewer than reelsCount).
@@ -380,28 +397,33 @@ export async function gradientDescent1D({
  * @param {number} [options.triggerRateTolerancePct=0.15] - Acceptable +/- band around that.
  * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
  * @param {number} [options.trialsPerPoint=3] - Independent trials averaged per candidate (reduces rare-event noise).
- * @param {number} [options.maxIterations=14] - Gradient-descent steps (or random trials) per phase.
- * @param {'rankTilt'|'premiumSplit'|'randomSearch'} [options.frequencyMode='rankTilt'] - RTP reallocation strategy, see above.
- * @param {string[]} [options.valueOrderExcludeTypes=['wild']] - Symbol `type`s excluded from the
- *   tier assignment in 'rankTilt'/'premiumSplit'/'randomSearch' (held fixed at their post-scatter-phase
- *   frequency instead) - wilds don't "pay" in the normal sense, so tiering them by payout would
- *   nonsensically treat them as the cheapest, most-common tier.
- * @param {[number, number]} [options.tiltBounds=[1, 40]] - Search bounds for the tilt parameter shared by
- *   'rankTilt'/'premiumSplit' (gradient descent) and 'randomSearch' (sampled log-uniformly). Values
- *   below 1 are clamped up to 1 - the tilt is a per-tier growth multiplier, and anything below 1
- *   would shrink lower-paying tiers' share back below the top tier's, inverting the ordering
- *   guarantee these modes exist to provide.
- * @param {number} [options.searchSeed=12345] - Base PRNG seed for 'randomSearch' and for the
- *   common-random-numbers gradient estimates in the other modes - a given seed always explores
- *   the same sequence, for reproducible runs.
- * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: {mult: number, error: number, result: Object, paytable: Object}) => (void|Promise<void>)} [options.onProgress] -
- *   Called (and awaited, if it returns a promise) after each candidate is measured, before yielding to the
- *   event loop - a caller can safely touch the DOM here and see it rendered before the next (heavier) candidate runs.
- * @returns {Promise<{ paytable: Object, rtp: number, triggerRatePct: number, diagnostics: Object }>}
+ * @param {number} [options.maxIterations=14] - Gradient-descent steps per reel per round.
+ * @param {number} [options.rounds=3] - Coordinate-descent rounds over reels.
+ * @param {string[]} [options.valueOrderExcludeTypes=['wild']] - Symbol `type`s excluded from
+ *   tier assignment on every reel (held fixed at their post-scatter-phase frequency instead).
+ * @param {[number, number]} [options.tiltBounds=[1, 40]] - Search bounds for each reel's tilt
+ *   parameter. Values below 1 are clamped up to 1 regardless of what's passed - the tilt is a
+ *   per-tier growth multiplier, and anything below 1 would invert the ordering guarantee.
+ * @param {number} [options.searchSeed=12345] - Base PRNG seed for the common-random-numbers
+ *   gradient estimates - a given seed always explores the same sequence, for reproducible runs.
+ * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: Object, context?: {reelIndex: number, round: number}) => (void|Promise<void>)} [options.onProgress] -
+ *   Called (and awaited, if it returns a promise) after each candidate is measured. `context`
+ *   is only present during phase 'shape', identifying which reel/round the step belongs to.
+ * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
-export async function tuneFrequencies(paytable, options = {}) {
+export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
+  if (!paytable || typeof paytable !== 'object') {
+    throw new Error('tuneFrequencies requires a paytable');
+  }
+  // Checked before destructuring options below - `reelsCount`'s default reads
+  // `reelFrequencyTables.length`, which would throw an unrelated TypeError first if this
+  // isn't actually an array.
+  if (!Array.isArray(reelFrequencyTables) || reelFrequencyTables.length === 0) {
+    throw new Error('tuneFrequencies requires a non-empty array of reelFrequencyTables');
+  }
+
   const {
-    reelsCount = 5,
+    reelsCount = reelFrequencyTables.length,
     rowsCount = 3,
     reelLength = 220,
     reelSeeds = [1234, 567, 89, 765, 3321],
@@ -418,43 +440,34 @@ export async function tuneFrequencies(paytable, options = {}) {
     trialSpins = 800000,
     trialsPerPoint = 3,
     maxIterations = 14,
-    frequencyMode = 'rankTilt',
+    rounds = 3,
     valueOrderExcludeTypes = ['wild'],
     tiltBounds = [1, 40],
     searchSeed = 12345,
     onProgress = null,
   } = options;
 
-  // Each candidate measurement is itself a synchronous, CPU-bound block (simulateSpins
-  // doesn't yield internally) - but yielding *between* candidates via a macrotask lets a
-  // browser tab repaint after each onProgress call, so a caller can render live, iterative
-  // results instead of the whole run appearing to freeze the page until it's done.
   const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0));
 
-  if (!paytable || typeof paytable !== 'object') {
-    throw new Error('tuneFrequencies requires a paytable');
+  if (reelFrequencyTables.length !== reelsCount) {
+    throw new Error(`tuneFrequencies requires reelFrequencyTables to be an array of length reelsCount (${reelsCount})`);
   }
 
-  const basePaytable = JSON.parse(JSON.stringify(paytable));
-  const scatterSymbols = Object.keys(basePaytable).filter(s => basePaytable[s].type === 'scatter');
+  const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
+  const scatterSymbols = Object.keys(paytable).filter(s => paytable[s].type === 'scatter');
 
-  function buildReelStrips(pt) {
-    const strips = [];
-    for (let i = 0; i < reelsCount; i++) {
-      strips.push(generateReel(pt, reelLength, reelSeeds[i % reelSeeds.length] + i * 100000));
-    }
-    return strips;
+  function buildReelStrips(reelTables) {
+    return reelTables.map((rt, i) => generateReel(rt, reelLength, reelSeeds[i % reelSeeds.length] + i * 100000));
   }
 
   // rngSeed is optional - omitted, this falls back to unseeded Math.random per trial (via
   // simulateSpins' own default). When provided, each trialsPerPoint repeat gets its own
-  // derived seed (so multiple trials still average over genuinely different sequences),
-  // but that derived seed is identical across different candidate measurements for the
-  // same trial index and rngSeed - the common-random-numbers property gradientDescent1D's
+  // derived seed, but that derived seed is identical across different candidate measurements
+  // for the same trial index and rngSeed - the common-random-numbers property gradientDescent1D's
   // finite difference relies on.
-  function measure(pt, rngSeed) {
-    const reelStrips = buildReelStrips(pt);
-    const config = { reelsCount, rowsCount, paytable: pt, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol };
+  function measure(reelTables, rngSeed) {
+    const reelStrips = buildReelStrips(reelTables);
+    const config = { reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol };
     let rtpSum = 0, triggerSum = 0;
     for (let i = 0; i < trialsPerPoint; i++) {
       const rng = rngSeed != null ? createSeededRng(rngSeed + i * 104729) : Math.random;
@@ -466,23 +479,23 @@ export async function tuneFrequencies(paytable, options = {}) {
   }
 
   // ---- Phase 1: scale scatter symbol(s) to hit the target trigger rate ----
-  let pt1 = basePaytable;
+  // One shared multiplier applied identically to every reel's table - a symbol with
+  // frequency 0 on a given reel stays 0 (0 * mult = 0), so this is safe even for reels
+  // that don't carry the scatter symbol at all.
+  let currentReelTables = baseReelTables;
   let scatterPhase = null;
   if (scatterSymbols.length > 0) {
-    const scatterBaseFreq = {};
-    scatterSymbols.forEach(s => { scatterBaseFreq[s] = basePaytable[s].frequency; });
-
     scatterPhase = await gradientDescent1D({
       initialParam: 1,
       minParam: 0.05,
       maxParam: 8,
       target: targetTriggerRatePct,
       tolerance: triggerRateTolerancePct,
-      buildTrial: (mult) => {
-        const trial = JSON.parse(JSON.stringify(basePaytable));
-        scatterSymbols.forEach(s => { trial[s].frequency = scatterBaseFreq[s] * mult; });
+      buildTrial: (mult) => baseReelTables.map(rt => {
+        const trial = JSON.parse(JSON.stringify(rt));
+        scatterSymbols.forEach(s => { if (trial[s]) trial[s].frequency = rt[s].frequency * mult; });
         return trial;
-      },
+      }),
       metricOf: (result) => result.triggerRate,
       measure,
       maxIterations,
@@ -490,152 +503,131 @@ export async function tuneFrequencies(paytable, options = {}) {
       onProgress: onProgress ? (i, mult, result, best) => onProgress('scatter', i, mult, result, best) : null,
       yieldToEventLoop,
     });
-    pt1 = scatterPhase.paytable;
+    currentReelTables = scatterPhase.trial;
   }
 
-  // ---- Phase 2: reallocate non-scatter weight to hit the target RTP ----
-  // Total non-scatter weight is held fixed throughout, so scatter's share (and therefore
-  // the trigger rate locked in above) doesn't drift while RTP is being tuned.
-  const nonScatterSymbols = Object.keys(pt1).filter(s => !scatterSymbols.includes(s));
-  const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
-  let rtpPhase = null;
+  // ---- Phase 2: coordinate descent over reels, tuning each reel's own value weights ----
+  // Deliberately NOT tracking a "best RTP seen across the whole run" snapshot here (unlike
+  // gradientDescent1D's own single-parameter search): a step from earlier in the run - before
+  // some reel had its order-safety floor applied - can have a lower RTP error than the fully
+  // safety-corrected final state, and blindly preferring it would silently reintroduce an
+  // ordering violation the later step fixed. Using the state after the full loop instead
+  // guarantees every reel was safety-floored on its last visit, since no reel is touched
+  // again after that.
+  let rtpPhaseStepCount = 0;
+  let lastReelResult = null;
 
-  const fixedShapeSymbols = nonScatterSymbols.filter(s => valueOrderExcludeTypes.includes(pt1[s].type));
-  const valueSymbols = nonScatterSymbols.filter(s => !valueOrderExcludeTypes.includes(pt1[s].type));
-  const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + pt1[s].frequency, 0);
-  const valueBudget = nonScatterTotal - fixedShapeTotal;
+  for (let round = 0; round < rounds; round++) {
+    for (let r = 0; r < reelsCount; r++) {
+      const reelTable = currentReelTables[r];
+      const nonScatterSymbols = Object.keys(reelTable).filter(s => !scatterSymbols.includes(s) && reelTable[s].frequency > 0);
+      const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
 
-  const tierOf = valueSymbols.length > 0
-    ? (frequencyMode === 'premiumSplit' ? computePremiumTiers(pt1, valueSymbols) : computeValueRanks(pt1, valueSymbols))
-    : {};
-  const tieredModeUsable = valueSymbols.length > 0 && valueBudget > 0 && new Set(Object.values(tierOf)).size > 1;
+      const fixedShapeSymbols = nonScatterSymbols.filter(s => valueOrderExcludeTypes.includes(paytable[s].type));
+      const valueSymbols = nonScatterSymbols.filter(s => !valueOrderExcludeTypes.includes(paytable[s].type));
+      const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
+      const valueBudget = nonScatterTotal - fixedShapeTotal;
 
-  if (tieredModeUsable) {
-    const baseFreq = {}; valueSymbols.forEach(s => { baseFreq[s] = pt1[s].frequency; });
-
-    // Applies an already-renormalized (summing to valueBudget) per-symbol weight map to a
-    // clone of pt1, leaving the excluded types (e.g. wilds) untouched at their Phase 1
-    // frequency.
-    function applyWeights(weights) {
-      const trial = JSON.parse(JSON.stringify(pt1));
-      valueSymbols.forEach(s => { trial[s].frequency = weights[s]; });
-      return trial;
-    }
-
-    // Tilt values below 1 would shrink higher-tier (lower-paying) symbols' multiplier below
-    // the top tier's fixed 1x, pulling weight back toward the top and inverting the very
-    // ordering guarantee these modes exist to provide - so 1 is a hard floor regardless of
-    // what tiltBounds is passed.
-    const tiltLo = Math.max(1, tiltBounds[0]);
-    const tiltHi = Math.max(tiltLo, tiltBounds[1]);
-
-    if (frequencyMode === 'randomSearch') {
-      // Sample many candidate distributions instead of committing to one tilt shape. Each
-      // trial draws its own log-uniform tilt across the full [tiltLo, tiltHi] range (so the
-      // same fully-concentrated extremes rankTilt/premiumSplit can reach are reachable here
-      // too) plus independent per-tier jitter - jitter is bounded to [1, 1.5] so every
-      // per-tier growth step is still >=1x, preserving the ordering guarantee on every
-      // single sampled candidate.
-      const maxTier = Math.max(...Object.values(tierOf));
-      const tiers = [];
-      for (let r = 0; r <= maxTier; r++) tiers.push(valueSymbols.filter(s => tierOf[s] === r));
-      const rng = createSeededRng(searchSeed);
-
-      let best = null;
-      const attempts = [];
-      for (let i = 0; i < maxIterations; i++) {
-        const tilt = tiltLo * Math.pow(tiltHi / tiltLo, rng());
-        const tierWeight = new Array(maxTier + 1);
-        tierWeight[0] = 1;
-        for (let r = 1; r <= maxTier; r++) {
-          const jitter = 1 + rng() * 0.5;
-          tierWeight[r] = tierWeight[r - 1] * tilt * jitter;
-        }
-        const raw = {};
-        tiers.forEach((tierSymbols, r) => {
-          const tierBaseTotal = tierSymbols.reduce((sum, s) => sum + baseFreq[s], 0) || 1;
-          tierSymbols.forEach(s => { raw[s] = tierWeight[r] * (baseFreq[s] / tierBaseTotal); });
-        });
-        const trial = applyWeights(renormalizeWeights(raw, valueBudget));
-        // Seeded for reproducible runs, offset well clear of the gradient-descent phases'
-        // per-step seeds elsewhere so the two can never coincide.
-        const result = measure(trial, searchSeed + 600000 + i * 7919);
-        const error = Math.abs(result.rtp - targetRtp);
-        const resultWithError = { ...result, error };
-        const candidate = { mult: tilt, error, result, paytable: trial, converged: error <= rtpTolerancePct };
-        if (!best || error < candidate.error) best = candidate;
-        attempts.push(candidate);
-        if (onProgress) await onProgress('shape', i, tilt, resultWithError, best);
-        await yieldToEventLoop();
-        if (error <= rtpTolerancePct) break;
+      if (valueSymbols.length === 0 || valueBudget <= 0) {
+        // Nothing tunable on this reel this round - leave it untouched and move to the next reel.
+        continue;
       }
-      attempts.sort((a, b) => a.error - b.error);
-      best.topCandidates = attempts.slice(0, 5).map(c => ({
-        rtp: c.result.rtp,
-        triggerRate: c.result.triggerRate,
-        error: c.error,
-        frequencies: Object.fromEntries(valueSymbols.map(s => [s, c.paytable[s].frequency])),
-      }));
-      rtpPhase = best;
-    } else {
-      // rankTilt or premiumSplit: identical mechanism, differing only in how tierOf groups
-      // symbols (computed above). weight(s) = baseFreq(s) * t^tierOf(s), t clamped >= 1.
-      rtpPhase = await gradientDescent1D({
-        initialParam: 1,
-        minParam: tiltLo,
-        maxParam: tiltHi,
-        target: targetRtp,
-        tolerance: rtpTolerancePct,
-        buildTrial: (t) => applyWeights(renormalizeWeights(tieredRawWeights(valueSymbols, baseFreq, tierOf, t), valueBudget)),
-        metricOf: (result) => result.rtp,
-        measure,
-        maxIterations,
-        seedBase: searchSeed + 300000,
-        onProgress: onProgress ? (i, t, result, best) => onProgress('shape', i, t, result, best) : null,
-        yieldToEventLoop,
-      });
-    }
-  } else if (nonScatterSymbols.length > 0) {
-    // Degenerate case (e.g. 'premiumSplit' requested on a paytable with no 'premium'-typed
-    // symbols, or every non-excluded symbol landed in the same tier): fall back to scaling
-    // every non-scatter symbol together. No ordering concern here since a uniform multiplier
-    // never changes relative proportions, so the tilt isn't floored at 1.
-    const baseFreq = {}; nonScatterSymbols.forEach(s => { baseFreq[s] = pt1[s].frequency; });
-    rtpPhase = await gradientDescent1D({
-      initialParam: 1,
-      minParam: 0.2,
-      maxParam: 5,
-      target: targetRtp,
-      tolerance: rtpTolerancePct,
-      buildTrial: (mult) => {
-        const trial = JSON.parse(JSON.stringify(pt1));
-        nonScatterSymbols.forEach(s => { trial[s].frequency = baseFreq[s] * mult; });
+
+      const tierOf = computeValueRanks(paytable, valueSymbols);
+      const tieredModeUsable = new Set(Object.values(tierOf)).size > 1;
+      const baseFreq = {}; valueSymbols.forEach(s => { baseFreq[s] = reelTable[s].frequency; });
+
+      // Applies an already-computed per-symbol weight map to a clone of this reel's table,
+      // then returns the *full* N-reel array (this reel updated, every other reel untouched
+      // at its current value) - `measure()` always needs the complete set to build strips.
+      function applyWeights(weights) {
+        const newReel = JSON.parse(JSON.stringify(reelTable));
+        valueSymbols.forEach(s => { newReel[s].frequency = weights[s]; });
+        const trial = currentReelTables.slice();
+        trial[r] = newReel;
         return trial;
-      },
-      metricOf: (result) => result.rtp,
-      measure,
-      maxIterations,
-      seedBase: searchSeed + 900000,
-      onProgress: onProgress ? (i, mult, result, best) => onProgress('shape', i, mult, result, best) : null,
-      yieldToEventLoop,
-    });
+      }
+
+      const tiltLo = Math.max(1, tiltBounds[0]);
+      const tiltHi = Math.max(tiltLo, tiltBounds[1]);
+
+      let reelResult = tieredModeUsable
+        ? await gradientDescent1D({
+            // weight(s) = baseFreq(s) * t^tierOf(s), t clamped >= 1 - guarantees a
+            // higher-paying symbol present on this reel is never more frequent than a
+            // lower-paying symbol also present on this reel, once t reaches the floor
+            // enforced below.
+            initialParam: 1,
+            minParam: tiltLo,
+            maxParam: tiltHi,
+            target: targetRtp,
+            tolerance: rtpTolerancePct,
+            buildTrial: (t) => applyWeights(renormalizeWeights(tieredRawWeights(valueSymbols, baseFreq, tierOf, t), valueBudget)),
+            metricOf: (result) => result.rtp,
+            measure,
+            maxIterations,
+            seedBase: searchSeed + 300000 + r * 50000 + round * 5000,
+            onProgress: onProgress ? (i, t, result, best) => onProgress('shape', i, t, result, best, { reelIndex: r, round }) : null,
+            yieldToEventLoop,
+          })
+        : await gradientDescent1D({
+            // Degenerate case for this reel (every present value-symbol shares one payout
+            // tier): scale them uniformly instead. No ordering concern - a uniform
+            // multiplier never changes relative proportions, so the tilt isn't floored at 1.
+            initialParam: 1,
+            minParam: 0.2,
+            maxParam: 5,
+            target: targetRtp,
+            tolerance: rtpTolerancePct,
+            buildTrial: (mult) => {
+              const weights = {}; valueSymbols.forEach(s => { weights[s] = baseFreq[s] * mult; });
+              return applyWeights(weights);
+            },
+            metricOf: (result) => result.rtp,
+            measure,
+            maxIterations,
+            seedBase: searchSeed + 900000 + r * 50000 + round * 5000,
+            onProgress: onProgress ? (i, mult, result, best) => onProgress('shape', i, mult, result, best, { reelIndex: r, round }) : null,
+            yieldToEventLoop,
+          });
+
+      // gradientDescent1D stops once its RTP metric is within tolerance (or iterations run
+      // out) - neither has any direct connection to whether every tier pair on this reel has
+      // individually crossed over yet, so a search landing at a "good enough" RTP can still
+      // leave a lower-paying pair inverted. Enforce the analytic floor unconditionally: never
+      // let the chosen tilt be smaller than what the data itself requires.
+      if (tieredModeUsable) {
+        const safeTilt = Math.min(tiltHi, minOrderSafeTilt(valueSymbols, baseFreq, tierOf));
+        if (safeTilt > reelResult.mult) {
+          const safeTrial = applyWeights(renormalizeWeights(tieredRawWeights(valueSymbols, baseFreq, tierOf, safeTilt), valueBudget));
+          const safeMeasured = measure(safeTrial, searchSeed + 300000 + r * 50000 + round * 5000 + 1);
+          const safeError = Math.abs(safeMeasured.rtp - targetRtp);
+          reelResult = { mult: safeTilt, error: safeError, result: safeMeasured, trial: safeTrial, converged: safeError <= rtpTolerancePct };
+        }
+      }
+
+      currentReelTables = reelResult.trial;
+      rtpPhaseStepCount++;
+      lastReelResult = reelResult;
+    }
   }
 
-  const finalPaytable = rtpPhase ? rtpPhase.paytable : pt1;
-  const finalResult = rtpPhase ? rtpPhase.result : measure(finalPaytable);
+  const rtpPhaseRan = rtpPhaseStepCount > 0;
+  const finalReelTables = currentReelTables;
+  const finalResult = rtpPhaseRan ? lastReelResult.result : measure(finalReelTables);
 
   return {
-    paytable: finalPaytable,
+    reelFrequencyTables: finalReelTables,
     rtp: finalResult.rtp,
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
       scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
-      rtpPhase: rtpPhase ? {
-        multiplier: rtpPhase.mult,
-        error: rtpPhase.error,
-        converged: !!rtpPhase.converged,
-        ...rtpPhase.result,
-        ...(rtpPhase.topCandidates ? { topCandidates: rtpPhase.topCandidates } : {}),
+      rtpPhase: rtpPhaseRan ? {
+        error: lastReelResult.error,
+        converged: !!lastReelResult.converged,
+        rtp: lastReelResult.result.rtp,
+        triggerRate: lastReelResult.result.triggerRate,
+        roundsRun: rounds,
       } : null,
     }
   };

@@ -589,6 +589,13 @@ git add core/SpinSimulator.js tests/tunefrequencies.test.mjs
 git commit -m "refactor: tune per-reel frequency tables via coordinate descent, remove premiumSplit/randomSearch"
 ```
 
+**Addendum (found during execution, not in the original Step 5 code above):** the "never inverts payout order" test failed against the real, non-idealized `FREQUENCY_REEL1/2/3` data (historical machine weights aren't monotonic-by-payout to start with) and exposed two real gaps in the Step 5 design as originally written:
+
+1. `gradientDescent1D` stops once its RTP metric is within tolerance (or iterations run out) - neither condition has any connection to whether every tier pair on a reel has individually crossed over yet. A search that reaches "good enough RTP" at a small tilt can leave a lower-paying pair still inverted. Fix: a new pure helper `minOrderSafeTilt(valueSymbols, baseFreq, tierOf)` (added next to `renormalizeWeights`) computes the analytic smallest `t >= 1` that satisfies every present pair on that reel, independent of RTP; after each reel's `gradientDescent1D` call, if `safeTilt > reelResult.mult`, the code re-measures at `safeTilt` and adopts that as `reelResult` instead.
+2. The originally-planned `globalBest` (tracking whichever step *anywhere in the whole run* had the lowest RTP error) could point at a snapshot from before some reel's safety floor was applied, silently reintroducing the violation the later step fixed. Fix: dropped `globalBest` entirely: the final result is `currentReelTables` as it stands after the full round/reel loop completes (`lastReelResult` replaces it purely for reporting the final step's own `.error`/`.converged`/`.result` in diagnostics) - since every reel gets its safety floor enforced on its last visit and is never touched again after, the post-loop state is order-safe by construction.
+
+Net effect on the plan's stated interfaces: unchanged (`tuneFrequencies`'s signature, return shape, and `onProgress` callback shape are exactly as specified above) - this only changed internals. The test file content in Step 3 needed one adjustment beyond what's shown above: the "never inverts payout order" test's `maxIterations` was bumped from 4 to 20 (real per-reel crossover points can require a non-trivial tilt to reach, unlike toy fixtures).
+
 ---
 
 ### Task 3: Update `core/SimulationPanel.js` for per-reel tuning UI
