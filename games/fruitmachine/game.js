@@ -56,44 +56,55 @@ export const PAYTABLE = {
 // original machines. `fixed: true` marks a symbol as excluded from TUNE FREQUENCIES' Phase 2
 // search on that specific reel (its frequency there is never touched) - star and strawberry
 // are wild symbols and are always meant to stay fixed, independent of payout ordering.
-// Note that REEL_1 does not contain the star or strawberry symbols.
+// `defaults` holds this reel's fallback minGap/maxStack (empty here - fruitmachine has no
+// symbol that needs spacing/stacking constraints); a symbol can override either under its
+// own entry in `symbols`. Note that REEL_1 does not contain the star or strawberry symbols.
 export const FREQUENCY_REEL1 = {
-  bar:        { frequency: 24.5 },
-  clover:     { frequency: 20.1 },
-  pear:       { frequency: 13.2 },
-  melon:      { frequency: 17.6 },
-  grapes:     { frequency: 3.5 },
-  plum:       { frequency: 10.1 },
-  orange:     { frequency: 3.5 },
-  cherries:   { frequency: 3.5 },
-  star:       { frequency: 0.0, fixed: true },
-  strawberry: { frequency: 0.0, fixed: true },
+  defaults: {},
+  symbols: {
+    bar:        { frequency: 24.5 },
+    clover:     { frequency: 20.1 },
+    pear:       { frequency: 13.2 },
+    melon:      { frequency: 17.6 },
+    grapes:     { frequency: 3.5 },
+    plum:       { frequency: 10.1 },
+    orange:     { frequency: 3.5 },
+    cherries:   { frequency: 3.5 },
+    star:       { frequency: 0.0, fixed: true },
+    strawberry: { frequency: 0.0, fixed: true },
+  },
 };
 
 export const FREQUENCY_REEL2 = {
-  bar:        { frequency: 8.9 },
-  clover:     { frequency: 10.5 },
-  pear:       { frequency: 10.5 },
-  melon:      { frequency: 11.7 },
-  grapes:     { frequency: 12.3 },
-  plum:       { frequency: 13.0 },
-  orange:     { frequency: 13.6 },
-  cherries:   { frequency: 15.5 },
-  star:       { frequency: 0.0, fixed: true },
-  strawberry: { frequency: 0.0, fixed: true },
+  defaults: {},
+  symbols: {
+    bar:        { frequency: 8.9 },
+    clover:     { frequency: 10.5 },
+    pear:       { frequency: 10.5 },
+    melon:      { frequency: 11.7 },
+    grapes:     { frequency: 12.3 },
+    plum:       { frequency: 13.0 },
+    orange:     { frequency: 13.6 },
+    cherries:   { frequency: 15.5 },
+    star:       { frequency: 0.0, fixed: true },
+    strawberry: { frequency: 0.0, fixed: true },
+  },
 };
 
 export const FREQUENCY_REEL3 = {
-  bar:        { frequency: 22.8 },
-  clover:     { frequency: 14.3 },
-  pear:       { frequency: 6.2 },
-  melon:      { frequency: 18.0 },
-  grapes:     { frequency: 3.3 },
-  plum:       { frequency: 9.7 },
-  orange:     { frequency: 3.8 },
-  cherries:   { frequency: 3.3 },
-  star:       { frequency: 28.3, min: 20, max: 30 },
-  strawberry: { frequency: 6.3, min: 2, max: 6 },
+  defaults: {},
+  symbols: {
+    bar:        { frequency: 22.8 },
+    clover:     { frequency: 14.3 },
+    pear:       { frequency: 6.2 },
+    melon:      { frequency: 18.0 },
+    grapes:     { frequency: 3.3 },
+    plum:       { frequency: 9.7 },
+    orange:     { frequency: 3.8 },
+    cherries:   { frequency: 3.3 },
+    star:       { frequency: 28.3, min: 20, max: 30 },
+    strawberry: { frequency: 6.3, min: 2, max: 6 },
+  },
 };
 
 // Generate the reel strips based on the frequency tables and seeds.
