@@ -461,11 +461,15 @@ export function generateReel(paytable, targetLength, seed, exclude=[], minScatte
     return reel;
   }
 
-  // Step 1 & 2: Compute weights and calculate counts in one pass
+  // Step 1 & 2: Compute weights and calculate counts in one pass. An explicit
+  // frequency: 0 means "never place this symbol on this reel" - excluded from `weights`
+  // entirely, same as `exclude` - not defaulted to 1 (which `freq || 1` did, since 0 is
+  // falsy) and not floored to a guaranteed single occurrence below.
   const weights = {};
   for (const symbol in paytable) {
     if (exclude.includes(symbol)) continue;
-    weights[symbol] = paytable[symbol].frequency || 1;
+    const freq = paytable[symbol].frequency ?? 1;
+    if (freq > 0) weights[symbol] = freq;
   }
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);

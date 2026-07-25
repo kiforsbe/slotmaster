@@ -1,6 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkWins, checkExpandingWins, checkWildLineWins } from '../core/SlotMath.js';
+import { checkWins, checkExpandingWins, checkWildLineWins, generateReel } from '../core/SlotMath.js';
+
+test('generateReel never places a symbol whose frequency is explicitly 0', () => {
+  const paytable = {
+    common:  { frequency: 10 },
+    rare:    { frequency: 1 },
+    never:   { frequency: 0 },
+  };
+  const reel = generateReel(paytable, 200, 42);
+  assert.ok(!reel.includes('never'), 'a symbol with frequency: 0 must never appear on the reel');
+  assert.ok(reel.includes('common'));
+  assert.ok(reel.includes('rare'));
+});
 
 test('checkWins accepts arbitrary grid shapes (3x3)', () => {
   const grid3x3 = [
