@@ -23,6 +23,11 @@ npm test
 Runs every `tests/*.mjs` file under Node's built-in test runner. No browser
 required — the math/simulation modules are plain functions, tested directly.
 
+## Architecture
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the `core/` module API reference and how
+a new game hooks into it.
+
 ## Project layout
 
 ```
