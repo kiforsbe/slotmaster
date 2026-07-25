@@ -549,7 +549,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   const scatterSymbols = Object.keys(paytable).filter(s => paytable[s].type === 'scatter');
 
   function buildReelStrips(reelTables) {
-    return reelTables.map((rt, i) => generateReel(rt, reelLength, reelSeeds[i % reelSeeds.length] + i * 100000));
+    // paytable (this function's outer `paytable` param, the real canonical rules table) is
+    // passed as the 6th arg so generateReel's scatter min-gap spacing works correctly even
+    // though these per-reel tables carry only `.frequency`, never `.type`.
+    return reelTables.map((rt, i) => generateReel(rt, reelLength, reelSeeds[i % reelSeeds.length] + i * 100000, [], 3, paytable));
   }
 
   // rngSeed is optional - omitted, this falls back to unseeded Math.random per trial (via

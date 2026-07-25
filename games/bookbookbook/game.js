@@ -50,18 +50,19 @@ const PAYTABLE = {
 // PAYTABLE.frequency used to carry) so this migration doesn't change RTP/trigger-rate by
 // itself - a pure data-model refactor. Differentiate them per reel via TUNE FREQUENCIES
 // (per-reel ordering preference, fixed, min/max) same as fruitmachine.
-// `book`'s `type: 'scatter'` is intentionally repeated here (fruitmachine's reel tables carry
-// no `type` at all, since it has no scatter symbol) - generateReel() is called with one of
-// these per-reel tables directly, not the full PAYTABLE, and its own min-gap enforcement
-// (spreads scatter symbols out so they can't cluster within one reel) reads `type` off
-// whatever table it's given, so it needs to be present here to keep working.
+// These tables carry only `.frequency` - no `.type` - `book`'s scatter min-gap spacing
+// (spreads scatter symbols out so they can't cluster within one reel) is driven by
+// generateReel() reading `type: 'scatter'` off the real PAYTABLE instead, passed explicitly
+// below (see generateReel's own `paytable` param doc in core/SlotMath.js). Don't duplicate
+// `type` onto these tables - that would just be a second copy of the paytable's own rule,
+// free to drift out of sync with it.
 // Don't be surprised if TUNE FREQUENCIES leaves `book`'s frequency completely unchanged on
 // every reel - that's expected here, not a bug: see the Phase 1 comment above
 // tuneFrequencies() in core/SpinSimulator.js. In short, book's baseline trigger rate
 // (~0.57%) already sits inside the tuner's default target band (0.6% +/- 0.15), so there's
 // nothing for that phase to correct.
 const FREQUENCY_REEL1 = {
-  book:     { frequency: 0.051, type: 'scatter' },
+  book:     { frequency: 0.051 },
   explorer: { frequency: 0.079 },
   tut:      { frequency: 0.157 },
   anubis:   { frequency: 0.234 },
@@ -73,7 +74,7 @@ const FREQUENCY_REEL1 = {
   ten:      { frequency: 0.201 },
 };
 const FREQUENCY_REEL2 = {
-  book:     { frequency: 0.051, type: 'scatter' },
+  book:     { frequency: 0.051 },
   explorer: { frequency: 0.079 },
   tut:      { frequency: 0.157 },
   anubis:   { frequency: 0.234 },
@@ -85,7 +86,7 @@ const FREQUENCY_REEL2 = {
   ten:      { frequency: 0.201 },
 };
 const FREQUENCY_REEL3 = {
-  book:     { frequency: 0.051, type: 'scatter' },
+  book:     { frequency: 0.051 },
   explorer: { frequency: 0.079 },
   tut:      { frequency: 0.157 },
   anubis:   { frequency: 0.234 },
@@ -97,7 +98,7 @@ const FREQUENCY_REEL3 = {
   ten:      { frequency: 0.201 },
 };
 const FREQUENCY_REEL4 = {
-  book:     { frequency: 0.051, type: 'scatter' },
+  book:     { frequency: 0.051 },
   explorer: { frequency: 0.079 },
   tut:      { frequency: 0.157 },
   anubis:   { frequency: 0.234 },
@@ -109,7 +110,7 @@ const FREQUENCY_REEL4 = {
   ten:      { frequency: 0.201 },
 };
 const FREQUENCY_REEL5 = {
-  book:     { frequency: 0.051, type: 'scatter' },
+  book:     { frequency: 0.051 },
   explorer: { frequency: 0.079 },
   tut:      { frequency: 0.157 },
   anubis:   { frequency: 0.234 },
@@ -126,8 +127,10 @@ const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQ
 // isn't a scatter (scatter symbols trigger free spins, they can't also expand during them).
 const EXPANDING_CANDIDATES = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type !== 'scatter');
 
-// 2. Reel Strips Generation (Randomized for each reel, from each reel's own frequency table)
-const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i]));
+// 2. Reel Strips Generation (Randomized for each reel, from each reel's own frequency table).
+// PAYTABLE is passed as the 6th arg so generateReel's scatter min-gap spacing works from the
+// real paytable's `type`, since these per-reel tables don't carry one themselves.
+const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i], [], 3, PAYTABLE));
 
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;

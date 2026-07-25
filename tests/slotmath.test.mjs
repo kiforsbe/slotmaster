@@ -14,6 +14,49 @@ test('generateReel never places a symbol whose frequency is explicitly 0', () =>
   assert.ok(reel.includes('rare'));
 });
 
+test('generateReel reads scatter type from a separate paytable param, not the weights table', () => {
+  // Per-reel frequency tables (games/*/game.js's FREQUENCY_REELn) carry only `.frequency` -
+  // no `.type` - so generateReel's scatter min-gap spacing must come from the real paytable
+  // passed as the 6th arg, not from the weights table itself.
+  const reelWeights = {
+    scatter: { frequency: 1 },
+    filler:  { frequency: 30 },
+  };
+  const paytable = {
+    scatter: { type: 'scatter' },
+    filler:  { type: 'regular' },
+  };
+  const reel = generateReel(reelWeights, 60, 7, [], 3, paytable);
+  // With no `type` info in reelWeights itself, min-gap spacing only takes effect because
+  // `paytable` supplies it - verify no two scatters land within the 3-wide gap.
+  const positions = reel.reduce((acc, s, i) => { if (s === 'scatter') acc.push(i); return acc; }, []);
+  for (let a = 0; a < positions.length; a++) {
+    for (let b = a + 1; b < positions.length; b++) {
+      const d = Math.abs(positions[a] - positions[b]);
+      const circularDist = Math.min(d, reel.length - d);
+      assert.ok(circularDist >= 3, `expected scatter symbols at least 3 apart, got positions ${positions[a]} and ${positions[b]}`);
+    }
+  }
+});
+
+test('generateReel defaults its paytable param to the weights table itself (backward compatible)', () => {
+  // A caller passing one combined frequency+type table (the old, pre-per-reel-model style)
+  // must keep working unchanged - paytable defaults to reelWeights when omitted.
+  const combined = {
+    scatter: { frequency: 1, type: 'scatter' },
+    filler:  { frequency: 30, type: 'regular' },
+  };
+  const reel = generateReel(combined, 60, 7);
+  const positions = reel.reduce((acc, s, i) => { if (s === 'scatter') acc.push(i); return acc; }, []);
+  for (let a = 0; a < positions.length; a++) {
+    for (let b = a + 1; b < positions.length; b++) {
+      const d = Math.abs(positions[a] - positions[b]);
+      const circularDist = Math.min(d, reel.length - d);
+      assert.ok(circularDist >= 3, `expected scatter symbols at least 3 apart, got positions ${positions[a]} and ${positions[b]}`);
+    }
+  }
+});
+
 test('checkWins accepts arbitrary grid shapes (3x3)', () => {
   const grid3x3 = [
     ['a', 'a', 'a'],

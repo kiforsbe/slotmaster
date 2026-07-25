@@ -409,7 +409,23 @@ export function generateTargetGrid(reelStrips, rowsCount, rng) {
   return grid;
 }
 
-export function generateReel(paytable, targetLength, seed, exclude=[], minScatterGap=3) {
+/**
+ * Builds one weighted reel strip.
+ * @param {Object} reelWeights - `{ symbol: { frequency } }` - this reel's own weights.
+ * @param {number} targetLength - Desired reel strip length.
+ * @param {number} seed - RNG seed for the shuffle (deterministic/reproducible).
+ * @param {string[]} [exclude=[]] - Symbols to omit from this reel entirely.
+ * @param {number} [minScatterGap=3] - Minimum circular distance enforced between any two
+ *   `type: 'scatter'` symbols on the built strip (see _enforceMinScatterGap).
+ * @param {Object} [paytable=reelWeights] - Rules table read only for `.type` (scatter min-gap
+ *   spacing) - defaults to `reelWeights` itself, so a caller passing one combined
+ *   frequency+type table (the pre-per-reel-frequency-model style) keeps working unchanged.
+ *   A per-reel frequency table (games/*\/game.js's FREQUENCY_REELn, which carries only
+ *   `.frequency`) needs the real canonical paytable passed here explicitly instead of
+ *   duplicating `type: 'scatter'` onto every reel's own table.
+ * @returns {string[]} The built reel strip (symbol names, length ~targetLength).
+ */
+export function generateReel(reelWeights, targetLength, seed, exclude=[], minScatterGap=3, paytable=reelWeights) {
   function _shuffle(array, rng) {
     for (let i = array.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
@@ -466,9 +482,9 @@ export function generateReel(paytable, targetLength, seed, exclude=[], minScatte
   // entirely, same as `exclude` - not defaulted to 1 (which `freq || 1` did, since 0 is
   // falsy) and not floored to a guaranteed single occurrence below.
   const weights = {};
-  for (const symbol in paytable) {
+  for (const symbol in reelWeights) {
     if (exclude.includes(symbol)) continue;
-    const freq = paytable[symbol].frequency ?? 1;
+    const freq = reelWeights[symbol].frequency ?? 1;
     if (freq > 0) weights[symbol] = freq;
   }
 
