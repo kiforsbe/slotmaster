@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Candy Frenzy - Cluster Pays Cascade Slot</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style type="text/css">
+    @import url('game.css');
+  </style>
+</head>
+<body>
+
+  <div class="cabinet-container">
+
+    <header>
+      <div class="title-logo">CANDY <span>FRENZY</span></div>
+      <div class="top-controls">
+        <button id="btn-paytable" class="btn-icon">📋 Paytable</button>
+        <button id="btn-mute" class="btn-icon">🔊 Sound ON</button>
+      </div>
+    </header>
+
+    <div class="game-viewport">
+      <div id="game-ticker" class="game-ticker">IDLE</div>
+
+      <div id="fs-panel" class="free-spins-panel">
+        <div id="fs-counter" class="fs-counter">FREE SPINS: 10 / 10</div>
+      </div>
+
+      <canvas id="game-canvas"></canvas>
+
+      <div class="debug-shortcuts">
+        <span class="btn-debug" style="cursor:default; border:none; color:#777;">Cheats:</span>
+        <button id="cheat-scatter" class="btn-debug">Bonus Trigger</button>
+      </div>
+    </div>
+
+    <div class="dashboard">
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Balance</span>
+          <span id="display-balance" class="dashboard-value">$1,000.00</span>
+        </div>
+      </div>
+
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Bet</span>
+          <div class="bet-adjuster">
+            <button id="bet-minus" class="btn-adjust">-</button>
+            <span id="bet-value" class="bet-display-value">1.00</span>
+            <button id="bet-plus" class="btn-adjust">+</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="spin-section">
+        <button id="btn-spin" class="btn-spin">SPIN</button>
+      </div>
+
+      <div class="auto-turbo-container">
+        <button id="btn-turbo" class="btn-icon">⚡ Turbo</button>
+        <button id="btn-auto" class="btn-icon">🔄 Auto</button>
+      </div>
+    </div>
+
+    <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px;">
+      <button id="btn-spinlog" class="btn-icon btn-sim-btn">SPIN LOG</button>
+    </div>
+
+  </div>
+
+  <!-- MODALS -->
+
+  <div id="modal-paytable" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <button class="btn-modal-close">×</button>
+      <h2 style="font-family: 'Baloo 2', serif; color: var(--gold); margin-bottom: 10px;">CANDY FRENZY PAYTABLE</h2>
+      <p style="font-size: 13px; color: #e0b0e8;">5+ orthogonally-connected symbols anywhere on the 7x7 grid pay as a cluster. No paylines. Winning clusters are removed and new candy cascades in - the spin only ends once a cascade produces no new cluster.</p>
+
+      <div class="paytable-grid" id="paytable-grid-content">
+        <!-- Rendered dynamically in game.js -->
+      </div>
+
+      <button id="btn-paytable-ok" class="btn-primary">CLOSE</button>
+    </div>
+  </div>
+
+  <div id="modal-fs-trigger" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="font-family: 'Baloo 2', serif; color: var(--gold); font-size: 28px;">BONUS TRIGGERED!</h2>
+      <p style="font-size: 14px; color: #fff; margin-top: 5px;">3+ BONUS SYMBOLS LANDED</p>
+      <p style="font-size: 15px; color: #e0b0e8; margin: 15px 0;">
+        You are awarded <strong id="fs-award-amount" style="color: var(--gold);">10</strong> FREE SPINS at 2x payout!
+      </p>
+      <button id="btn-start-fs" class="btn-primary">START FREE SPINS</button>
+    </div>
+  </div>
+
+  <div id="modal-fs-summary" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="font-family: 'Baloo 2', serif; color: var(--gold); font-size: 32px;">FREE SPINS COMPLETE</h2>
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--gold); border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <span class="dashboard-label">Total Free Spins Win</span>
+        <h3 id="fs-total-win" style="font-size: 36px; font-weight: 800; color: #fff; margin-top: 6px;">$0.00</h3>
+      </div>
+      <button id="btn-close-fs-summary" class="btn-primary">COLLECT PRIZE</button>
+    </div>
+  </div>
+
+  <!-- Shared modal shell for SPIN LOG (reused from core/SpinLogPanel.js - no RUN SIMULATION/TUNE FREQUENCIES buttons/modals for this game) -->
+  <div id="sim-modal" class="sim-modal" style="display: none;">
+    <button class="btn-modal-close">×</button>
+    <div id="sim-stats" class="sim-stats"></div>
+  </div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
