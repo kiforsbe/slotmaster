@@ -94,8 +94,8 @@ export const FREQUENCY_REEL3 = {
   plum:       { frequency: 12.0 },
   orange:     { frequency:  4.0 },
   cherries:   { frequency:  4.0 },
-  star:       { frequency: 24.0, fixed: true },
-  strawberry: { frequency:  4.0, fixed: true },
+  star:       { frequency: 24.0 },
+  strawberry: { frequency:  4.0 },
 };
 
 // Generate the reel strips based on the frequency tables and seeds.
