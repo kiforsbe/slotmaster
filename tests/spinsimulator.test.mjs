@@ -162,3 +162,31 @@ test('simulateSpins simulates an expanding wild bonus when hasExpandingWild is s
   assert.equal(expandingWins.length, 1, 'expected exactly one expanding win, from the one awarded free spin');
   assert.equal(expandingWins[0].symbol, 'other', "expected 'other' - the only non-scatter symbol in this paytable");
 });
+
+test('simulateSpins leaves spinLog empty unless logSpins is set (opt-in, per its own doc)', () => {
+  const results = simulateSpins({ ...EXPANDING_CONFIG, hasExpandingWild: true }, 1, 1, 1);
+  assert.deepEqual(results.spinLog, [], 'expected no per-spin log entries without an explicit opt-in');
+});
+
+test('simulateSpins records one spinLog entry per simulated spin when logSpins is set', () => {
+  const results = simulateSpins({ ...EXPANDING_CONFIG, hasExpandingWild: true, logSpins: true }, 1, 1, 1);
+  // 1 base spin (the trigger) + 1 free spin (the single awarded spin) = 2 total.
+  assert.equal(results.spinLog.length, 2, 'expected one log entry per base+free spin');
+  assert.equal(results.totalSpins, 2);
+
+  const [baseEntry, freeEntry] = results.spinLog;
+  assert.equal(baseEntry.phase, 'base');
+  assert.equal(baseEntry.totalBet, 1, 'base spin bet = betPerLine(1) * linesCount(1)');
+  assert.equal(baseEntry.scatterCount, 3, 'the guaranteed 3-scatter trigger on reels 1-3');
+
+  assert.equal(freeEntry.phase, 'free');
+  assert.equal(freeEntry.totalBet, 0, 'free spins cost nothing to spin');
+  assert.equal(freeEntry.expandingSymbol, 'other');
+  assert.equal(freeEntry.expandingReels, 1, 'only reel 4 ever lands the non-scatter symbol here');
+  assert.ok(freeEntry.expandingWin > 0);
+
+  const loggedTotalWin = results.spinLog.reduce((sum, e) => sum + e.totalWin, 0);
+  assert.equal(loggedTotalWin, results.totalWins, 'per-spin log totals must reconcile with the aggregate totalWins');
+  const loggedTotalBet = results.spinLog.reduce((sum, e) => sum + e.totalBet, 0);
+  assert.equal(loggedTotalBet, results.totalBets, 'per-spin log totals must reconcile with the aggregate totalBets');
+});

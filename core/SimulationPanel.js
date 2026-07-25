@@ -2,6 +2,7 @@
 // core/SpinSimulator.js's pure simulateSpins/tuneFrequencies functions.
 // Every game's game.js calls into this instead of maintaining its own copy.
 import { resolveFrequencyBounds } from './SlotMath.js';
+import { exportSpinLogCsv } from './SpinLog.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -185,7 +186,12 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
 
   setTimeout(() => {
     try {
-      const results = engine.runSimulation(numSpins, betPerLine, linesCount);
+      // Every run is seeded (even though no UI exposes the value to type back in yet) so the
+      // exported spin log's "Seed" column is always meaningful provenance, not a placeholder -
+      // note it down and pass it to engine.runSimulation(..., { seed }) to reproduce this run.
+      const seed = Math.floor(Math.random() * 2 ** 31);
+      const startedAt = new Date().toISOString();
+      const results = engine.runSimulation(numSpins, betPerLine, linesCount, { seed, logSpins: true });
 
       if (simStats) simStats.style.display = '';
       simRtpDisplay.textContent = results.rtp;
@@ -232,11 +238,19 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
       }
 
       let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
+      detailsHtml += `<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 15px; font-size: 0.85em; color: #aaa;">
+                        <span title="Pass this to engine.runSimulation(..., { seed }) to reproduce this exact run">Seed: <strong style="color: #ccc;">${seed}</strong></span>
+                        <button id="sim-export-log-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.9em;">EXPORT SPIN LOG (CSV)</button>
+                      </div>`;
       groupSymbolsByType(paytable).forEach(({ type, symbols }) => {
         const title = type.charAt(0).toUpperCase() + type.slice(1) + ' Symbols';
         detailsHtml += createSection(title, symbols, symbolStats, paytable);
       });
       detailsContainer.innerHTML = detailsHtml;
+
+      detailsContainer.querySelector('#sim-export-log-btn').addEventListener('click', () => {
+        exportSpinLogCsv(results.spinLog, { seed, startedAt, filenamePrefix: 'spinlog' });
+      });
 
       simModal.style.display = 'block';
       simModal.style.maxWidth = '1200px';

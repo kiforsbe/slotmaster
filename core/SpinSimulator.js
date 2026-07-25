@@ -3,6 +3,7 @@
  * It models spins without any visual or audio side effects.
  */
 import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis.
@@ -20,6 +21,12 @@ import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, create
  *   what enables retrigger simulation at all - if neither table is set, free spins run for
  *   exactly `freeSpinsCount` spins with no retriggers, matching this function's original
  *   behavior exactly.
+ * @param {boolean} [config.logSpins=false] - When true, records one entry per simulated spin
+ *   (base and free alike) in the returned `spinLog` array - spin index, phase, bet, total win,
+ *   and a breakdown of every scatter/line/expanding win that spin produced. Off by default since
+ *   it holds one object per spin in memory for the whole run (relevant at the default 1,000,000+
+ *   spin counts); turn it on for a dev-tooling export (see SimulationPanel.js's
+ *   "EXPORT SPIN LOG" button), not for routine RTP measurement.
  * @param {boolean} [config.hasExpandingWild=false] - Whether free spins here include a
  *   Book-of-Dead-style expanding-wild bonus (a random non-scatter symbol picked fresh each
  *   free-spins session, expanding to fill any reel it lands on - see checkExpandingWins).
@@ -51,6 +58,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     totalWins: 0,
     winDistribution: {}, // winAmount -> count
     detailedWins: [],     // New: Detailed breakdown of every win
+    spinLog: [],           // Populated only when config.logSpins is true (see its own doc)
     scatterCounts: 0,
     maxWin: 0,
     minWin: Infinity,
@@ -91,6 +99,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   let totalFreeSpinsRun = 0;
   const hasExpandingWild = !!simConfig.hasExpandingWild;
   let expandingSymbol = null;
+  const logSpins = !!simConfig.logSpins;
 
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
@@ -142,7 +151,8 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     scatterCounts: results.scatterCounts,
     freeSpinsTriggered: results.freeSpinsTriggered,
     winDistribution: results.winDistribution,
-    detailedWins: results.detailedWins
+    detailedWins: results.detailedWins,
+    spinLog: results.spinLog
   };
 
   // Helper to simulate a single spin (base or free)
@@ -237,6 +247,27 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     if (spinWin > results.maxWin) results.maxWin = spinWin;
     if (spinWin < results.minWin) results.minWin = spinWin;
     results.winDistribution[spinWin] = (results.winDistribution[spinWin] || 0) + 1;
+
+    if (logSpins) {
+      const entry = createSpinLogEntry({
+        spinIndex: results.totalSimulatedSpins,
+        phase: isFreeSpin ? 'free' : 'base',
+        betPerLine: simConfig.betPerLine,
+        linesCount,
+        chargedBet: totalSpinBet,
+        scatterBetBase: simConfig.totalBet,
+        winData,
+        scatterSymbol: simConfig.scatterSymbol
+      });
+      if (expandingResults) {
+        applyExpandingWinToSpinLogEntry(entry, {
+          expandingSymbol,
+          expandingReels: expandingResults.expandingReels.length,
+          expandingWin: expandingResults.totalPayoutMultiplier * betPerLine
+        });
+      }
+      results.spinLog.push(entry);
+    }
 
     return { spinWin, winData, expandingResults };
   }
