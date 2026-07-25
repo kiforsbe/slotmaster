@@ -200,49 +200,15 @@ function computeValueRanks(paytable, symbols) {
   return rankOf;
 }
 
-// weight(s) = baseFreq(s) * t^tierOf(s), before renormalization. Non-decreasing as
-// tierOf(s) increases whenever t >= 1 - this is what makes "higher-tier symbols end up no
-// more frequent" hold by construction rather than by chance, for rankTilt/premiumSplit.
-function tieredRawWeights(valueSymbols, baseFreq, tierOf, t) {
-  const raw = {};
-  valueSymbols.forEach(s => { raw[s] = baseFreq[s] * Math.pow(t, tierOf[s]); });
-  return raw;
-}
-
-// Scales any positive per-symbol raw-weight map so it sums to valueBudget - shared by
-// every Phase 2 mode (tieredRawWeights' t^tier construction, and randomSearch's jittered
-// tier sampling) so they all scale into the same fixed budget Phase 1's trigger-rate share
-// depends on, regardless of how the raw weights themselves were produced.
+// Scales any positive per-symbol raw-weight map so it sums to valueBudget - used both to
+// project Phase 2's Nelder-Mead candidates back onto each reel's fixed budget, and (via
+// Phase 1) to keep the scatter-symbol scaling on the same footing.
 function renormalizeWeights(raw, valueBudget) {
   const rawTotal = Object.values(raw).reduce((a, b) => a + b, 0);
   const scale = valueBudget / rawTotal;
   const out = {};
   Object.keys(raw).forEach(s => { out[s] = raw[s] * scale; });
   return out;
-}
-
-// The smallest t >= 1 that satisfies the ordering guarantee for every present pair on this
-// reel, independent of any RTP target. weight(s) = baseFreq(s) * t^tierOf(s) is only
-// non-decreasing-by-tier once t clears each pair's own crossover point - a lower-tier
-// (higher-paying) symbol a with baseFreq(a) > baseFreq(b) for some higher-tier (lower-paying)
-// b needs t^(tierOf(b)-tierOf(a)) >= baseFreq(a)/baseFreq(b), i.e.
-// t >= (baseFreq(a)/baseFreq(b))^(1/(tierOf(b)-tierOf(a))). Renormalization (a shared
-// positive scale factor across all symbols) never changes pairwise ordering, so this can be
-// computed on raw baseFreq values directly. Needed because gradientDescent1D stops once its
-// RTP metric is within tolerance (or iterations run out) - neither condition has any direct
-// connection to whether every tier pair has individually crossed over yet, so the search
-// alone cannot be trusted to reach an order-safe t on its own.
-function minOrderSafeTilt(valueSymbols, baseFreq, tierOf) {
-  let minT = 1;
-  for (const a of valueSymbols) {
-    for (const b of valueSymbols) {
-      if (tierOf[a] < tierOf[b] && baseFreq[a] > baseFreq[b]) {
-        const neededT = Math.pow(baseFreq[a] / baseFreq[b], 1 / (tierOf[b] - tierOf[a]));
-        if (neededT > minT) minT = neededT;
-      }
-    }
-  }
-  return minT;
 }
 
 /**
@@ -467,22 +433,18 @@ export async function nelderMead({
  *  1. Scale every 'scatter'-typed symbol's frequency by one shared multiplier, applied
  *     identically to every reel's table (gradientDescent1D), until the free-spin trigger
  *     rate lands on target. A symbol with frequency 0 on a given reel stays 0 (0 * mult = 0).
- *  2. Tune each reel's own value-symbol weights independently via coordinate descent: for
- *     `options.rounds` rounds, visit reel 0, then reel 1, ... then reel N-1 in turn. Each
- *     reel's turn runs the existing gradientDescent1D (unmodified) to find that reel's own
- *     tilt `t_r`, holding every other reel's table fixed at its current value - so this is
- *     coordinate descent over reels, not true multi-dimensional gradient descent.
- *     Within one reel's turn: weight(s) = baseFreq_r(s) * t_r^tierOf(s), t_r clamped >= 1,
- *     tierOf from computeValueRanks(paytable, ...) over the symbols actually present
- *     (nonzero base frequency) on that reel - so a higher-paying symbol present on a given
- *     reel can never end up more frequent than a lower-paying symbol also present on that
- *     same reel. If a reel has no tunable tiers (e.g. every present value-symbol shares one
- *     payout, or the reel has no non-excluded symbols at all), that reel is scaled uniformly
- *     instead (no ordering concern - a uniform multiplier never changes relative proportions).
- *  A global best (full reel-table combination + its measured RTP) is tracked across every
- *  sub-call in both phases, not just the final one: generateReel() rounds symbol counts to
- *  whole numbers per reel, so achievable trigger rate / RTP is quantized with occasional
- *  jumps rather than a smooth dial.
+ *  2. Jointly tune every reel's value-symbol weights via one Nelder-Mead simplex search
+ *     over one free weight per (value symbol, reel) pair - true multi-dimensional
+ *     optimization, not coordinate descent over reels. "A higher-paying symbol should not
+ *     be more frequent than a lower-paying symbol on the same reel" is a soft penalty term
+ *     added to the loss (see `nelderMead`'s `evaluate` closure below), not a hard
+ *     constraint - a single scalar-per-reel tilt could not simultaneously fix an ordering
+ *     violation and hit the RTP target when the two required different corrections for
+ *     different symbols on the same reel; a genuinely free weight per symbol can. Any
+ *     ordering violation still present once the search finishes is reported in
+ *     `diagnostics.rtpPhase.orderingViolations`, not silently corrected.
+ *     Symbols whose `type` is in `valueOrderExcludeTypes`, and any symbol with baseline
+ *     frequency 0 on a given reel, are excluded from the search entirely (fixed / left at 0).
  *
  * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
  *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
@@ -501,18 +463,22 @@ export async function nelderMead({
  * @param {number} [options.triggerRateTolerancePct=0.15] - Acceptable +/- band around that.
  * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
  * @param {number} [options.trialsPerPoint=3] - Independent trials averaged per candidate (reduces rare-event noise).
- * @param {number} [options.maxIterations=14] - Gradient-descent steps per reel per round.
- * @param {number} [options.rounds=3] - Coordinate-descent rounds over reels.
+ * @param {number} [options.maxIterations=150] - Nelder-Mead iterations for the one joint
+ *   Phase 2 search (each iteration is cheap - usually one measure() call).
+ * @param {number} [options.orderingPenaltyWeight=0.5] - Weight of the soft ordering-violation
+ *   penalty added to Phase 2's loss alongside RTP error - higher discourages violations more
+ *   strongly, but RTP convergence always wins when the two genuinely conflict.
+ * @param {number} [options.initialStepSize=0.5] - Log-space perturbation used to build Phase
+ *   2's initial Nelder-Mead simplex.
  * @param {string[]} [options.valueOrderExcludeTypes=['wild']] - Symbol `type`s excluded from
- *   tier assignment on every reel (held fixed at their post-scatter-phase frequency instead).
- * @param {[number, number]} [options.tiltBounds=[1, 40]] - Search bounds for each reel's tilt
- *   parameter. Values below 1 are clamped up to 1 regardless of what's passed - the tilt is a
- *   per-tier growth multiplier, and anything below 1 would invert the ordering guarantee.
+ *   Phase 2 entirely (held fixed at their post-scatter-phase frequency instead).
  * @param {number} [options.searchSeed=12345] - Base PRNG seed for the common-random-numbers
- *   gradient estimates - a given seed always explores the same sequence, for reproducible runs.
- * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: Object, context?: {reelIndex: number, round: number}) => (void|Promise<void>)} [options.onProgress] -
- *   Called (and awaited, if it returns a promise) after each candidate is measured. `context`
- *   is only present during phase 'shape', identifying which reel/round the step belongs to.
+ *   gradient/simplex estimates - a given seed always explores the same sequence, for
+ *   reproducible runs.
+ * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: Object) => (void|Promise<void>)} [options.onProgress] -
+ *   Called (and awaited, if it returns a promise) after each candidate is measured.
+ *   `multiplier` is always `null` during phase 'shape' (Phase 2 moves every dimension
+ *   together each iteration, so there's no longer one scalar to report per step).
  * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
 export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
@@ -543,10 +509,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRateTolerancePct = 0.15,
     trialSpins = 800000,
     trialsPerPoint = 3,
-    maxIterations = 14,
-    rounds = 3,
+    maxIterations = 150,
+    orderingPenaltyWeight = 0.5,
+    initialStepSize = 0.5,
     valueOrderExcludeTypes = ['wild'],
-    tiltBounds = [1, 40],
     searchSeed = 12345,
     onProgress = null,
   } = options;
@@ -610,115 +576,125 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     currentReelTables = scatterPhase.trial;
   }
 
-  // ---- Phase 2: coordinate descent over reels, tuning each reel's own value weights ----
-  // Deliberately NOT tracking a "best RTP seen across the whole run" snapshot here (unlike
-  // gradientDescent1D's own single-parameter search): a step from earlier in the run - before
-  // some reel had its order-safety floor applied - can have a lower RTP error than the fully
-  // safety-corrected final state, and blindly preferring it would silently reintroduce an
-  // ordering violation the later step fixed. Using the state after the full loop instead
-  // guarantees every reel was safety-floored on its last visit, since no reel is touched
-  // again after that.
-  let rtpPhaseStepCount = 0;
-  let lastReelResult = null;
-
-  for (let round = 0; round < rounds; round++) {
-    for (let r = 0; r < reelsCount; r++) {
-      const reelTable = currentReelTables[r];
-      const nonScatterSymbols = Object.keys(reelTable).filter(s => !scatterSymbols.includes(s) && reelTable[s].frequency > 0);
-      const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
-
-      const fixedShapeSymbols = nonScatterSymbols.filter(s => valueOrderExcludeTypes.includes(paytable[s].type));
-      const valueSymbols = nonScatterSymbols.filter(s => !valueOrderExcludeTypes.includes(paytable[s].type));
-      const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
-      const valueBudget = nonScatterTotal - fixedShapeTotal;
-
-      if (valueSymbols.length === 0 || valueBudget <= 0) {
-        // Nothing tunable on this reel this round - leave it untouched and move to the next reel.
-        continue;
-      }
-
-      const tierOf = computeValueRanks(paytable, valueSymbols);
-      const tieredModeUsable = new Set(Object.values(tierOf)).size > 1;
-      const baseFreq = {}; valueSymbols.forEach(s => { baseFreq[s] = reelTable[s].frequency; });
-
-      // Applies an already-computed per-symbol weight map to a clone of this reel's table,
-      // then returns the *full* N-reel array (this reel updated, every other reel untouched
-      // at its current value) - `measure()` always needs the complete set to build strips.
-      function applyWeights(weights) {
-        const newReel = JSON.parse(JSON.stringify(reelTable));
-        valueSymbols.forEach(s => { newReel[s].frequency = weights[s]; });
-        const trial = currentReelTables.slice();
-        trial[r] = newReel;
-        return trial;
-      }
-
-      const tiltLo = Math.max(1, tiltBounds[0]);
-      const tiltHi = Math.max(tiltLo, tiltBounds[1]);
-
-      let reelResult = tieredModeUsable
-        ? await gradientDescent1D({
-            // weight(s) = baseFreq(s) * t^tierOf(s), t clamped >= 1 - guarantees a
-            // higher-paying symbol present on this reel is never more frequent than a
-            // lower-paying symbol also present on this reel, once t reaches the floor
-            // enforced below.
-            initialParam: 1,
-            minParam: tiltLo,
-            maxParam: tiltHi,
-            target: targetRtp,
-            tolerance: rtpTolerancePct,
-            buildTrial: (t) => applyWeights(renormalizeWeights(tieredRawWeights(valueSymbols, baseFreq, tierOf, t), valueBudget)),
-            metricOf: (result) => result.rtp,
-            measure,
-            maxIterations,
-            seedBase: searchSeed + 300000 + r * 50000 + round * 5000,
-            onProgress: onProgress ? (i, t, result, best) => onProgress('shape', i, t, result, best, { reelIndex: r, round }) : null,
-            yieldToEventLoop,
-          })
-        : await gradientDescent1D({
-            // Degenerate case for this reel (every present value-symbol shares one payout
-            // tier): scale them uniformly instead. No ordering concern - a uniform
-            // multiplier never changes relative proportions, so the tilt isn't floored at 1.
-            initialParam: 1,
-            minParam: 0.2,
-            maxParam: 5,
-            target: targetRtp,
-            tolerance: rtpTolerancePct,
-            buildTrial: (mult) => {
-              const weights = {}; valueSymbols.forEach(s => { weights[s] = baseFreq[s] * mult; });
-              return applyWeights(weights);
-            },
-            metricOf: (result) => result.rtp,
-            measure,
-            maxIterations,
-            seedBase: searchSeed + 900000 + r * 50000 + round * 5000,
-            onProgress: onProgress ? (i, mult, result, best) => onProgress('shape', i, mult, result, best, { reelIndex: r, round }) : null,
-            yieldToEventLoop,
-          });
-
-      // gradientDescent1D stops once its RTP metric is within tolerance (or iterations run
-      // out) - neither has any direct connection to whether every tier pair on this reel has
-      // individually crossed over yet, so a search landing at a "good enough" RTP can still
-      // leave a lower-paying pair inverted. Enforce the analytic floor unconditionally: never
-      // let the chosen tilt be smaller than what the data itself requires.
-      if (tieredModeUsable) {
-        const safeTilt = Math.min(tiltHi, minOrderSafeTilt(valueSymbols, baseFreq, tierOf));
-        if (safeTilt > reelResult.mult) {
-          const safeTrial = applyWeights(renormalizeWeights(tieredRawWeights(valueSymbols, baseFreq, tierOf, safeTilt), valueBudget));
-          const safeMeasured = measure(safeTrial, searchSeed + 300000 + r * 50000 + round * 5000 + 1);
-          const safeError = Math.abs(safeMeasured.rtp - targetRtp);
-          reelResult = { mult: safeTilt, error: safeError, result: safeMeasured, trial: safeTrial, converged: safeError <= rtpTolerancePct };
-        }
-      }
-
-      currentReelTables = reelResult.trial;
-      rtpPhaseStepCount++;
-      lastReelResult = reelResult;
+  // ---- Phase 2: joint multi-dimensional tuning of every reel's value-symbol weights ----
+  // One free weight per (value symbol, reel) pair, searched jointly via Nelder-Mead -
+  // replacing the old per-reel scalar-tilt coordinate descent, which could not
+  // simultaneously fix an ordering violation and hit the RTP target when the two required
+  // different corrections (see the design doc for the concrete case that proved this: a
+  // single scalar can't move one symbol without dragging every other symbol on that reel
+  // along with it). "Higher payout should not be more frequent" is now a soft penalty term
+  // in the loss (below), not a hard post-hoc floor - the optimizer can accept a small
+  // remaining violation rather than force RTP far off target, and any violation still
+  // present at the end is reported in diagnostics rather than silently corrected.
+  const dims = []; // [{ reelIndex, symbol }] - one entry per free parameter
+  const valueBudgetByReel = [];
+  const tierOfByReel = [];
+  currentReelTables.forEach((reelTable, r) => {
+    const nonScatterSymbols = Object.keys(reelTable).filter(s => !scatterSymbols.includes(s) && reelTable[s].frequency > 0);
+    const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
+    const fixedShapeSymbols = nonScatterSymbols.filter(s => valueOrderExcludeTypes.includes(paytable[s].type));
+    const valueSymbols = nonScatterSymbols.filter(s => !valueOrderExcludeTypes.includes(paytable[s].type));
+    const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
+    const valueBudget = nonScatterTotal - fixedShapeTotal;
+    valueBudgetByReel[r] = valueBudget;
+    tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
+    if (valueSymbols.length > 0 && valueBudget > 0) {
+      valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s }));
     }
+  });
+
+  let rtpPhaseResult = null;
+
+  if (dims.length > 0) {
+    const initialPoint = dims.map(d => Math.log(currentReelTables[d.reelIndex][d.symbol].frequency));
+    // Generous per-dimension bounds (relative to that dimension's own starting frequency,
+    // not a shared absolute range) - wide enough to not artificially constrain the search,
+    // just enough to keep the simplex from drifting to a degenerate near-zero or runaway
+    // value on a reel whose other symbols have a very different scale.
+    const dimBounds = dims.map(d => {
+      const base = currentReelTables[d.reelIndex][d.symbol].frequency;
+      return { minX: Math.log(base * 0.001), maxX: Math.log(base * 1000) };
+    });
+
+    // Turns a raw parameter vector into a full N-reel array: clamp each dimension to its
+    // bounds, exponentiate out of log-space, then renormalize each reel's value-symbol
+    // weights back to that reel's fixed budget - every other reel/symbol not in `dims`
+    // (scatter, wild-excluded, or baseline-zero) is carried through from currentReelTables
+    // untouched.
+    function projectPoint(x) {
+      const reelTables = currentReelTables.map(rt => JSON.parse(JSON.stringify(rt)));
+      const rawByReel = {};
+      dims.forEach((d, i) => {
+        const xi = Math.min(dimBounds[i].maxX, Math.max(dimBounds[i].minX, x[i]));
+        (rawByReel[d.reelIndex] ??= {})[d.symbol] = Math.exp(xi);
+      });
+      Object.keys(rawByReel).forEach(rIdxStr => {
+        const rIdx = Number(rIdxStr);
+        const renormalized = renormalizeWeights(rawByReel[rIdx], valueBudgetByReel[rIdx]);
+        Object.keys(renormalized).forEach(s => { reelTables[rIdx][s].frequency = renormalized[s]; });
+      });
+      return reelTables;
+    }
+
+    // Soft ordering penalty: sums, per reel, how much any higher-paying symbol's frequency
+    // exceeds a lower-paying symbol's frequency on that same reel (0 if none present).
+    function orderingPenaltyOf(reelTables) {
+      let total = 0;
+      const violations = [];
+      dims.forEach(({ reelIndex: r, symbol: a }) => {
+        const tierOf = tierOfByReel[r];
+        dims.forEach(({ reelIndex: r2, symbol: b }) => {
+          if (r !== r2 || a === b || tierOf[a] >= tierOf[b]) return;
+          const diff = reelTables[r][a].frequency - reelTables[r][b].frequency;
+          if (diff > 0) {
+            total += diff;
+            violations.push({ reel: r, higherPaySymbol: a, lowerPaySymbol: b, amount: diff });
+          }
+        });
+      });
+      return { total, violations };
+    }
+
+    // One fixed seed for the entire Nelder-Mead call (rather than one per iteration like
+    // gradientDescent1D's probes): every point evaluated - old simplex vertices or new
+    // candidates - needs to stay directly comparable for the whole run, not just within one
+    // iteration, since a vertex from iteration 3 may still be in play at iteration 50.
+    // measure()'s own trialsPerPoint averaging keeps a single seed's estimate reasonably
+    // stable per point.
+    const nmSeed = searchSeed + 700000;
+
+    function evaluate(x) {
+      const reelTables = projectPoint(x);
+      const measured = measure(reelTables, nmSeed);
+      const { total: penalty, violations } = orderingPenaltyOf(reelTables);
+      const error = Math.abs(measured.rtp - targetRtp);
+      return {
+        loss: error + orderingPenaltyWeight * penalty,
+        rtp: measured.rtp,
+        triggerRate: measured.triggerRate,
+        error,
+        orderingViolations: violations,
+        trial: reelTables,
+      };
+    }
+
+    const nm = await nelderMead({
+      initialPoint,
+      initialStepSize,
+      evaluate,
+      maxIterations,
+      onProgress: onProgress ? (i, point, result, best) => onProgress('shape', i, null, result, best) : null,
+      yieldToEventLoop,
+    });
+
+    currentReelTables = nm.result.trial;
+    rtpPhaseResult = { ...nm.result, iterations: nm.iterations };
   }
 
-  const rtpPhaseRan = rtpPhaseStepCount > 0;
   const finalReelTables = currentReelTables;
-  const finalResult = rtpPhaseRan ? lastReelResult.result : measure(finalReelTables);
+  const finalResult = rtpPhaseResult
+    ? { rtp: rtpPhaseResult.rtp, triggerRate: rtpPhaseResult.triggerRate }
+    : measure(finalReelTables);
 
   return {
     reelFrequencyTables: finalReelTables,
@@ -726,12 +702,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
       scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
-      rtpPhase: rtpPhaseRan ? {
-        error: lastReelResult.error,
-        converged: !!lastReelResult.converged,
-        rtp: lastReelResult.result.rtp,
-        triggerRate: lastReelResult.result.triggerRate,
-        roundsRun: rounds,
+      rtpPhase: rtpPhaseResult ? {
+        error: rtpPhaseResult.error,
+        converged: rtpPhaseResult.error <= rtpTolerancePct,
+        rtp: rtpPhaseResult.rtp,
+        triggerRate: rtpPhaseResult.triggerRate,
+        iterationsRun: rtpPhaseResult.iterations,
+        orderingViolations: rtpPhaseResult.orderingViolations,
       } : null,
     }
   };
