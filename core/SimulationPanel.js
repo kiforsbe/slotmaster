@@ -249,18 +249,16 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
           <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Max Iterations / Phase<br>
-          <input id="tune-max-iterations" type="number" value="10" step="1" min="3" max="30" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label style="font-size: 0.8em; color: #ccc;">Coordinate Descent Rounds<br>
-          <input id="tune-rounds" type="number" value="3" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
+        <label style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
+          <input id="tune-max-iterations" type="number" value="150" step="10" min="10" max="1000" style="width: 100%; margin-top: 4px;">
         </label>
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
-        Each reel is tuned independently (coordinate descent: reel 1, then reel 2, ... then back to reel 1,
-        for this many rounds), guaranteeing a higher-paying symbol is never more frequent than a lower-paying
-        one within that same reel. For some paytables the target RTP may not be reachable under that
-        constraint (achieved RTP will fall short; see the result below).
+        Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
+        Nelder-Mead simplex search. A higher-paying symbol being no more frequent than a
+        lower-paying one on the same reel is a soft preference, not an absolute rule - the
+        search will accept a small violation rather than push RTP far off target. Any
+        violation still present at the end is listed below.
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
@@ -287,7 +285,6 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     trialSpins: tuneContainer.querySelector('#tune-trial-spins'),
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
-    rounds: tuneContainer.querySelector('#tune-rounds'),
   };
 
   const options = {
@@ -305,8 +302,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
-    maxIterations: parseInt(inputs.maxIterations.value, 10) || 10,
-    rounds: parseInt(inputs.rounds.value, 10) || 3,
+    maxIterations: parseInt(inputs.maxIterations.value, 10) || 150,
   };
 
   Object.values(inputs).forEach(el => { el.disabled = true; });
@@ -326,10 +322,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   try {
     const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(paytable, reelFrequencyTables, {
       ...options,
-      onProgress: (phase, i, mult, r, best, context) => {
-        const label = phase === 'scatter'
-          ? `Scatter frequency ${i + 1}`
-          : `Reel ${context.reelIndex + 1} · round ${context.round + 1} · step ${i + 1}`;
+      onProgress: (phase, i, mult, r, best) => {
+        const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
         appendLog(`[${label}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
       }
@@ -349,10 +343,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     const targetRtp = options.targetRtp;
     if (!rtpConverged) {
       html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
-                 <strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> under the per-reel ordering constraint -
-                 the closest attempt found is off by ${diagnostics.rtpPhase.error.toFixed(2)} percentage points. This can mean the
-                 current frequencies/payouts don't allow ${targetRtp}% RTP while keeping every symbol no more frequent than a
-                 lower-paying one on the same reel - don't treat the RTP shown above as final without checking this.
+                 <strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> -
+                 the closest attempt found is off by ${diagnostics.rtpPhase.error.toFixed(2)} percentage points.
+                 Try raising Max Iterations, or check whether the current frequencies/payouts allow
+                 ${targetRtp}% RTP at all - don't treat the RTP shown above as final without checking this.
+               </p>`;
+    }
+
+    const violations = diagnostics.rtpPhase?.orderingViolations ?? [];
+    if (violations.length > 0) {
+      const rows = violations.map(v => {
+        const higher = paytable[v.higherPaySymbol]?.friendlyName || v.higherPaySymbol;
+        const lower = paytable[v.lowerPaySymbol]?.friendlyName || v.lowerPaySymbol;
+        return `Reel ${v.reel + 1}: ${higher} is ${v.amount.toFixed(3)} more frequent than ${lower}`;
+      });
+      html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
+                 <strong>⚠ ${violations.length} ordering violation${violations.length > 1 ? 's' : ''} remain</strong> (accepted to keep RTP close to target):<br>
+                 ${rows.join('<br>')}
                </p>`;
     }
 
