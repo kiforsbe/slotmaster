@@ -133,6 +133,130 @@ test('generateReel caps consecutive runs of a symbol via maxStack', () => {
   }
 });
 
+test('generateReel forms runs of at least minStack whenever a clustered symbol appears', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      stacked: { frequency: 1, minStack: 3 },
+      filler:  { frequency: 5 },
+    },
+  };
+  const reel = generateReel(reelWeights, 100, 5);
+  assert.ok(reel.includes('stacked'), 'expected "stacked" to actually appear on the built reel');
+  const n = reel.length;
+  let seam = -1;
+  for (let i = 0; i < n; i++) { if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; } }
+  assert.notEqual(seam, -1, 'reel should not be a single uniform symbol');
+  let i = 0;
+  while (i < n) {
+    const idx = (seam + i) % n;
+    if (reel[idx] === 'stacked') {
+      let runLen = 1;
+      while (runLen < n && reel[(seam + i + runLen) % n] === 'stacked') runLen++;
+      assert.ok(runLen >= 3, `expected every "stacked" run to be at least 3 long, found a run of ${runLen} at position ${idx}`);
+      i += runLen;
+    } else {
+      i++;
+    }
+  }
+});
+
+test('generateReel caps a clustered symbol\'s own run size via maxStack, without merging separate clusters over that cap', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      stacked: { frequency: 1, minStack: 2, maxStack: 4 },
+      filler:  { frequency: 3 },
+    },
+  };
+  const reel = generateReel(reelWeights, 150, 9);
+  assert.ok(reel.includes('stacked'), 'expected "stacked" to actually appear on the built reel');
+  const n = reel.length;
+  let seam = -1;
+  for (let i = 0; i < n; i++) { if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; } }
+  let i = 0;
+  while (i < n) {
+    const idx = (seam + i) % n;
+    if (reel[idx] === 'stacked') {
+      let runLen = 1;
+      while (runLen < n && reel[(seam + i + runLen) % n] === 'stacked') runLen++;
+      assert.ok(runLen <= 4, `expected no "stacked" run longer than 4, found a run of ${runLen} at position ${idx}`);
+      i += runLen;
+    } else {
+      i++;
+    }
+  }
+});
+
+test('generateReel spaces clusters apart (not individual stops within a cluster) once minStack > 1 and minGap is set', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      stacked: { frequency: 1, minStack: 2, minGap: 20 },
+      filler:  { frequency: 20 },
+    },
+  };
+  const reel = generateReel(reelWeights, 1000, 3);
+  const n = reel.length;
+  let seam = -1;
+  for (let i = 0; i < n; i++) { if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; } }
+  const runs = [];
+  let i = 0;
+  while (i < n) {
+    const idx = (seam + i) % n;
+    if (reel[idx] === 'stacked') {
+      let runLen = 1;
+      while (runLen < n && reel[(seam + i + runLen) % n] === 'stacked') runLen++;
+      runs.push({ start: idx, length: runLen });
+      i += runLen;
+    } else {
+      i++;
+    }
+  }
+  assert.ok(runs.length >= 2, `expected at least 2 clusters to compare distances between, got ${runs.length}`);
+  const circularDist = (a, b) => { const d = Math.abs(a - b); return Math.min(d, n - d); };
+  for (let a = 0; a < runs.length; a++) {
+    for (let b = a + 1; b < runs.length; b++) {
+      const dist = circularDist(runs[a].start, runs[b].start);
+      assert.ok(dist >= 20, `expected clusters at least 20 apart (by start position), got ${dist} between clusters at ${runs[a].start} and ${runs[b].start}`);
+    }
+  }
+});
+
+test('generateReel with every symbol at minStack: 1 (the default) is byte-identical to before minStack existed', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      common: { frequency: 1, maxStack: 2 },
+      filler: { frequency: 1 },
+    },
+  };
+  const withDefaultMinStack = generateReel(reelWeights, 60, 11);
+  const explicitlyOne = generateReel(
+    { defaults: {}, symbols: { common: { frequency: 1, maxStack: 2, minStack: 1 }, filler: { frequency: 1, minStack: 1 } } },
+    60, 11
+  );
+  assert.deepEqual(withDefaultMinStack, explicitlyOne);
+});
+
+test('generateReel degrades gracefully (best effort) when a symbol has fewer occurrences than its own minStack', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      rare:   { frequency: 0.05, minStack: 50 },
+      filler: { frequency: 20 },
+    },
+  };
+  const reel = generateReel(reelWeights, 100, 1);
+  // Must not throw, hang, or drop the symbol entirely - best effort, same tolerance as
+  // minGap/maxStack already have for a reel too dense/sparse to fully satisfy. (Exact length
+  // isn't asserted here - the existing Math.max(1, round(...)) floor on tiny weights can push
+  // the total slightly past targetLength regardless of minStack, a pre-existing characteristic
+  // unrelated to this feature.)
+  assert.ok(reel.includes('rare'), 'expected "rare" to still appear at least once, even under-clustered');
+  assert.ok(reel.length >= 99 && reel.length <= 102, `expected reel length close to 100, got ${reel.length}`);
+});
+
 test('generateReel treats a table with no .symbols key as a flat legacy symbol map', () => {
   const flat = { a: { frequency: 10 }, b: { frequency: 1 } };
   const reel = generateReel(flat, 50, 5);

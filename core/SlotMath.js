@@ -415,23 +415,33 @@ export function generateTargetGrid(reelStrips, rowsCount, rng) {
 /**
  * Builds one weighted reel strip, with optional per-symbol spacing constraints.
  *
- * `reelWeights` is either the structured shape `{ defaults?: { minGap?, maxStack? },
- * symbols: { symbol: { frequency, minGap?, maxStack?, ... } } }`, or a flat legacy shape
- * (`{ symbol: { frequency, ... } }` directly, no `.symbols` wrapper) - auto-detected by the
- * presence of a `.symbols` key. The flat shape has no way to express reel-level defaults.
+ * `reelWeights` is either the structured shape `{ defaults?: { minGap?, maxStack?, minStack? },
+ * symbols: { symbol: { frequency, minGap?, maxStack?, minStack?, ... } } }`, or a flat legacy
+ * shape (`{ symbol: { frequency, ... } }` directly, no `.symbols` wrapper) - auto-detected by
+ * the presence of a `.symbols` key. The flat shape has no way to express reel-level defaults.
  *
- * Two independent spacing constraints, each resolved per symbol as: symbol-level override ->
- * reel `defaults` -> built-in fallback (`minGap: 1` / `maxStack: Infinity`, i.e.
- * unconstrained - except a symbol with `paytable[symbol].triggerFreeSpins === true` falls
- * back to `defaultTriggerMinGap` instead of 1, so a free-spins-triggering symbol is spaced
- * out by default without needing to be configured):
+ * Three independent spacing constraints, each resolved per symbol as: symbol-level override ->
+ * reel `defaults` -> built-in fallback (`minGap: 1` / `maxStack: Infinity` / `minStack: 1`,
+ * i.e. unconstrained - except a symbol with `paytable[symbol].triggerFreeSpins === true` falls
+ * back to `defaultTriggerMinGap` instead of 1 for `minGap`, so a free-spins-triggering symbol
+ * is spaced out by default without needing to be configured):
  *   - `minGap`: minimum circular distance enforced between any two occurrences of that
- *     symbol on the built strip (self-spacing only - a symbol's minGap constrains its own
- *     occurrences relative to each other, not to other symbols).
+ *     symbol on the built strip (self-spacing only). Once `minStack > 1` for that symbol,
+ *     this instead spaces whole *clusters* apart - two stops inside the same cluster are
+ *     meant to be adjacent, only the distance between separate clusters is constrained.
  *   - `maxStack`: maximum run length of consecutive identical occurrences of that symbol
- *     allowed on the built strip (circular - a run can wrap from the end to the start).
- * Both are best-effort: a reel too dense to fully satisfy a constraint just gets as close as
- * it can, it doesn't throw or infinite-loop.
+ *     allowed on the built strip (circular - a run can wrap from the end to the start). Once
+ *     `minStack > 1` for that symbol, this instead caps the size of any single cluster - two
+ *     of that symbol's own clusters are always kept from landing directly adjacent to each
+ *     other (so they can never silently merge into one combined run), independent of this
+ *     setting.
+ *   - `minStack`: minimum run length whenever the symbol appears at all - it's never placed
+ *     as a lone isolated stop once this is above 1 (e.g. a stacked-feeling symbol). Forming
+ *     clusters and spacing them apart both remain best-effort under `minGap`/`maxStack`
+ *     tension (a symbol asked to both spread out its clusters widely and keep them small is
+ *     satisfied as well as the reel's density allows, not perfectly).
+ * All three are best-effort: a reel too dense/sparse to fully satisfy a constraint just gets
+ * as close as it can, it doesn't throw or infinite-loop.
  *
  * @param {Object} reelWeights - This reel's own weights (see shape above).
  * @param {number} targetLength - Desired reel strip length.
@@ -535,6 +545,29 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
     return reel;
   }
 
+  // Splits `count` occurrences of a clustered symbol into cluster sizes, each between
+  // `minStack` and `maxStack` (best-effort - a remainder that doesn't fill a full cluster is
+  // spread across the other clusters rather than dumped into one oversized one; any cluster
+  // that would still exceed `maxStack` gets split into maxStack-sized chunks plus a
+  // leftover). Not itself responsible for placement - just how many of each size to place.
+  function _computeClusterSizes(count, minStack, maxStack) {
+    if (count <= 0) return [];
+    if (count < minStack) return [count]; // best effort - not enough occurrences for one full cluster
+    const cap = Math.min(maxStack, count);
+    const numClusters = Math.max(1, Math.floor(count / minStack));
+    const base = Math.floor(count / numClusters);
+    const remainder = count - base * numClusters;
+    const sizes = new Array(numClusters).fill(base);
+    for (let i = 0; i < remainder; i++) sizes[i % numClusters] += 1;
+    const finalSizes = [];
+    sizes.forEach(size => {
+      let remaining = size;
+      while (remaining > cap) { finalSizes.push(cap); remaining -= cap; }
+      finalSizes.push(remaining);
+    });
+    return finalSizes.filter(s => s > 0);
+  }
+
   // Step 1 & 2: Compute weights and calculate counts in one pass. An explicit
   // frequency: 0 means "never place this symbol on this reel" - excluded from `weights`
   // entirely, same as `exclude` - not defaulted to 1 (which `freq || 1` did, since 0 is
@@ -547,22 +580,7 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
   }
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
-  const reel = [];
 
-  // Step 3: Build reel directly from weights and total weight
-  for (const symbol in weights) {
-    const count = Math.max(1, Math.round((weights[symbol] / totalWeight) * targetLength));
-    for (let i = 0; i < count; i++) reel.push(symbol);
-  }
-
-  // Step 4: Shuffle with seed
-  const rng = createSeededRng(seed);
-  _shuffle(reel, rng);
-
-  // Step 5: Apply each present symbol's own minGap/maxStack - resolved as symbol override ->
-  // reel defaults -> built-in fallback. minGap passes run first (the coarser, whole-strip
-  // constraint), then maxStack cleans up runs in the result, so a minGap swap can't undo a
-  // maxStack fix.
   function resolveMinGap(symbol) {
     const override = symbolsTable[symbol].minGap;
     if (override != null) return override;
@@ -576,14 +594,76 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
     if (reelDefaults.maxStack != null) return reelDefaults.maxStack;
     return Infinity;
   }
+  function resolveMinStack(symbol) {
+    const override = symbolsTable[symbol].minStack;
+    if (override != null) return override;
+    if (reelDefaults.minStack != null) return reelDefaults.minStack;
+    return 1;
+  }
 
+  // Step 3: Build a pre-shuffle array. A symbol with minStack > 1 is represented as one
+  // placeholder per *cluster*, not one per occurrence - so the shuffle, minGap, and (for
+  // clustered symbols) maxStack passes below all treat a whole cluster as a single atomic
+  // unit, entirely unmodified from how they already work for a plain single-occurrence
+  // symbol. Clusters are only expanded into their real, full-length run of consecutive
+  // copies at the very end (Step 6), once every position is finalized. A symbol at
+  // minStack: 1 (the default - every reel that doesn't opt in) takes the untouched, original
+  // path: one placeholder per occurrence, identical to before minStack existed.
+  const preShuffle = [];
+  const clusterSizesBySymbol = {}; // symbol -> this symbol's assigned cluster sizes, consumed in order at expansion time
+  for (const symbol in weights) {
+    const count = Math.max(1, Math.round((weights[symbol] / totalWeight) * targetLength));
+    const minStack = resolveMinStack(symbol);
+    if (minStack > 1) {
+      const cap = resolveMaxStack(symbol); // repurposed as this symbol's per-cluster size cap once clustered
+      const sizes = _computeClusterSizes(count, minStack, cap);
+      clusterSizesBySymbol[symbol] = sizes;
+      for (let i = 0; i < sizes.length; i++) preShuffle.push(symbol);
+    } else {
+      for (let i = 0; i < count; i++) preShuffle.push(symbol);
+    }
+  }
+
+  // Step 4: Shuffle with seed
+  const rng = createSeededRng(seed);
+  _shuffle(preShuffle, rng);
+
+  // Step 5: Apply each present symbol's own minGap/maxStack - resolved as symbol override ->
+  // reel defaults -> built-in fallback. minGap passes run first (the coarser, whole-strip
+  // constraint), then maxStack cleans up runs in the result, so a minGap swap can't undo a
+  // maxStack fix. For a clustered symbol (minStack > 1), maxStack no longer means "run length
+  // cap" (that's already handled per-cluster by _computeClusterSizes above) - instead this
+  // pass always forbids two of that symbol's own cluster placeholders from landing directly
+  // adjacent to each other, regardless of the symbol's own maxStack setting, so two clusters
+  // can never silently merge into one combined run bigger than either was meant to be.
   for (const symbol in weights) {
     const gap = resolveMinGap(symbol);
-    if (gap > 1) _enforceMinGap(reel, symbol, gap, rng);
+    if (gap > 1) _enforceMinGap(preShuffle, symbol, gap, rng);
   }
   for (const symbol in weights) {
-    const cap = resolveMaxStack(symbol);
-    if (cap < Infinity) _enforceMaxStack(reel, symbol, cap, rng);
+    const minStack = resolveMinStack(symbol);
+    if (minStack > 1) {
+      _enforceMaxStack(preShuffle, symbol, 1, rng);
+    } else {
+      const cap = resolveMaxStack(symbol);
+      if (cap < Infinity) _enforceMaxStack(preShuffle, symbol, cap, rng);
+    }
+  }
+
+  // Step 6: Expand cluster placeholders into their real, full-length runs. A non-clustered
+  // symbol's entries pass through 1:1, unchanged - so the final reel is exactly what today's
+  // code would have produced whenever no symbol on this reel uses minStack > 1.
+  const reel = [];
+  const clusterCursor = {}; // symbol -> next index into clusterSizesBySymbol[symbol] to consume
+  for (const entry of preShuffle) {
+    const sizes = clusterSizesBySymbol[entry];
+    if (sizes) {
+      const cursor = clusterCursor[entry] || 0;
+      for (let i = 0; i < sizes[cursor]; i++) reel.push(entry);
+      clusterCursor[entry] = cursor + 1;
+    } else {
+      reel.push(entry);
+    }
   }
 
   return reel;
