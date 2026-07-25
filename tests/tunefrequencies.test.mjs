@@ -129,44 +129,25 @@ test('nelderMead reports per-iteration progress via onProgress', async () => {
 
 const REEL_TABLES = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3];
 
-function assertNeverInvertsPayoutOrderPerReel(paytable, reelFrequencyTables) {
-  reelFrequencyTables.forEach((reelTable, reelIdx) => {
-    const present = Object.keys(reelTable).filter(s => paytable[s].type !== 'wild' && reelTable[s].frequency > 0);
-    for (const a of present) {
-      for (const b of present) {
-        const payoutA = paytable[a].payout.at(-1);
-        const payoutB = paytable[b].payout.at(-1);
-        if (payoutA > payoutB) {
-          assert.ok(
-            reelTable[a].frequency <= reelTable[b].frequency,
-            `reel ${reelIdx + 1}: ${a} (payout ${payoutA}, freq ${reelTable[a].frequency}) should not be more ` +
-            `frequent than ${b} (payout ${payoutB}, freq ${reelTable[b].frequency})`
-          );
-        }
-      }
-    }
-  });
-}
-
-test('tuneFrequencies never inverts payout order within any single reel', async () => {
-  // Fruit machine's real historical per-reel weights are NOT monotonic by payout to start
-  // with (e.g. reel 1's clover, paying 20, starts 4x more frequent than grapes, paying 10) -
-  // the ordering guarantee only holds once the tilt search actually reaches the crossover
-  // point for the worst-case pair, so this needs enough iterations to get there, not just
-  // enough to satisfy the (unrelated) RTP tolerance.
-  const { reelFrequencyTables } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+test('tuneFrequencies converges RTP close to target even when baseline data has a large ordering violation', async () => {
+  // Old design: FREQUENCY_REEL1's melon (pays 15x) at freq 20 vs grapes (pays 10x) at
+  // freq 4 forced a hard floor to t=5.0, overriding an RTP search that had already
+  // converged - and that override, compounding across reels, made RTP unreachable (ended
+  // near 131% against a 96% target). The new design should actually reach the target.
+  const { rtp, diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    targetRtp: 96, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 20, rounds: 2,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
   });
-  assertNeverInvertsPayoutOrderPerReel(PAYTABLE, reelFrequencyTables);
+  assert.ok(Math.abs(rtp - 96) < 10, `expected RTP within 10 points of target, got ${rtp}`);
+  assert.ok(typeof diagnostics.rtpPhase.orderingViolations === 'object', 'orderingViolations must be reported (possibly empty), never omitted');
 });
 
 test('tuneFrequencies never gives a reel-absent symbol (frequency 0) a nonzero frequency', async () => {
   const { reelFrequencyTables } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    targetRtp: 96, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 4, rounds: 2,
+    targetRtp: 96, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 4,
   });
   // FREQUENCY_REEL1 and FREQUENCY_REEL2 both define star/strawberry at frequency: 0 (only
   // reel 3 carries them) - tuning must never turn those into nonzero frequencies.
@@ -176,30 +157,31 @@ test('tuneFrequencies never gives a reel-absent symbol (frequency 0) a nonzero f
   assert.equal(reelFrequencyTables[1].strawberry.frequency, 0);
 });
 
-test('tuneFrequencies diagnostics expose a per-step error and reel/round context via onProgress', async () => {
+test('tuneFrequencies diagnostics expose a per-step error via onProgress, without a reel/round context', async () => {
   const stepsSeen = [];
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 3, rounds: 2,
-    onProgress: (phase, i, mult, result, best, context) => {
-      if (phase === 'shape') stepsSeen.push({ error: result.error, context });
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 6,
+    onProgress: (phase, i, mult, result, best) => {
+      if (phase === 'shape') stepsSeen.push({ error: result.error, mult });
     },
   });
   const distinct = new Set(stepsSeen.map(s => s.error.toFixed(6)));
   assert.ok(distinct.size > 1, `expected per-step error to vary across iterations, got ${stepsSeen.map(s => s.error)}`);
-  assert.ok(stepsSeen.every(s => s.context && typeof s.context.reelIndex === 'number' && typeof s.context.round === 'number'),
-    'every "shape" phase progress callback must include { reelIndex, round }');
+  assert.ok(stepsSeen.every(s => s.mult === null), 'phase "shape" no longer has one scalar per step - mult must always be null');
 });
 
 test('tuneFrequencies diagnostics.rtpPhase includes numeric error and boolean converged fields', async () => {
   const { diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 3, rounds: 1,
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 3,
   });
   assert.ok(typeof diagnostics.rtpPhase.error === 'number');
   assert.ok(typeof diagnostics.rtpPhase.converged === 'boolean');
+  assert.ok(typeof diagnostics.rtpPhase.iterationsRun === 'number');
+  assert.ok(Array.isArray(diagnostics.rtpPhase.orderingViolations));
   // Fruit machine's paytable has no scatter-typed symbol, so this phase should be a no-op.
   assert.equal(diagnostics.scatterPhase, null);
 });
@@ -209,7 +191,7 @@ test('tuneFrequencies throws if reelFrequencyTables.length does not match reelsC
     () => tuneFrequencies(PAYTABLE, [FREQUENCY_REEL1, FREQUENCY_REEL2], {
       reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
       reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-      trialSpins: 1000, maxIterations: 1, rounds: 1,
+      trialSpins: 1000, maxIterations: 1,
     }),
     /reelFrequencyTables/
   );
