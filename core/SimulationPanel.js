@@ -202,7 +202,9 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
     const lines = symbols.map(symbol => {
       const keyPart = `${symbol}:`.padEnd(keyWidth);
       const fixedPart = table[symbol].fixed ? ', fixed: true' : '';
-      return `  ${keyPart} { frequency: ${table[symbol].frequency.toFixed(1)}${fixedPart} },`;
+      const minPart = table[symbol].min != null ? `, min: ${table[symbol].min}` : '';
+      const maxPart = table[symbol].max != null ? `, max: ${table[symbol].max}` : '';
+      return `  ${keyPart} { frequency: ${table[symbol].frequency.toFixed(1)}${fixedPart}${minPart}${maxPart} },`;
     });
     return `export const FREQUENCY_REEL${i + 1} = {\n${lines.join('\n')}\n};`;
   }).join('\n\n');
@@ -265,6 +267,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
           <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
+        <label style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
+          <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
         ${biasSelectorsHtml}
@@ -277,7 +282,11 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         premium symbols show up often on some reels but rarely on another, so lines look
         close but rarely land); "no preference" disables it for that reel. It's always a soft
         preference, not an absolute rule - the search will accept a small violation rather
-        than push RTP far off target. Any violation still present at the end is listed below.
+        than push RTP far off target. A symbol can also carry its own soft <code>min</code>/
+        <code>max</code> frequency bounds directly in its FREQUENCY_REELn entry (edit that in
+        game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
+        strongly those are enforced, same soft-preference semantics. Any violation still
+        present at the end is listed below.
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
@@ -305,6 +314,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
     orderingPenaltyWeight: tuneContainer.querySelector('#tune-ordering-weight'),
+    limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
 
@@ -325,6 +335,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 150,
     orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
+    limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
     orderingBiasByReel: biasSelects.map(el => parseInt(el.value, 10)),
   };
 
@@ -388,6 +399,18 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
       });
       html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
                  <strong>⚠ ${violations.length} ordering violation${violations.length > 1 ? 's' : ''} remain</strong> (accepted to keep RTP close to target):<br>
+                 ${rows.join('<br>')}
+               </p>`;
+    }
+
+    const limitViolations = diagnostics.rtpPhase?.limitViolations ?? [];
+    if (limitViolations.length > 0) {
+      const rows = limitViolations.map(v => {
+        const name = paytable[v.symbol]?.friendlyName || v.symbol;
+        return `Reel ${v.reel + 1}: ${name} is ${v.amount.toFixed(3)} past its ${v.bound} limit (${v.limit})`;
+      });
+      html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
+                 <strong>⚠ ${limitViolations.length} frequency limit violation${limitViolations.length > 1 ? 's' : ''} remain</strong> (accepted to keep RTP close to target):<br>
                  ${rows.join('<br>')}
                </p>`;
     }

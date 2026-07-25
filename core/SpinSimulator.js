@@ -452,10 +452,13 @@ export async function nelderMead({
  * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
  *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
  * @param {Object[]} reelFrequencyTables - One table per reel, each `{ symbol: { frequency,
- *   fixed? } }`. `frequency` is the same shape generateReel already accepts. `fixed: true`
- *   is optional (defaults to falsy/tunable) and excludes that symbol from Phase 2 on that
- *   specific reel only - its frequency is left exactly as passed in. Not mutated; a tuned
- *   clone is returned.
+ *   fixed?, min?, max? } }`. `frequency` is the same shape generateReel already accepts.
+ *   `fixed: true` is optional (defaults to falsy/tunable) and excludes that symbol from
+ *   Phase 2 on that specific reel only - its frequency is left exactly as passed in. `min`
+ *   and/or `max` are optional soft bounds (same units as `frequency`) on that symbol's
+ *   frequency on that specific reel - like the ordering preference, a discouraged-but-not-
+ *   forbidden preference (see `limitPenaltyWeight` below), not a hard clamp. Not mutated; a
+ *   tuned clone is returned.
  * @param {Object} [options]
  * @param {number} [options.reelsCount=reelFrequencyTables.length]
  * @param {number} [options.rowsCount=3]
@@ -474,6 +477,9 @@ export async function nelderMead({
  * @param {number} [options.orderingPenaltyWeight=0.5] - Weight of the soft ordering-violation
  *   penalty added to Phase 2's loss alongside RTP error - higher discourages violations more
  *   strongly, but RTP convergence always wins when the two genuinely conflict.
+ * @param {number} [options.limitPenaltyWeight=0.5] - Weight of the soft per-symbol min/max
+ *   frequency penalty (see `reelFrequencyTables`' `min`/`max` above) added to Phase 2's loss
+ *   alongside RTP error and the ordering penalty - same soft-preference semantics.
  * @param {number[]} [options.orderingBiasByReel] - Per-reel direction/strength for the
  *   ordering preference, indexed by reel. `-1` (the default for every reel, if omitted or if
  *   a specific reel's entry is missing) keeps today's behavior: a higher-paying symbol is
@@ -524,6 +530,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     trialsPerPoint = 3,
     maxIterations = 150,
     orderingPenaltyWeight = 0.5,
+    limitPenaltyWeight = 0.5,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchSeed = 12345,
@@ -615,7 +622,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     valueBudgetByReel[r] = valueBudget;
     tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
     if (valueSymbols.length > 0 && valueBudget > 0) {
-      valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s }));
+      valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s, min: reelTable[s].min, max: reelTable[s].max }));
     }
   });
 
@@ -680,6 +687,32 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return { total, violations };
     }
 
+    // Soft per-symbol frequency limits: each dim optionally carries its own `min`/`max`
+    // (from that symbol's entry in its reel's frequency table - see reelFrequencyTables'
+    // doc above). Violating either costs `limitPenaltyWeight` times how far outside the
+    // bound the symbol's *projected* (post-renormalization) frequency actually landed - a
+    // preference, like ordering, not a hard clamp: the search can still cross a limit if
+    // hitting the RTP target genuinely requires it, and any crossing is reported rather than
+    // silently prevented.
+    function limitPenaltyOf(reelTables) {
+      let total = 0;
+      const violations = [];
+      dims.forEach(({ reelIndex: r, symbol: s, min, max }) => {
+        const freq = reelTables[r][s].frequency;
+        if (min != null && freq < min) {
+          const amount = min - freq;
+          total += amount;
+          violations.push({ reel: r, symbol: s, bound: 'min', limit: min, amount });
+        }
+        if (max != null && freq > max) {
+          const amount = freq - max;
+          total += amount;
+          violations.push({ reel: r, symbol: s, bound: 'max', limit: max, amount });
+        }
+      });
+      return { total, violations };
+    }
+
     // One fixed seed for the entire Nelder-Mead call (rather than one per iteration like
     // gradientDescent1D's probes): every point evaluated - old simplex vertices or new
     // candidates - needs to stay directly comparable for the whole run, not just within one
@@ -691,14 +724,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     function evaluate(x) {
       const reelTables = projectPoint(x);
       const measured = measure(reelTables, nmSeed);
-      const { total: penalty, violations } = orderingPenaltyOf(reelTables);
+      const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
+      const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
       const error = Math.abs(measured.rtp - targetRtp);
       return {
-        loss: error + orderingPenaltyWeight * penalty,
+        loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty,
         rtp: measured.rtp,
         triggerRate: measured.triggerRate,
         error,
-        orderingViolations: violations,
+        orderingViolations,
+        limitViolations,
         trial: reelTables,
       };
     }
@@ -734,6 +769,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         triggerRate: rtpPhaseResult.triggerRate,
         iterationsRun: rtpPhaseResult.iterations,
         orderingViolations: rtpPhaseResult.orderingViolations,
+        limitViolations: rtpPhaseResult.limitViolations,
       } : null,
     }
   };

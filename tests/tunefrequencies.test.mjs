@@ -181,6 +181,24 @@ test('tuneFrequencies leaves a symbol untouched on a reel where its own entry se
   // remain freely tunable, i.e. is not expected to equal its own baseline.
 });
 
+test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limitPenaltyWeight)', async () => {
+  const cap = FREQUENCY_REEL1.bar.frequency / 2;
+  const cappedTables = [
+    { ...FREQUENCY_REEL1, bar: { ...FREQUENCY_REEL1.bar, max: cap } },
+    FREQUENCY_REEL2,
+    FREQUENCY_REEL3,
+  ];
+  const { reelFrequencyTables, diagnostics } = await tuneFrequencies(PAYTABLE, cappedTables, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
+    limitPenaltyWeight: 10,
+  });
+  assert.ok(reelFrequencyTables[0].bar.frequency <= cap + 2,
+    `expected bar's frequency to stay close to its soft cap of ${cap}, got ${reelFrequencyTables[0].bar.frequency}`);
+  assert.ok(Array.isArray(diagnostics.rtpPhase.limitViolations), 'limitViolations must be reported (possibly empty), never omitted');
+});
+
 test('tuneFrequencies never gives a reel-absent symbol (frequency 0) a nonzero frequency', async () => {
   const { reelFrequencyTables } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
@@ -200,7 +218,11 @@ test('tuneFrequencies diagnostics expose a per-step error via onProgress, withou
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 6,
+    // The committed FREQUENCY_REEL1/2/3 are already close to targetRtp (someone adopted a
+    // tuned result), so a short run can genuinely find no improvement for a few iterations
+    // before noise/search finally moves the best - needs more than a handful of iterations
+    // to reliably show variation, unlike when the baseline was still far from optimal.
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 20,
     onProgress: (phase, i, mult, result, best) => {
       if (phase === 'shape') stepsSeen.push({ error: result.error, mult });
     },
