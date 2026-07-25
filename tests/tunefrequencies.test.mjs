@@ -161,6 +161,26 @@ test('tuneFrequencies honors a per-reel reversed ordering preference (orderingBi
     'any violation reported on the bias-reversed reel must itself carry bias: 1');
 });
 
+test('tuneFrequencies leaves a symbol untouched on a reel where its own entry sets fixed: true, even if not wild-typed', async () => {
+  // `fixed` lives on the reel data itself (per symbol, per reel), independent of the
+  // paytable's `type` - a perfectly ordinary value symbol (bar) can be pinned on one specific
+  // reel while staying freely tunable everywhere else.
+  const reelTablesWithFixedBar = [
+    { ...FREQUENCY_REEL1, bar: { ...FREQUENCY_REEL1.bar, fixed: true } },
+    FREQUENCY_REEL2,
+    FREQUENCY_REEL3,
+  ];
+  const { reelFrequencyTables } = await tuneFrequencies(PAYTABLE, reelTablesWithFixedBar, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 20,
+  });
+  assert.equal(reelFrequencyTables[0].bar.frequency, FREQUENCY_REEL1.bar.frequency,
+    `expected bar's frequency on reel 1 to stay exactly at its baseline (fixed: true), got ${reelFrequencyTables[0].bar.frequency}`);
+  // bar is only fixed on reel 1 - reel 3 (which also carries bar, not fixed there) should
+  // remain freely tunable, i.e. is not expected to equal its own baseline.
+});
+
 test('tuneFrequencies never gives a reel-absent symbol (frequency 0) a nonzero frequency', async () => {
   const { reelFrequencyTables } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,

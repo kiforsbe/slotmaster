@@ -443,13 +443,19 @@ export async function nelderMead({
  *     different symbols on the same reel; a genuinely free weight per symbol can. Any
  *     ordering violation still present once the search finishes is reported in
  *     `diagnostics.rtpPhase.orderingViolations`, not silently corrected.
- *     Symbols whose `type` is in `valueOrderExcludeTypes`, and any symbol with baseline
- *     frequency 0 on a given reel, are excluded from the search entirely (fixed / left at 0).
+ *     Any symbol with `fixed: true` on a given reel's own frequency table entry, and any
+ *     symbol with baseline frequency 0 on a given reel, are excluded from the search entirely
+ *     (held fixed / left at 0). `fixed` lives on the reel data itself, per (symbol, reel) -
+ *     not derived from the paytable's `type` - so it's independent per reel: a symbol can be
+ *     fixed on one reel and freely tuned on another.
  *
  * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
  *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
- * @param {Object[]} reelFrequencyTables - One table per reel, each `{ symbol: { frequency } }`
- *   (same shape generateReel already accepts). Not mutated; a tuned clone is returned.
+ * @param {Object[]} reelFrequencyTables - One table per reel, each `{ symbol: { frequency,
+ *   fixed? } }`. `frequency` is the same shape generateReel already accepts. `fixed: true`
+ *   is optional (defaults to falsy/tunable) and excludes that symbol from Phase 2 on that
+ *   specific reel only - its frequency is left exactly as passed in. Not mutated; a tuned
+ *   clone is returned.
  * @param {Object} [options]
  * @param {number} [options.reelsCount=reelFrequencyTables.length]
  * @param {number} [options.rowsCount=3]
@@ -479,8 +485,6 @@ export async function nelderMead({
  *   how strongly that reel's preference is enforced relative to `orderingPenaltyWeight`.
  * @param {number} [options.initialStepSize=0.5] - Log-space perturbation used to build Phase
  *   2's initial Nelder-Mead simplex.
- * @param {string[]} [options.valueOrderExcludeTypes=['wild']] - Symbol `type`s excluded from
- *   Phase 2 entirely (held fixed at their post-scatter-phase frequency instead).
  * @param {number} [options.searchSeed=12345] - Base PRNG seed for the common-random-numbers
  *   gradient/simplex estimates - a given seed always explores the same sequence, for
  *   reproducible runs.
@@ -522,7 +526,6 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     orderingPenaltyWeight = 0.5,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
-    valueOrderExcludeTypes = ['wild'],
     searchSeed = 12345,
     onProgress = null,
   } = options;
@@ -601,11 +604,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   const dims = []; // [{ reelIndex, symbol }] - one entry per free parameter
   const valueBudgetByReel = [];
   const tierOfByReel = [];
+  const isFixed = (reelTable, s) => reelTable[s].fixed === true;
   currentReelTables.forEach((reelTable, r) => {
     const nonScatterSymbols = Object.keys(reelTable).filter(s => !scatterSymbols.includes(s) && reelTable[s].frequency > 0);
     const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
-    const fixedShapeSymbols = nonScatterSymbols.filter(s => valueOrderExcludeTypes.includes(paytable[s].type));
-    const valueSymbols = nonScatterSymbols.filter(s => !valueOrderExcludeTypes.includes(paytable[s].type));
+    const fixedShapeSymbols = nonScatterSymbols.filter(s => isFixed(reelTable, s));
+    const valueSymbols = nonScatterSymbols.filter(s => !isFixed(reelTable, s));
     const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
     const valueBudget = nonScatterTotal - fixedShapeTotal;
     valueBudgetByReel[r] = valueBudget;

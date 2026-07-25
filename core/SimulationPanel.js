@@ -201,7 +201,8 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
     const keyWidth = Math.max(...symbols.map(s => s.length + 1));
     const lines = symbols.map(symbol => {
       const keyPart = `${symbol}:`.padEnd(keyWidth);
-      return `  ${keyPart} { frequency: ${table[symbol].frequency.toFixed(1)} },`;
+      const fixedPart = table[symbol].fixed ? ', fixed: true' : '';
+      return `  ${keyPart} { frequency: ${table[symbol].frequency.toFixed(1)}${fixedPart} },`;
     });
     return `export const FREQUENCY_REEL${i + 1} = {\n${lines.join('\n')}\n};`;
   }).join('\n\n');

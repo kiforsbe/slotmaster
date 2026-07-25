@@ -52,7 +52,10 @@ export const PAYTABLE = {
   strawberry: { payout: [0.00, 0.00,  0.00], type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 4.00 },
 };
 
-// Frequency tables for each reel. These are based on the actual symbol weights used in the original machines.
+// Frequency tables for each reel. These are based on the actual symbol weights used in the
+// original machines. `fixed: true` marks a symbol as excluded from TUNE FREQUENCIES' Phase 2
+// search on that specific reel (its frequency there is never touched) - star and strawberry
+// are wild symbols and are always meant to stay fixed, independent of payout ordering.
 // Note that REEL_1 does not contain the star or strawberry symbols.
 export const FREQUENCY_REEL1 = {
   bar:        { frequency: 16.0 },
@@ -63,8 +66,8 @@ export const FREQUENCY_REEL1 = {
   plum:       { frequency: 16.0 },
   orange:     { frequency:  4.0 },
   cherries:   { frequency:  4.0 },
-  star:       { frequency:  0.0 },
-  strawberry: { frequency:  0.0 },
+  star:       { frequency:  0.0, fixed: true },
+  strawberry: { frequency:  0.0, fixed: true },
 };
 
 // This reel contains the same symbols as reel 1, but with different frequencies to create a different distribution of symbols.
@@ -77,8 +80,8 @@ export const FREQUENCY_REEL2 = {
   plum:       { frequency: 16.0 },
   orange:     { frequency:  8.0 },
   cherries:   { frequency: 12.0 },
-  star:       { frequency:  0.0 },
-  strawberry: { frequency:  0.0 },
+  star:       { frequency:  0.0, fixed: true },
+  strawberry: { frequency:  0.0, fixed: true },
 };
 
 // This reel contains additional symbols (star and strawberry) and different frequencies to create a different distribution of symbols.
@@ -91,8 +94,8 @@ export const FREQUENCY_REEL3 = {
   plum:       { frequency: 12.0 },
   orange:     { frequency:  4.0 },
   cherries:   { frequency:  4.0 },
-  star:       { frequency: 24.0 },
-  strawberry: { frequency:  4.0 },
+  star:       { frequency: 24.0, fixed: true },
+  strawberry: { frequency:  4.0, fixed: true },
 };
 
 // Generate the reel strips based on the frequency tables and seeds.
