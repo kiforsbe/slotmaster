@@ -630,6 +630,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // remaining violation rather than force RTP far off target, and any violation still
   // present at the end is reported in diagnostics rather than silently corrected.
   const dims = []; // [{ reelIndex, symbol }] - one entry per free parameter
+  const fixedSymbols = []; // [{ reel, symbol }] - excluded from the search entirely (fixed: true)
   const valueBudgetByReel = [];
   const tierOfByReel = [];
   const isFixed = (symbolsTable, s) => symbolsTable[s].fixed === true;
@@ -643,6 +644,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const valueBudget = nonScatterTotal - fixedShapeTotal;
     valueBudgetByReel[r] = valueBudget;
     tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
+    fixedShapeSymbols.forEach(s => fixedSymbols.push({ reel: r, symbol: s }));
     if (valueSymbols.length > 0 && valueBudget > 0) {
       valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s, min: symbolsTable[s].min, max: symbolsTable[s].max }));
     }
@@ -743,12 +745,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // stable per point.
     const nmSeed = searchSeed + 700000;
 
+    let rtpMin = Infinity, rtpMax = -Infinity;
+
     function evaluate(x) {
       const reelTables = projectPoint(x);
       const measured = measure(reelTables, nmSeed);
       const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
       const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
       const error = Math.abs(measured.rtp - targetRtp);
+      if (measured.rtp < rtpMin) rtpMin = measured.rtp;
+      if (measured.rtp > rtpMax) rtpMax = measured.rtp;
       return {
         loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty,
         rtp: measured.rtp,
@@ -770,7 +776,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     });
 
     currentReelTables = nm.result.trial;
-    rtpPhaseResult = { ...nm.result, iterations: nm.iterations };
+    rtpPhaseResult = { ...nm.result, iterations: nm.iterations, rtpRange: { min: rtpMin, max: rtpMax }, fixedSymbols };
   }
 
   const finalReelTables = currentReelTables;
@@ -792,6 +798,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         iterationsRun: rtpPhaseResult.iterations,
         orderingViolations: rtpPhaseResult.orderingViolations,
         limitViolations: rtpPhaseResult.limitViolations,
+        rtpRange: rtpPhaseResult.rtpRange,
+        fixedSymbols: rtpPhaseResult.fixedSymbols,
       } : null,
     }
   };
