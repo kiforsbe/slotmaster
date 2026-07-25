@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bar Fruits - Classic Slot Machine</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style type="text/css">
+    @import url('game.css');
+  </style>
+</head>
+<body>
+
+  <div class="cabinet-container">
+
+    <!-- Header -->
+    <header>
+      <div class="title-logo">BAR <span>FRUITS</span></div>
+
+      <div class="top-controls">
+        <button id="btn-paytable" class="btn-icon">
+          📋 Paytable
+        </button>
+        <button id="btn-mute" class="btn-icon">
+          🔊 Sound ON
+        </button>
+      </div>
+    </header>
+
+    <!-- Game Viewport (Canvas and overlay panels) -->
+    <div class="game-viewport">
+
+      <!-- Live Game Ticker -->
+      <div id="game-ticker" class="game-ticker">IDLE</div>
+
+      <!-- Free Spins Header Information Panel -->
+      <div id="fs-panel" class="free-spins-panel">
+        <div id="fs-counter" class="fs-counter">FREE SPINS: 10 / 10</div>
+      </div>
+
+      <!-- Canvas Renderer -->
+      <canvas id="game-canvas"></canvas>
+
+      <!-- Debug cheats (allows quick testing of the scatter trigger / big wins) -->
+      <div class="debug-shortcuts">
+        <span class="btn-debug" style="cursor:default; border:none; color:#777;">Cheats:</span>
+        <button id="cheat-scatter" class="btn-debug">Scatter Trigger</button>
+        <button id="cheat-bigwin" class="btn-debug">Line Big Win</button>
+      </div>
+
+    </div>
+
+    <!-- Glassmorphic Controls Dashboard -->
+    <div class="dashboard">
+
+      <!-- Balance Panel -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Balance</span>
+          <span id="display-balance" class="dashboard-value">$1,000.00</span>
+        </div>
+      </div>
+
+      <!-- Bet Size Selector -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Bet Per Line</span>
+          <div class="bet-adjuster">
+            <button id="bet-minus" class="btn-adjust">-</button>
+            <span id="bet-value" class="bet-display-value">0.10</span>
+            <button id="bet-plus" class="btn-adjust">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lines Selector -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Lines</span>
+          <div class="bet-adjuster">
+            <button id="lines-minus" class="btn-adjust">-</button>
+            <span id="lines-value" class="bet-display-value">20 / 20</span>
+            <button id="lines-plus" class="btn-adjust">+</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Total Bet Panel -->
+      <div class="dashboard-panel">
+        <div class="bet-container">
+          <span class="dashboard-label">Total Bet</span>
+          <span id="display-total-bet" class="dashboard-value">$2.00</span>
+        </div>
+      </div>
+
+      <!-- Spin Button -->
+      <div class="spin-section">
+        <button id="btn-spin" class="btn-spin">SPIN</button>
+      </div>
+
+      <!-- Turbo / Auto -->
+      <div class="auto-turbo-container">
+        <button id="btn-turbo" class="btn-icon">⚡ Turbo</button>
+        <button id="btn-auto" class="btn-icon">🔄 Auto</button>
+      </div>
+
+    </div>
+
+    <!-- Simulation Controls -->
+    <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px;">
+      <button id="btn-tune" class="btn-icon btn-sim-btn">TUNE FREQUENCIES</button>
+      <button id="btn-sim" class="btn-icon btn-sim-btn">RUN SIMULATION</button>
+    </div>
+
+  </div>
+
+  <!-- MODALS -->
+
+  <!-- Paytable Modal -->
+  <div id="modal-paytable" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+      <button class="btn-modal-close">×</button>
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); margin-bottom: 10px;">BAR FRUITS PAYTABLE</h2>
+      <p style="font-size: 13px; color: #d9a891;">3+ in-a-row pays left-to-right on 20 lines. Star scatters pay anywhere on the grid and award Free Spins.</p>
+
+      <div class="paytable-grid" id="paytable-grid-content">
+        <!-- Rendered dynamically in game.js -->
+      </div>
+
+      <h3 style="font-family: 'Cinzel', serif; color: #fff; font-size: 14px; margin: 15px 0 10px 0;">ACTIVE PAYLINES (20 LINES)</h3>
+      <div style="display: flex; gap: 4px; justify-content: center; flex-wrap: wrap;" id="paylines-preview">
+        <!-- Rendered dynamically -->
+      </div>
+
+      <button id="btn-paytable-ok" class="btn-primary">CLOSE</button>
+    </div>
+  </div>
+
+  <!-- Free Spins Trigger Modal -->
+  <div id="modal-fs-trigger" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); font-size: 28px;">SCATTER TRIGGERED!</h2>
+      <p style="font-size: 14px; color: #fff; margin-top: 5px;">3+ STARS LANDED</p>
+      <p style="font-size: 15px; color: #d9a891; margin: 15px 0;">
+        You are awarded <strong id="fs-award-amount" style="color: var(--gold);">10</strong> FREE SPINS!
+      </p>
+      <button id="btn-start-fs" class="btn-primary">START FREE SPINS</button>
+    </div>
+  </div>
+
+  <!-- Free Spins Summary Modal -->
+  <div id="modal-fs-summary" class="modal-overlay">
+    <div class="modal-content">
+      <h2 style="font-family: 'Cinzel', serif; color: var(--gold); font-size: 32px;">FREE SPINS COMPLETE</h2>
+
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--gold); border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <span class="dashboard-label">Total Free Spins Win</span>
+        <h3 id="fs-total-win" style="font-size: 36px; font-weight: 800; color: #fff; text-shadow: 0 0 10px var(--gold-glow); margin-top: 6px;">$0.00</h3>
+      </div>
+
+      <button id="btn-close-fs-summary" class="btn-primary">COLLECT PRIZE</button>
+    </div>
+  </div>
+
+  <!-- Simulation Results Modal -->
+  <div id="sim-modal" class="sim-modal" style="display: none;">
+    <button class="btn-modal-close">×</button>
+    <h2>Simulation Results</h2>
+    <div id="sim-stats" class="sim-stats">
+      <div class="stat-box">
+        <span class="stat-label">Return to Player (RTP)</span>
+        <div id="sim-rtp" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Total Spins</span>
+        <div id="sim-total-spins" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Max Win</span>
+        <div id="sim-max-win" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Free Spins Triggered</span>
+        <div id="sim-free-spins" class="stat-value">-</div>
+      </div>
+    </div>
+    <button id="btn-close-sim" class="btn-close-sim">CLOSE</button>
+  </div>
+
+  <!-- Core Javascript modules -->
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

@@ -574,13 +574,20 @@ export class SlotEngine {
 
     this.targetGrid = [];
     if (winType === 'scatter') {
-      // Book-of-dead-specific: assumes a 5-reel layout with a scatter symbol named 'book'.
-      // Only meaningful for games that configure one; fruit machine never calls this.
-      for (let col = 0; col < 5; col++) {
+      // Forces this.config.scatterSymbol into the first, middle, and last reel (middle row) -
+      // works for any grid shape a game configures. Falls back to 'book' if scatterSymbol
+      // isn't set, preserving this cheat's original book-of-dead-specific behavior for a game
+      // that never configured one.
+      const scatterSym = this.config.scatterSymbol || 'book';
+      const reelsCount = this.config.reelsCount;
+      const midRow = Math.floor(this.config.rowsCount / 2);
+      const triggerCols = [0, Math.floor(reelsCount / 2), reelsCount - 1];
+      for (let col = 0; col < reelsCount; col++) {
         const strip = this.config.reelStrips[col];
-        const colSymbols = [this.getRandomSymbol(strip), this.getRandomSymbol(strip), this.getRandomSymbol(strip)];
-        if (col === 0 || col === 2 || col === 4) {
-          colSymbols[1] = 'book'; // Force book in middle
+        const colSymbols = [];
+        for (let row = 0; row < this.config.rowsCount; row++) colSymbols.push(this.getRandomSymbol(strip));
+        if (triggerCols.includes(col)) {
+          colSymbols[midRow] = scatterSym;
         }
         this.targetGrid.push(colSymbols);
       }
