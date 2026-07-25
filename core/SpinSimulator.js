@@ -307,7 +307,7 @@ export async function gradientDescent1D({
     // change can measure as an *exactly* zero slope even though the metric does move at a
     // larger step. Without this, the search stalls permanently at the first such plateau
     // (trust decays every iteration regardless, but x itself never moves).
-    let slope = 0;
+    let slope = 0, usedDx = epsilon;
     outer: for (const sign of [1, -1]) {
       for (let widen = 1; widen <= 8; widen *= 2) {
         const xProbe = Math.min(maxX, Math.max(minX, x + sign * epsilon * widen));
@@ -315,11 +315,17 @@ export async function gradientDescent1D({
         if (dx === 0) continue;
         const probeResult = measure(buildTrial(Math.exp(xProbe)), stepSeed);
         slope = (metricOf(probeResult) - metric) / dx;
-        if (slope !== 0) break outer;
+        if (slope !== 0) { usedDx = dx; break outer; }
       }
     }
     if (slope !== 0) {
-      const step = ((target - metric) / slope) * trust;
+      // Cap the step to a small multiple of the distance actually probed - a shallow slope
+      // measured only because the probe had to widen to escape a flat plateau is a coarse,
+      // low-confidence estimate; extrapolating it at full strength is what previously sent
+      // the search flying from one end of the parameter range to the other in a single step.
+      const rawStep = ((target - metric) / slope) * trust;
+      const maxStep = Math.abs(usedDx) * 4;
+      const step = Math.max(-maxStep, Math.min(maxStep, rawStep));
       x = Math.min(maxX, Math.max(minX, x + step));
     }
     trust *= trustFactorDecay;
