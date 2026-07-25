@@ -121,8 +121,18 @@ export class SlotEngine {
   setupReels() {
     this.reels = [];
     for (let r = 0; r < this.config.reelsCount; r++) {
-      const strip = this.config.reelStrips[r] || ['jack', 'queen', 'king', 'ace'];
-      
+      const strip = this.config.reelStrips[r];
+      if (!strip) {
+        // A silent fallback here used to substitute placeholder card symbols ('jack',
+        // 'queen', ...) that don't exist in any current game's paytable - a misconfigured
+        // reelsCount/reelStrips mismatch would render broken symbols instead of failing
+        // loudly at the actual point of misconfiguration.
+        throw new Error(
+          `SlotEngine: reelStrips[${r}] is missing - reelsCount (${this.config.reelsCount}) ` +
+          `doesn't match reelStrips.length (${this.config.reelStrips.length})`
+        );
+      }
+
       // Initialize each reel with random symbols
       const symbols = [];
       for (let i = 0; i < this.config.rowsCount + 3; i++) {
