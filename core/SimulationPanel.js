@@ -414,12 +414,31 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
 
     const targetRtp = options.targetRtp;
-    if (!rtpConverged) {
+    const reason = diagnostics.rtpPhase?.reason;
+    if (reason && reason !== 'converged') {
+      const rp = diagnostics.rtpPhase;
+      const rangeNote = rp.rtpRange
+        ? ` RTP ranged from ${rp.rtpRange.min.toFixed(2)}% to ${rp.rtpRange.max.toFixed(2)}% during the search.`
+        : '';
+      let message;
+      if (reason === 'converged-with-violations') {
+        const totalViolations = rp.orderingViolations.length + rp.limitViolations.length;
+        message = `<strong>⚠ Target RTP (${targetRtp}%) was reached, but ${rp.orderingViolations.length} ordering / ` +
+          `${rp.limitViolations.length} limit violation${totalViolations === 1 ? '' : 's'} remain</strong> ` +
+          `(totaling ${rp.orderingPenaltyRemaining.toFixed(3)} / ${rp.limitPenaltyRemaining.toFixed(3)}) - the search stopped trying to ` +
+          `resolve them further after ${rp.restarts} restart${rp.restarts === 1 ? '' : 's'}.`;
+      } else if (reason === 'stalled') {
+        message = `<strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> - the search gave up after ${rp.restarts} restart${rp.restarts === 1 ? '' : 's'} ` +
+          `with no further improvement on RTP, ordering, or limits (used ${rp.iterationsRun} of ${rp.iterationsBudget} iterations). ` +
+          `The closest attempt found is off by ${rp.error.toFixed(2)} percentage points. Raising Max Iterations alone is unlikely to help - ` +
+          `check whether the current frequencies/payouts allow ${targetRtp}% RTP at all.`;
+      } else { // 'exhausted'
+        message = `<strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> - the closest attempt found is off by ${rp.error.toFixed(2)} ` +
+          `percentage points, and the search was still improving when it ran out of iterations (used all ${rp.iterationsBudget}). ` +
+          `Try raising Max Iterations.`;
+      }
       html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
-                 <strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> -
-                 the closest attempt found is off by ${diagnostics.rtpPhase.error.toFixed(2)} percentage points.
-                 Try raising Max Iterations, or check whether the current frequencies/payouts allow
-                 ${targetRtp}% RTP at all - don't treat the RTP shown above as final without checking this.
+                 ${message}${rangeNote}
                </p>`;
     }
 
