@@ -78,9 +78,10 @@ and trigger/summary modals (same pattern as bookbookbook, minus the expanding-sy
 
 ## Debug tools
 
-**RUN SIMULATION** and **TUNE FREQUENCIES** work the same as the other games. `game.js` has a
-`DEBUG_MODE` flag (on by default) with two cheat buttons: force a scatter trigger, or force a
-line big win.
+**RUN SIMULATION** and **TUNE FREQUENCIES** work the same as the other games. **SPIN LOG**
+opens a live table of recent real spins (seed, bet, win, win breakdown) with a CSV export
+button (see the top-level README's "Spin logging" section). `game.js` has a `DEBUG_MODE` flag
+(on by default) with two cheat buttons: force a scatter trigger, or force a line big win.
 
 ## Tuning status
 
@@ -89,3 +90,6 @@ for fruits) - they have **not** been through a TUNE FREQUENCIES pass yet, since 
 the in-browser panel. `tests/barfruits.test.mjs` only checks that the math wiring itself is
 sane (consistent shapes, star's spacing constraint, a finite RTP), not that RTP is anywhere
 near a target - run TUNE FREQUENCIES in-browser before treating this paytable as final.
+
+---
+_Last updated: 2026-07-25, commit `a674e00`._

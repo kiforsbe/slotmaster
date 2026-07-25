@@ -68,7 +68,12 @@ PAYTABLE modal that renders payouts and a preview of each of the 5 paylines dire
 ## Debug tools
 
 **RUN SIMULATION** runs 1,000,000 spins headlessly through the same win evaluator
-(`checkWildLineWins`) the live game uses and reports measured RTP/max win. **TUNE
+(`checkWildLineWins`) the live game uses and reports measured RTP/max win, seeding the run and
+offering a per-spin CSV export (see the top-level README's "Spin logging" section). **TUNE
 FREQUENCIES** opens the auto-tuner (`core/SpinSimulator.js`/`SimulationPanel.js`) against this
 game's own paytable and reel tables — since there's no scatter/free-spins symbol here, its
-trigger-rate phase is a no-op and only the RTP/ordering phase runs.
+trigger-rate phase is a no-op and only the RTP/ordering phase runs. **SPIN LOG** opens a live
+table of recent real spins (seed, bet, win, win breakdown), also exportable as CSV.
+
+---
+_Last updated: 2026-07-25, commit `a674e00`._

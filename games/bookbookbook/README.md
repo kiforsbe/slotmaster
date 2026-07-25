@@ -1,7 +1,7 @@
 # Book of Book Book (bookbookbook)
 
-A classic Book of Ra/Book of Dead-style 5-reel, 3-row machine, 10 fixed paylines, with a
-book-scatter-triggered free spins bonus and an expanding symbol.
+A classic Book of Ra/Book of Dead-style 5-reel, 3-row machine, adjustable 1-10 paylines, with
+a book-scatter-triggered free spins bonus and an expanding symbol.
 
 See the top-level [README](../../README.md) for how reel frequency tables, `minGap`/
 `maxStack`, and `tuneFrequencies` work in general; this file only covers what's specific to
@@ -9,8 +9,8 @@ this game.
 
 ## Paylines
 
-10 fixed lines across the 5x3 grid (`PAYLINES` in `game.js`) — always all active, there's no
-per-line bet selector in this game (see Betting below):
+10 fixed lines across the 5x3 grid (`PAYLINES` in `game.js`), selectable 1-10 via the LINES
+control (see Betting below) — only the first N lines are active for a given spin:
 
 1. Horizontal middle row
 2. Horizontal top row
@@ -62,9 +62,12 @@ inside the tuner's default target band).
 
 ## Betting
 
-Bet is a flat per-spin amount (`BET_PER_LINE`, starting at `$1`, adjustable `$1`-`$100` in
-whole-dollar steps) applied across all 10 always-active lines — there's no separate lines
-selector in this game, unlike fruitmachine.
+Per-line bet: `$0.10` default, step, and minimum, up to `$100` max (`BET_PER_LINE`/`_STEP`/
+`_MAX` in `game.js`). Lines: 1-10, adjustable independently of bet size (same pattern as
+fruitmachine/barfruits); total bet (`betPerLine × linesCount`) is shown in its own dashboard
+panel. Note: `BET_PER_LINE`/`LINES_COUNT` must be passed explicitly into the `new
+SlotEngine(...)` config — they aren't picked up automatically just by being defined, since
+`SlotEngine` falls back to its own defaults (`$1`, 10 lines) otherwise.
 
 ## Controls
 
@@ -76,7 +79,13 @@ current expanding symbol during the bonus.
 ## Debug tools
 
 **RUN SIMULATION** and **TUNE FREQUENCIES** work the same as in fruitmachine (see the
-top-level README), against this game's `PAYTABLE` and five `FREQUENCY_REELn` tables.
-`game.js` also has a `DEBUG_MODE` flag (on by default) that enables three cheat buttons for
-manually forcing a scatter trigger, an expanding-symbol win, or a big win, for testing the
-bonus flow without waiting on real spins.
+top-level README), against this game's `PAYTABLE` and five `FREQUENCY_REELn` tables — both are
+configured with `hasExpandingWild: true` (see `docs/ARCHITECTURE.md`'s `simulateSpins` entry),
+since this game's free spins really do include one; omitting it would silently under-measure
+RTP. **SPIN LOG** opens a live table of recent real spins with a CSV export button (see the
+top-level README's "Spin logging" section). `game.js` also has a `DEBUG_MODE` flag (on by
+default) that enables three cheat buttons for manually forcing a scatter trigger, an
+expanding-symbol win, or a big win, for testing the bonus flow without waiting on real spins.
+
+---
+_Last updated: 2026-07-25, commit `a674e00`._

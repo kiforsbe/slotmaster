@@ -18,6 +18,10 @@ core/SlotMath.js            <- win evaluation, reel building, seeded RNG
 core/SpinSimulator.js       <- headless simulation + auto-tuning, built on SlotMath.js
 core/SimulationPanel.js     <- browser UI for SpinSimulator.js, used by game.js's debug buttons
 core/SlotAudio.js           <- synthesized sound effects, used by SlotEngine.js
+
+core/SpinLog.js             <- pure per-spin log entry building + CSV serialization
+core/SpinLogPanel.js        <- browser UI for SpinLog.js, reads SlotEngine.spinLog
+core/FileIO.js              <- generic browser file-download helper, used by SpinLog.js
 ```
 
 Nothing in `core/` imports from `games/`. A game only ever flows data *into* `core/` (its own
@@ -108,9 +112,16 @@ answered by polling physics.
 - `updateBet()` — recompute `totalBet` after changing `betPerLine`/`linesCount`.
 - `loadAssets(spritesheetUrl?, symbolsConfig?)` — (re)load the sprite atlas, e.g. for a theme
   switcher.
-- `runSimulation(numBaseSpins?, betPerLine?, linesCount?)` — thin wrapper around
+- `runSimulation(numBaseSpins?, betPerLine?, linesCount?, options?)` — thin wrapper around
   `SpinSimulator.simulateSpins` using this engine's own live `config`, so a simulation always
-  measures exactly what the running game would actually pay.
+  measures exactly what the running game would actually pay. `options.seed` seeds the run for
+  reproducibility; `options.logSpins` (default `false`) populates the returned `spinLog` (see
+  "Spin logging" below) — both off by default, matching `simulateSpins`' own legacy behavior.
+
+Also exposes `engine.spinLog` (one entry per real spin made so far, see "Spin logging" below)
+and `engine.lastSpinSeed` (the seed behind the most recent spin — `engine.spin(engine.
+lastSpinSeed)` replays it exactly) as plain properties a game or debug tool can read directly;
+neither needs a method call.
 
 Rendering (`render()` and everything below it) is internal — a game never calls into it
 directly, only supplies the sprite atlas and reacts to `onStateChange`/`onWin` to update its
@@ -127,14 +138,19 @@ simulated RTP is never a separate model of the game, it's the same `checkWins`/
   (defaulting to `checkWins`) and returns aggregate stats: `rtp`, `maxWin`, win/hit
   distributions, `freeSpinsTriggered`, etc. `config` is shaped like `SlotEngine`'s own config
   (`reelStrips`, `paytable`, `paylines`, `winEvaluator`, ...) — in fact `SlotEngine.
-  runSimulation()` passes its own `this.config` straight through.
+  runSimulation()` passes its own `this.config` straight through. Two config fields are opt-in,
+  both `false` by default so existing callers see no behavior change: `hasExpandingWild`
+  (simulate a Book-of-Dead-style expanding-wild bonus during free spins — only bookbookbook
+  actually has this mechanic) and `logSpins` (populate `results.spinLog`, one entry per
+  simulated spin, via `core/SpinLog.js` — see "Spin logging" below).
 - **`tuneFrequencies(paytable, reelFrequencyTables, options)`** — the RUN SIMULATION/TUNE
   FREQUENCIES panel's auto-balancer. Given a paytable and one frequency table per reel,
   searches for reel frequencies that hit a target RTP and free-spins trigger rate, returning a
   tuned clone (never mutates its input). See its own extensive JSDoc in the file for the full
   two-phase strategy (trigger-rate scaling, then a joint Nelder-Mead search over per-symbol
-  weights) and every tuning knob (`orderingBiasByReel`, `limitPenaltyWeight`, `min`/`max`,
-  `fixed`, ...) — that doc is deliberately the canonical reference, not duplicated here.
+  weights) and every tuning knob (`orderingBiasByReel`, `limitPenaltyWeight`,
+  `uniformityPenaltyWeight`, `initialWeightStrategy`, `minFrequency`/`maxFrequency`, `fixed`,
+  ...) — that doc is deliberately the canonical reference, not duplicated here.
 - **`gradientDescent1D`**, **`nelderMead`** — generic numerical optimizers `tuneFrequencies`
   is built from (log-space 1D search and an N-dimensional simplex search, respectively). Not
   slot-specific; exported mainly because `tuneFrequencies`' own tests exercise them directly.
@@ -158,6 +174,33 @@ UI — it calls these instead:
   `{ defaults, symbols }` tables back into pasteable `export const FREQUENCY_REELn = {...}`
   source text (4-significant-figure frequencies, so values under 1 don't collapse into each
   other — see the top-level README).
+
+## `core/SpinLog.js` / `core/SpinLogPanel.js` / `core/FileIO.js` — spin logging
+
+Both `SlotEngine.js` (live spins) and `SpinSimulator.js` (a batch run, opt-in via
+`config.logSpins`) build their per-spin log entries through the same pure functions in
+`core/SpinLog.js`, so the two can't drift apart on field names or payout math:
+
+- **`createSpinLogEntry({ spinIndex, phase, betPerLine, linesCount, chargedBet,
+  scatterBetBase, winData, scatterSymbol, seed, timestamp })`** — builds one entry from a win
+  evaluator's result. `seed`/`timestamp` are per-entry only when the caller has one (live play
+  always does; a batch run shares one continuous rng stream across the whole call instead, so
+  it leaves these `null` and documents the run's seed/start time separately — see
+  `exportSpinLogCsv` below).
+- **`applyExpandingWinToSpinLogEntry(entry, { expandingSymbol, expandingReels, expandingWin })`**
+  — mutates an entry once its expanding win is known, whether that's immediately (a batch run
+  already has it) or later (live play, only after the expansion animation finishes — see
+  `SlotEngine._pushSpinLogEntry`/the `'expanding'` state handling in `update()`).
+- **`summarizeSpinWins(entry)`** / **`exportSpinLogCsv(spinLog, { seed, startedAt,
+  filenamePrefix })`** — the compact `TYPE:symbol:count:amount[:flags]` win-summary format (see
+  its own doc for the exact grammar and a ready-made parsing regex) and the CSV builder +
+  download trigger used by both the RUN SIMULATION panel's export button and
+  `SpinLogPanel.js`'s.
+- **`core/SpinLogPanel.js`'s `openSpinLogPanel({ engine, domRefs })`** — the SPIN LOG dev
+  button's panel: a live-refreshing table of `engine.spinLog`'s most recent entries plus an
+  export button. Reuses the same shared modal DOM as `SimulationPanel.js`'s panels.
+- **`core/FileIO.js`'s `downloadTextFile(filename, text, mimeType)`** — generic
+  browser-download utility `exportSpinLogCsv` is built on; not spin-log-specific.
 
 ## `core/SlotAudio.js` — synthesized sound effects
 
@@ -196,9 +239,10 @@ a plugin registry — there's no central list of games to update.
    winEvaluator, wildSymbol, scatterSymbol, betPerLine, linesCount, symbolsConfig,
    spritesheetUrl, onStateChange, onScatterTrigger, onWin })`.
 6. Wire the rest of the page's DOM controls (spin/auto/turbo/mute/bet/lines buttons) to the
-   engine's public methods, and the RUN SIMULATION / TUNE FREQUENCIES buttons to
-   `runSimulationAndRender`/`openTuneFrequenciesPanel` from `SimulationPanel.js`, passing the
-   same `PAYTABLE`/`FREQUENCY_REELn`/`PAYLINES` the live engine uses.
+   engine's public methods, the RUN SIMULATION / TUNE FREQUENCIES buttons to
+   `runSimulationAndRender`/`openTuneFrequenciesPanel` from `SimulationPanel.js` (passing the
+   same `PAYTABLE`/`FREQUENCY_REELn`/`PAYLINES` the live engine uses), and a SPIN LOG button to
+   `openSpinLogPanel({ engine, domRefs: { simModal, simStats } })` from `SpinLogPanel.js`.
 
 ### 2. `index.html` — the DOM contract `game.js` expects
 
@@ -209,8 +253,9 @@ supply them. At minimum: `#game-canvas` (the render target), `#btn-spin`, `#btn-
 (never hand-author paytable text — it drifts), and a `#sim-modal` with the stat elements
 `runSimulationAndRender`/`openTuneFrequenciesPanel` render into (`#sim-stats`, `#sim-rtp`,
 `#sim-total-spins`, `#sim-max-win`, `#sim-free-spins`, plus `#btn-sim`/`#btn-tune`/
-`#btn-close-sim`). Copy an existing game's `index.html` as the starting point rather than
-writing this from scratch — the exact id set is easiest to get right by example.
+`#btn-close-sim`/`#btn-spinlog` — `SpinLogPanel.js`'s panel reuses the same `#sim-modal`).
+Copy an existing game's `index.html` as the starting point rather than writing this from
+scratch — the exact id set is easiest to get right by example.
 
 ### 3. Asset loading
 
@@ -281,3 +326,6 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   uses. A simulated RTP is only ever trustworthy because of this — see the earlier
   `.toFixed(1)` frequency-rounding bug (documented in git history) for what happens when a
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
+
+---
+_Docs last synced with the codebase: 2026-07-25, commit `a674e00`._

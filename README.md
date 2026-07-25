@@ -3,6 +3,17 @@
 Browser-based slot machine games. Plain ES modules, no build step, no bundler —
 open `index.html` (via a local server, see below) and play.
 
+## Games
+
+| Game | Grid | Bonus | README |
+|---|---|---|---|
+| Book of Book Book | 5x3, 10 lines | Book scatter → free spins with an expanding symbol | [games/bookbookbook](games/bookbookbook/README.md) |
+| Lucky Fruits | 3x3, 1-5 lines | None — wilds only | [games/fruitmachine](games/fruitmachine/README.md) |
+| Bar Fruits | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
+
+All three share the same `core/` engine and debug tooling; each README covers only what's
+specific to that game.
+
 ## Running it
 
 ES modules need to be served over HTTP (`file://` won't work). On Windows:
@@ -45,6 +56,12 @@ docs/    Design specs and implementation plans (docs/superpowers/)
 - **`core/SimulationPanel.js`** — the in-browser RUN SIMULATION / TUNE FREQUENCIES UI (a debug
   panel included in each game's `index.html`), plus the formatter that turns a tuned result
   back into pasteable `FREQUENCY_REELn` source.
+- **`core/SpinLog.js`** — pure per-spin log entry building and CSV serialization, shared by
+  both `SpinSimulator.js` (a batch run) and `SlotEngine.js` (live play) so the two can't drift
+  apart on what a logged spin looks like. See "Spin logging" below.
+- **`core/SpinLogPanel.js`** / **`core/FileIO.js`** — the in-browser SPIN LOG viewer (reads
+  `SlotEngine.spinLog`) and a small generic "download this text as a file" helper it uses for
+  CSV export.
 - **`core/SlotAudio.js`** — sound effects.
 
 Each game (`games/<name>/game.js`) owns its own `PAYTABLE`, paylines, and per-reel frequency
@@ -62,7 +79,7 @@ export const FREQUENCY_REEL1 = {
   defaults: { minGap: 2 },       // optional reel-wide fallback constraints
   symbols: {
     bar: { frequency: 24.5 },
-    star: { frequency: 6.3, min: 2, max: 6, maxStack: 1, minGap: 3 },
+    star: { frequency: 6.3, minFrequency: 2, maxFrequency: 6, maxStack: 1, minGap: 3 },
   },
 };
 ```
@@ -93,9 +110,10 @@ as it can rather than throwing or looping forever.
 reel — its frequency is left exactly as written. Used for symbols whose frequency shouldn't be
 touched by auto-tuning (e.g. a wild that's deliberately rare).
 
-**`min`/`max`** on a symbol are soft bounds `tuneFrequencies` tries to keep that symbol's
-tuned frequency within, on that reel — a discouraged-but-not-forbidden preference, not a hard
-clamp.
+**`minFrequency`/`maxFrequency`** on a symbol are soft bounds `tuneFrequencies` tries to keep
+that symbol's tuned frequency within, on that reel — a discouraged-but-not-forbidden
+preference, not a hard clamp. Resolved the same per-symbol → reel `defaults` → unconstrained
+way as `minGap`/`maxStack` (see `resolveFrequencyBounds` in `core/SlotMath.js`).
 
 ### `triggerFreeSpins`, not `type: 'scatter'`
 
@@ -123,3 +141,29 @@ for a "near miss" feel — premium symbols showing up often on the reels a playe
 rarely on the ones that would complete the line. That's a UI convenience, not a change to
 `tuneFrequencies`' own default; calling it directly without `orderingBiasByReel` still behaves
 exactly as before.
+
+`tuneFrequencies` has several more tuning knobs (`uniformityPenaltyWeight`,
+`initialWeightStrategy`, per-reel ordering `Strength`, ...) — its own JSDoc in
+`core/SpinSimulator.js` is the canonical reference for all of them, deliberately not duplicated
+here.
+
+## Spin logging
+
+Every real spin (base and free, live in the browser) is recorded to `engine.spinLog` — one
+entry per spin, each with its own seed, timestamp, bet, and a breakdown of every
+scatter/line/expanding win it produced (`core/SpinLog.js`'s `createSpinLogEntry`). Click a
+game's **SPIN LOG** button to open a live-refreshing table of recent spins with an **EXPORT
+CSV** button (`core/SpinLogPanel.js`), for pulling a session's data into Excel/Sheets.
+
+RUN SIMULATION can log the same way: pass `logSpins: true` to `simulateSpins`/
+`engine.runSimulation` and every simulated spin lands in `results.spinLog` too — the RUN
+SIMULATION panel does this automatically, seeding each run (shown next to its results) so it
+can be reproduced, with its own "EXPORT SPIN LOG (CSV)" button. Both paths share the same
+`core/SpinLog.js` entry shape and CSV format (`exportSpinLogCsv`), so a batch run's export and
+a live session's export are interchangeable in a spreadsheet. The win-breakdown cell uses a
+compact, regex-friendly format — `TYPE:symbol:count:amount[:flags]` per win, joined by `|`
+(e.g. `S:book:3:20|L4:ace:3:5:W`) — see `summarizeSpinWins`'s own doc in `core/SpinLog.js` for
+the exact grammar.
+
+---
+_Docs last synced with the codebase: 2026-07-25, commit `a674e00`._
