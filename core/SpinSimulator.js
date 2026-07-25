@@ -574,6 +574,20 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // One shared multiplier applied identically to every reel's table - a symbol with
   // frequency 0 on a given reel stays 0 (0 * mult = 0), so this is safe even for reels
   // that don't carry the scatter symbol at all.
+  //
+  // This is the ONLY place a scatter-typed symbol's frequency can change - Phase 2 (below)
+  // explicitly excludes scatter symbols from its dimensions entirely (they're filtered out
+  // of nonScatterSymbols before valueSymbols/fixedShapeSymbols are even computed), so a
+  // scatter symbol untouched here stays untouched for the rest of the run.
+  //
+  // It's expected - not a bug - for this phase to converge with mult staying at its
+  // gradientDescent1D starting value of 1 (i.e. the scatter symbol's frequency doesn't
+  // change at all): the search starts there and stops as soon as the measured trigger rate
+  // is within `triggerRateTolerancePct` of `targetTriggerRatePct`, so if the *baseline*
+  // frequency already lands inside that band, there's simply nothing to correct. Confirmed
+  // for games/bookbookbook/game.js's real data: baseline trigger rate ~0.57% already sits
+  // inside the default 0.6% +/- 0.15 target band, so `diagnostics.scatterPhase.multiplier`
+  // comes back exactly 1 and `book`'s frequency is unchanged on every reel.
   let currentReelTables = baseReelTables;
   let scatterPhase = null;
   if (scatterSymbols.length > 0) {

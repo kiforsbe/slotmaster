@@ -55,6 +55,11 @@ const PAYTABLE = {
 // these per-reel tables directly, not the full PAYTABLE, and its own min-gap enforcement
 // (spreads scatter symbols out so they can't cluster within one reel) reads `type` off
 // whatever table it's given, so it needs to be present here to keep working.
+// Don't be surprised if TUNE FREQUENCIES leaves `book`'s frequency completely unchanged on
+// every reel - that's expected here, not a bug: see the Phase 1 comment above
+// tuneFrequencies() in core/SpinSimulator.js. In short, book's baseline trigger rate
+// (~0.57%) already sits inside the tuner's default target band (0.6% +/- 0.15), so there's
+// nothing for that phase to correct.
 const FREQUENCY_REEL1 = {
   book:     { frequency: 0.051, type: 'scatter' },
   explorer: { frequency: 0.079 },
