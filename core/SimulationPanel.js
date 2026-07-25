@@ -193,6 +193,17 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
  * `export const FREQUENCY_REELn = { ... }` literals, column-aligned - matching the exact
  * style already used in games/fruitmachine/game.js.
  */
+// A fixed decimal-place count (the previous `.toFixed(1)`) is fine for frequencies in the
+// tens (fruitmachine's bar: 25.3) but is catastrophically lossy for frequencies under 1
+// (bookbookbook's book: 0.051 and explorer: 0.079 both rounded to "0.1" - two symbols with
+// nearly 2x different rarity reading back as identical). Significant figures scale with
+// magnitude instead, so both ranges keep enough precision to survive a copy/paste
+// round-trip without silently corrupting the tuned result.
+function formatFrequencyForCopy(freq) {
+  if (freq === 0) return '0';
+  return Number(freq.toPrecision(4)).toString();
+}
+
 export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
   return reelFrequencyTables.map((table, i) => {
     const symbols = Object.keys(table);
@@ -204,7 +215,7 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
       const fixedPart = table[symbol].fixed ? ', fixed: true' : '';
       const minPart = table[symbol].min != null ? `, min: ${table[symbol].min}` : '';
       const maxPart = table[symbol].max != null ? `, max: ${table[symbol].max}` : '';
-      return `  ${keyPart} { frequency: ${table[symbol].frequency.toFixed(1)}${fixedPart}${minPart}${maxPart} },`;
+      return `  ${keyPart} { frequency: ${formatFrequencyForCopy(table[symbol].frequency)}${fixedPart}${minPart}${maxPart} },`;
     });
     return `export const FREQUENCY_REEL${i + 1} = {\n${lines.join('\n')}\n};`;
   }).join('\n\n');
