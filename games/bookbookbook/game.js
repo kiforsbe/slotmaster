@@ -29,28 +29,100 @@ const PAYLINES = [
 ];
 
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
-// Frequencies tuned (with SlotMath's now-fixed payout math and generateReel's scatter
-// min-gap enforcement) to land near 96% RTP while keeping the book/scatter trigger rate
-// around 0.5% of spins (~1 in 200), with 4+ books rare and 5+ books effectively astronomical.
+// Rules only (payout, type, paymode, wild, triggerFreeSpins, friendlyName) - no `.frequency`
+// field. Frequencies live only on the per-reel FREQUENCY_REELn tables below (same model as
+// games/fruitmachine/game.js) - see tuneFrequencies' own docs in core/SpinSimulator.js for
+// why frequencies must come from the reels, not the paytable.
 const PAYTABLE = {
-  book:     { payout: [0,  0,   2,   20,  200], frequency: 0.051, type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
-  explorer: { payout: [0, 10, 100, 1000, 5000], frequency: 0.079, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
-  tut:      { payout: [0,  5,  40,  400, 2000], frequency: 0.157, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Tutankhamun' },
-  anubis:   { payout: [0,  5,  30,  100,  750], frequency: 0.234, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
-  scarab:   { payout: [0,  5,  30,  100,  750], frequency: 0.234, type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
-  ace:      { payout: [0,  0,   5,   40,  150], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
-  king:     { payout: [0,  0,   5,   40,  150], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
-  queen:    { payout: [0,  0,   5,   30,  100], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
-  jack:     { payout: [0,  0,   5,   30,  100], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
-  ten:      { payout: [0,  0,   5,   30,  100], frequency: 0.201, type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
+  book:     { payout: [0,  0,   2,   20,  200], type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },
+  explorer: { payout: [0, 10, 100, 1000, 5000], type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'The Explorer' },
+  tut:      { payout: [0,  5,  40,  400, 2000], type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Tutankhamun' },
+  anubis:   { payout: [0,  5,  30,  100,  750], type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Anubis Guard' },
+  scarab:   { payout: [0,  5,  30,  100,  750], type: 'premium', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Scarab Beetle' },
+  ace:      { payout: [0,  0,   5,   40,  150], type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Golden Ace' },
+  king:     { payout: [0,  0,   5,   40,  150], type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Pharaoh King' },
+  queen:    { payout: [0,  0,   5,   30,  100], type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Royal Queen' },
+  jack:     { payout: [0,  0,   5,   30,  100], type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Desert Jack' },
+  ten:      { payout: [0,  0,   5,   30,  100], type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
 };
+
+// Frequency tables for each reel. Every reel starts out identical (same numbers the flat
+// PAYTABLE.frequency used to carry) so this migration doesn't change RTP/trigger-rate by
+// itself - a pure data-model refactor. Differentiate them per reel via TUNE FREQUENCIES
+// (per-reel ordering preference, fixed, min/max) same as fruitmachine.
+// `book`'s `type: 'scatter'` is intentionally repeated here (fruitmachine's reel tables carry
+// no `type` at all, since it has no scatter symbol) - generateReel() is called with one of
+// these per-reel tables directly, not the full PAYTABLE, and its own min-gap enforcement
+// (spreads scatter symbols out so they can't cluster within one reel) reads `type` off
+// whatever table it's given, so it needs to be present here to keep working.
+const FREQUENCY_REEL1 = {
+  book:     { frequency: 0.051, type: 'scatter' },
+  explorer: { frequency: 0.079 },
+  tut:      { frequency: 0.157 },
+  anubis:   { frequency: 0.234 },
+  scarab:   { frequency: 0.234 },
+  ace:      { frequency: 0.201 },
+  king:     { frequency: 0.201 },
+  queen:    { frequency: 0.201 },
+  jack:     { frequency: 0.201 },
+  ten:      { frequency: 0.201 },
+};
+const FREQUENCY_REEL2 = {
+  book:     { frequency: 0.051, type: 'scatter' },
+  explorer: { frequency: 0.079 },
+  tut:      { frequency: 0.157 },
+  anubis:   { frequency: 0.234 },
+  scarab:   { frequency: 0.234 },
+  ace:      { frequency: 0.201 },
+  king:     { frequency: 0.201 },
+  queen:    { frequency: 0.201 },
+  jack:     { frequency: 0.201 },
+  ten:      { frequency: 0.201 },
+};
+const FREQUENCY_REEL3 = {
+  book:     { frequency: 0.051, type: 'scatter' },
+  explorer: { frequency: 0.079 },
+  tut:      { frequency: 0.157 },
+  anubis:   { frequency: 0.234 },
+  scarab:   { frequency: 0.234 },
+  ace:      { frequency: 0.201 },
+  king:     { frequency: 0.201 },
+  queen:    { frequency: 0.201 },
+  jack:     { frequency: 0.201 },
+  ten:      { frequency: 0.201 },
+};
+const FREQUENCY_REEL4 = {
+  book:     { frequency: 0.051, type: 'scatter' },
+  explorer: { frequency: 0.079 },
+  tut:      { frequency: 0.157 },
+  anubis:   { frequency: 0.234 },
+  scarab:   { frequency: 0.234 },
+  ace:      { frequency: 0.201 },
+  king:     { frequency: 0.201 },
+  queen:    { frequency: 0.201 },
+  jack:     { frequency: 0.201 },
+  ten:      { frequency: 0.201 },
+};
+const FREQUENCY_REEL5 = {
+  book:     { frequency: 0.051, type: 'scatter' },
+  explorer: { frequency: 0.079 },
+  tut:      { frequency: 0.157 },
+  anubis:   { frequency: 0.234 },
+  scarab:   { frequency: 0.234 },
+  ace:      { frequency: 0.201 },
+  king:     { frequency: 0.201 },
+  queen:    { frequency: 0.201 },
+  jack:     { frequency: 0.201 },
+  ten:      { frequency: 0.201 },
+};
+const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQUENCY_REEL4, FREQUENCY_REEL5];
 
 // Symbols eligible to be picked as the free spins expanding symbol - anything that
 // isn't a scatter (scatter symbols trigger free spins, they can't also expand during them).
 const EXPANDING_CANDIDATES = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type !== 'scatter');
 
-// 2. Reel Strips Generation (Randomized for each reel)
-const REEL_STRIPS = REEL_SEEDS.map(seed => generateReel(PAYTABLE, REEL_LENGTH, seed));
+// 2. Reel Strips Generation (Randomized for each reel, from each reel's own frequency table)
+const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i]));
 
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
@@ -167,6 +239,7 @@ window.addEventListener('load', async () => {
     btnTune.addEventListener('click', () => {
       openTuneFrequenciesPanel({
         paytable: PAYTABLE,
+        reelFrequencyTables: FREQUENCY_REELS,
         tuneConfig: {
           reelsCount: REELS_COUNT,
           rowsCount: ROWS_COUNT,
