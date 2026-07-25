@@ -189,61 +189,22 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
 }
 
 /**
- * Formats a paytable back out as a paste-ready `const PAYTABLE = { ... }` literal,
- * column-aligned. Field-agnostic: formats whichever scalar/array/boolean fields are
- * present (union across all symbols, first-seen order), so it works unchanged for
- * paytables with different field sets. `friendlyName` (if present) always renders last.
+ * Formats an array of per-reel frequency tables back out as paste-ready
+ * `export const FREQUENCY_REELn = { ... }` literals, column-aligned - matching the exact
+ * style already used in games/fruitmachine/game.js.
  */
-export function formatPaytableForCopy(paytable) {
-  const symbols = Object.keys(paytable);
-  if (symbols.length === 0) return 'const PAYTABLE = {};';
+export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
+  return reelFrequencyTables.map((table, i) => {
+    const symbols = Object.keys(table);
+    if (symbols.length === 0) return `export const FREQUENCY_REEL${i + 1} = {};`;
 
-  const keyWidth = Math.max(...symbols.map(s => s.length + 1));
-
-  const fieldNames = [];
-  symbols.forEach(s => {
-    Object.keys(paytable[s]).forEach(field => {
-      if (field !== 'payout' && field !== 'friendlyName' && !fieldNames.includes(field)) {
-        fieldNames.push(field);
-      }
+    const keyWidth = Math.max(...symbols.map(s => s.length + 1));
+    const lines = symbols.map(symbol => {
+      const keyPart = `${symbol}:`.padEnd(keyWidth);
+      return `  ${keyPart} { frequency: ${table[symbol].frequency.toFixed(1)} },`;
     });
-  });
-
-  const payoutLen = paytable[symbols[0]].payout.length;
-  const payoutColWidths = Array.from({ length: payoutLen }, (_, col) =>
-    Math.max(...symbols.map(s => String(paytable[s].payout[col]).length))
-  );
-  const fmtPayout = (arr) =>
-    '[' + arr.map((v, i) => String(v).padStart(payoutColWidths[i])).join(', ') + ']';
-
-  const renderValue = (value) => {
-    if (Array.isArray(value)) return `[${value.map(v => typeof v === 'string' ? `'${v}'` : v).join(', ')}]`;
-    if (typeof value === 'string') return `'${value}'`;
-    return String(value);
-  };
-
-  const fmtField = (fieldName) => {
-    const rendered = {};
-    symbols.forEach(s => {
-      rendered[s] = (fieldName in paytable[s]) ? `${fieldName}: ${renderValue(paytable[s][fieldName])},` : '';
-    });
-    const width = Math.max(...symbols.map(s => rendered[s].length));
-    const padded = {};
-    symbols.forEach(s => { padded[s] = rendered[s].padEnd(width); });
-    return padded;
-  };
-
-  const fieldColumns = fieldNames.map(fmtField);
-
-  const lines = symbols.map(symbol => {
-    const data = paytable[symbol];
-    const keyPart = `${symbol}:`.padEnd(keyWidth);
-    const fieldsPart = fieldColumns.map(col => col[symbol]).filter(s => s.length > 0).join(' ');
-    const namePart = data.friendlyName !== undefined ? ` friendlyName: '${data.friendlyName}'` : '';
-    return `  ${keyPart} { payout: ${fmtPayout(data.payout)}, ${fieldsPart}${namePart} },`;
-  });
-
-  return `const PAYTABLE = {\n${lines.join('\n')}\n};`;
+    return `export const FREQUENCY_REEL${i + 1} = {\n${lines.join('\n')}\n};`;
+  }).join('\n\n');
 }
 
 /**
@@ -253,10 +214,11 @@ export function formatPaytableForCopy(paytable) {
  * (applying a result means regenerating reel strips, a deliberate source change).
  * @param {Object} args
  * @param {Object} args.paytable
+ * @param {Object[]} args.reelFrequencyTables - One table per reel, each `{ symbol: { frequency } }`.
  * @param {Object} args.tuneConfig - { reelsCount, rowsCount, paylines, reelSeeds, betPerLine, linesCount, reelLength, winEvaluator, wildSymbol, scatterSymbol }
  * @param {Object} args.domRefs - { simModal, simStats }
  */
-export function openTuneFrequenciesPanel({ paytable, tuneConfig, domRefs }) {
+export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneConfig, domRefs }) {
   const { simModal, simStats } = domRefs;
   let tuneContainer = simModal.querySelector('#tune-details');
   if (!tuneContainer) {
@@ -290,26 +252,21 @@ export function openTuneFrequenciesPanel({ paytable, tuneConfig, domRefs }) {
         <label style="font-size: 0.8em; color: #ccc;">Max Iterations / Phase<br>
           <input id="tune-max-iterations" type="number" value="10" step="1" min="3" max="30" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Frequency Mode<br>
-          <select id="tune-frequency-mode" style="width: 100%; margin-top: 4px;">
-            <option value="rankTilt" selected>Rank Tilt (value-ordered, default)</option>
-            <option value="premiumSplit">Premium / Other Split (value-ordered)</option>
-            <option value="randomSearch">Random Search (value-ordered)</option>
-          </select>
+        <label style="font-size: 0.8em; color: #ccc;">Coordinate Descent Rounds<br>
+          <input id="tune-rounds" type="number" value="3" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
         </label>
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
-        Every mode here guarantees a higher-paying symbol is never more frequent than a lower-paying one.
-        Rank Tilt groups symbols by exact payout value (finest-grained); Premium/Other Split groups them
-        into just two tiers (premium vs. everything else, coarser); Random Search samples many distributions
-        instead of one smooth tilt curve. For some paytables the target RTP may not be reachable under that
+        Each reel is tuned independently (coordinate descent: reel 1, then reel 2, ... then back to reel 1,
+        for this many rounds), guaranteeing a higher-paying symbol is never more frequent than a lower-paying
+        one within that same reel. For some paytables the target RTP may not be reachable under that
         constraint (achieved RTP will fall short; see the result below).
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
     `;
-    tuneContainer.querySelector('#tune-start-btn').addEventListener('click', () => startTuning({ paytable, tuneConfig, tuneContainer }));
+    tuneContainer.querySelector('#tune-start-btn').addEventListener('click', () => startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer }));
   }
 
   if (simStats) simStats.style.display = 'none';
@@ -319,7 +276,7 @@ export function openTuneFrequenciesPanel({ paytable, tuneConfig, domRefs }) {
   simModal.style.width = '95%';
 }
 
-async function startTuning({ paytable, tuneConfig, tuneContainer }) {
+async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer }) {
   const startBtn = tuneContainer.querySelector('#tune-start-btn');
   const logEl = tuneContainer.querySelector('#tune-progress-log');
   const resultsEl = tuneContainer.querySelector('#tune-results');
@@ -330,7 +287,7 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     trialSpins: tuneContainer.querySelector('#tune-trial-spins'),
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
-    frequencyMode: tuneContainer.querySelector('#tune-frequency-mode'),
+    rounds: tuneContainer.querySelector('#tune-rounds'),
   };
 
   const options = {
@@ -349,7 +306,7 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 10,
-    frequencyMode: inputs.frequencyMode.value,
+    rounds: parseInt(inputs.rounds.value, 10) || 3,
   };
 
   Object.values(inputs).forEach(el => { el.disabled = true; });
@@ -367,12 +324,14 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
   };
 
   try {
-    const { paytable: tunedPaytable, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(paytable, {
+    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(paytable, reelFrequencyTables, {
       ...options,
-      onProgress: (phase, i, mult, r, best) => {
-        const labels = { scatter: 'Scatter frequency', shape: `Frequency shape (${options.frequencyMode})` };
+      onProgress: (phase, i, mult, r, best, context) => {
+        const label = phase === 'scatter'
+          ? `Scatter frequency ${i + 1}`
+          : `Reel ${context.reelIndex + 1} · round ${context.round + 1} · step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
-        appendLog(`[${labels[phase] || phase} ${i + 1}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
+        appendLog(`[${label}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
       }
     });
 
@@ -390,59 +349,44 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     const targetRtp = options.targetRtp;
     if (!rtpConverged) {
       html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
-                 <strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> under the "${options.frequencyMode}" ordering constraint -
-                 the closest attempt found is off by ${diagnostics.rtpPhase.error.toFixed(2)} percentage points. This can mean the payout
-                 table's current frequencies/payouts don't allow ${targetRtp}% RTP while keeping every symbol no more frequent than a
-                 lower-paying one - don't treat the RTP shown above as final without checking this.
+                 <strong>⚠ Target RTP (${targetRtp}%) was NOT reached</strong> under the per-reel ordering constraint -
+                 the closest attempt found is off by ${diagnostics.rtpPhase.error.toFixed(2)} percentage points. This can mean the
+                 current frequencies/payouts don't allow ${targetRtp}% RTP while keeping every symbol no more frequent than a
+                 lower-paying one on the same reel - don't treat the RTP shown above as final without checking this.
                </p>`;
     }
 
-    const topCandidates = diagnostics.rtpPhase?.topCandidates;
-    if (topCandidates && topCandidates.length > 0) {
-      html += `<div style="margin-bottom: 12px;">
-                 <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Other distributions tried (best 5)</span>
-                 <table style="width: 100%; border-collapse: collapse; font-size: 0.8em; margin-top: 4px;">
-                   <thead><tr style="color: #888; font-size: 0.85em;">
-                     <th style="text-align: left; padding: 2px 4px;">#</th>
-                     <th style="text-align: right; padding: 2px 4px;">RTP</th>
-                     <th style="text-align: right; padding: 2px 4px;">Trigger</th>
-                   </tr></thead><tbody>`;
-      topCandidates.forEach((c, idx) => {
-        html += `<tr><td style="padding: 2px 4px;">${idx + 1}</td>
-                     <td style="text-align: right; padding: 2px 4px;">${c.rtp.toFixed(2)}%</td>
-                     <td style="text-align: right; padding: 2px 4px;">${c.triggerRate.toFixed(3)}%</td>
-                   </tr>`;
+    html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">`;
+    reelFrequencyTables.forEach((baseReelTable, reelIdx) => {
+      const tunedReelTable = tunedReelTables[reelIdx];
+      html += `<div><h4 style="margin: 0 0 6px; font-size: 0.8em; color: #aaa; text-transform: uppercase;">Reel ${reelIdx + 1}</h4>`;
+      html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">`;
+      html += `<thead><tr style="color: #888; font-size: 0.75em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
+                  <th style="text-align: left; padding: 3px;">Symbol</th>
+                  <th style="text-align: right; padding: 3px;">Current</th>
+                  <th style="text-align: right; padding: 3px;">Suggested</th>
+                  <th style="text-align: right; padding: 3px;">Δ</th>
+                </tr></thead><tbody>`;
+      Object.keys(baseReelTable).forEach(symbol => {
+        const current = baseReelTable[symbol].frequency;
+        const suggested = tunedReelTable[symbol].frequency;
+        const delta = suggested - current;
+        const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
+        html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 3px;">${paytable[symbol]?.friendlyName || symbol}</td>
+                    <td style="text-align: right; padding: 3px;">${current.toFixed(4)}</td>
+                    <td style="text-align: right; padding: 3px; font-weight: bold;">${suggested.toFixed(4)}</td>
+                    <td style="text-align: right; padding: 3px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
+                  </tr>`;
       });
       html += `</tbody></table></div>`;
-    }
-
-    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">`;
-    html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
-                <th style="text-align: left; padding: 4px;">Symbol</th>
-                <th style="text-align: left; padding: 4px;">Type</th>
-                <th style="text-align: right; padding: 4px;">Current Freq</th>
-                <th style="text-align: right; padding: 4px;">Suggested Freq</th>
-                <th style="text-align: right; padding: 4px;">Δ</th>
-              </tr></thead><tbody>`;
-    Object.keys(paytable).forEach(symbol => {
-      const current = paytable[symbol].frequency;
-      const suggested = tunedPaytable[symbol].frequency;
-      const delta = suggested - current;
-      const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
-      html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 4px;">${paytable[symbol].friendlyName || symbol}</td>
-                  <td style="padding: 4px; color: #999;">${paytable[symbol].type}</td>
-                  <td style="text-align: right; padding: 4px;">${current.toFixed(4)}</td>
-                  <td style="text-align: right; padding: 4px; font-weight: bold;">${suggested.toFixed(4)}</td>
-                  <td style="text-align: right; padding: 4px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
-                </tr>`;
     });
-    html += `</tbody></table>`;
-    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by editing PAYTABLE's frequency values in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
+    html += `</div>`;
+    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by replacing FREQUENCY_REEL1/2/3 in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
 
     html += `<div style="margin-top: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                  <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Copy-paste ready PAYTABLE</span>
+                  <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Copy-paste ready FREQUENCY_REEL tables</span>
                   <button id="tune-copy-btn" class="btn-icon btn-sim-btn" style="padding: 4px 10px; font-size: 0.75em;">COPY</button>
                 </div>
                 <textarea id="tune-paytable-output" readonly style="width: 100%; height: 200px; box-sizing: border-box; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.4); color: #ddd; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;"></textarea>
@@ -451,7 +395,7 @@ async function startTuning({ paytable, tuneConfig, tuneContainer }) {
     resultsEl.innerHTML = html;
 
     const paytableOutput = resultsEl.querySelector('#tune-paytable-output');
-    paytableOutput.value = formatPaytableForCopy(tunedPaytable);
+    paytableOutput.value = formatReelFrequencyTablesForCopy(tunedReelTables);
 
     const copyBtn = resultsEl.querySelector('#tune-copy-btn');
     copyBtn.addEventListener('click', async () => {
