@@ -346,38 +346,72 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
   simModal.style.width = '95%';
 }
 
-// Renders the TUNE FREQUENCIES panel's live per-reel table: each value symbol's current
-// frequency (from the live candidate being evaluated, or the untouched baseline before Phase 2
-// starts moving anything) alongside its resolved min/maxFrequency bounds, so it's visible at a
-// glance whether the search is currently inside or outside a symbol's configured range. Bounds
-// are static for the whole run (only frequency itself moves), so `boundsByReel` is resolved
-// once, before tuning starts, not recomputed on every render.
-function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, liveTrial) {
-  let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">`;
+// One symbol's gauge: a single horizontal track auto-scaled to fit whatever's relevant (the
+// configured soft bounds, the range actually explored so far, and the current value) - a light
+// blue band for the configured minFrequency/maxFrequency range, a brighter band for the
+// tested min/max range (the actual low/high frequency this symbol has been assigned to across
+// every candidate evaluated so far this run), and a gold tick for the current value. When only
+// one distinct value is known so far (e.g. before Phase 2 has moved anything), the scale can't
+// derive a span - the tick renders centered with no bands rather than dividing by zero.
+function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, testedMax) {
+  const values = [current, configuredMin, configuredMax, testedMin, testedMax].filter(v => v != null);
+  const scaleMin = Math.min(...values);
+  const scaleMax = Math.max(...values);
+  const span = scaleMax - scaleMin;
+  const pct = (v) => span > 0 ? ((v - scaleMin) / span) * 100 : 50;
+
+  const configuredBand = (configuredMin != null && configuredMax != null)
+    ? `<div style="position: absolute; left: ${pct(configuredMin)}%; width: ${Math.max(pct(configuredMax) - pct(configuredMin), 1)}%; top: 0; height: 100%; background: rgba(126,200,255,0.18); border-left: 1px solid rgba(126,200,255,0.5); border-right: 1px solid rgba(126,200,255,0.5);"></div>`
+    : '';
+  const testedBand = (testedMin != null && testedMax != null)
+    ? `<div style="position: absolute; left: ${pct(testedMin)}%; width: ${Math.max(pct(testedMax) - pct(testedMin), 1)}%; top: 30%; height: 40%; background: rgba(255,255,255,0.4); border-radius: 2px;"></div>`
+    : '';
+  const currentTick = current != null
+    ? `<div style="position: absolute; left: calc(${pct(current)}% - 1px); top: -2px; width: 2px; height: calc(100% + 4px); background: #e6b800;"></div>`
+    : '';
+
+  const title = [
+    current != null ? `current: ${current.toFixed(3)}` : null,
+    testedMin != null ? `tested: ${testedMin.toFixed(3)} – ${testedMax.toFixed(3)}` : null,
+    configuredMin != null || configuredMax != null
+      ? `configured: ${configuredMin != null ? configuredMin.toFixed(3) : '–'} – ${configuredMax != null ? configuredMax.toFixed(3) : '–'}`
+      : null,
+  ].filter(Boolean).join(' | ');
+
+  return `<div title="${title}" style="position: relative; height: 14px; background: rgba(255,255,255,0.06); border-radius: 3px;">${configuredBand}${testedBand}${currentTick}</div>`;
+}
+
+// Renders the TUNE FREQUENCIES panel's live per-reel view: one gauge row per value symbol,
+// showing its current frequency (from the live candidate being evaluated, or the untouched
+// baseline before Phase 2 starts moving anything) against both its configured soft
+// minFrequency/maxFrequency bounds (resolved once up front - static for the whole run) and the
+// min/max it's actually been tested at so far this run (`testedRangeByReel`, updated by the
+// caller on every Phase 2 iteration - grows monotonically, never shrinks, until the next run
+// resets it).
+function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial) {
+  let html = `<div style="font-size: 0.7em; color: #888; margin-bottom: 6px;">
+                 <span style="color: #7ec8ff;">▮</span> configured range &nbsp;
+                 <span style="color: #ddd;">▮</span> tested range &nbsp;
+                 <span style="color: #e6b800;">|</span> current
+               </div>`;
+  html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">`;
   reelFrequencyTables.forEach((baseReelTableWrapper, reelIdx) => {
     const baseReelTable = baseReelTableWrapper.symbols || baseReelTableWrapper;
     const liveReelTable = liveTrial ? (liveTrial[reelIdx].symbols || liveTrial[reelIdx]) : null;
+    const testedRange = testedRangeByReel[reelIdx];
     html += `<div><h4 style="margin: 0 0 4px; font-size: 0.75em; color: #aaa; text-transform: uppercase;">Reel ${reelIdx + 1}</h4>`;
-    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.78em;">`;
-    html += `<thead><tr style="color: #888; font-size: 0.75em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
-                <th style="text-align: left; padding: 2px;">Symbol</th>
-                <th style="text-align: right; padding: 2px;">Current</th>
-                <th style="text-align: right; padding: 2px;">Min</th>
-                <th style="text-align: right; padding: 2px;">Max</th>
-              </tr></thead><tbody>`;
     Object.keys(baseReelTable).forEach(symbol => {
       const current = liveReelTable ? liveReelTable[symbol].frequency : baseReelTable[symbol].frequency;
       const { minFrequency, maxFrequency } = boundsByReel[reelIdx][symbol];
-      const outOfBounds = (minFrequency != null && current < minFrequency) || (maxFrequency != null && current > maxFrequency);
-      const currentColor = outOfBounds ? '#e6b800' : '#ddd';
-      html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                  <td style="padding: 2px;">${symbol}</td>
-                  <td style="text-align: right; padding: 2px; color: ${currentColor};">${current.toFixed(3)}</td>
-                  <td style="text-align: right; padding: 2px; color: #888;">${minFrequency != null ? minFrequency.toFixed(3) : '–'}</td>
-                  <td style="text-align: right; padding: 2px; color: #888;">${maxFrequency != null ? maxFrequency.toFixed(3) : '–'}</td>
-                </tr>`;
+      const tested = testedRange[symbol];
+      const gauge = renderFrequencyGauge(current, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null);
+      html += `<div style="display: grid; grid-template-columns: 66px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em;">
+                  <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${symbol}</span>
+                  <span style="text-align: right; color: #ddd;">${current.toFixed(3)}</span>
+                  ${gauge}
+                </div>`;
     });
-    html += `</tbody></table></div>`;
+    html += `</div>`;
   });
   html += `</div>`;
   return html;
@@ -407,6 +441,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     return bounds;
   });
   const liveTableEl = tuneContainer.querySelector('#tune-live-table');
+  // reelIdx -> symbol -> { min, max } actually assigned during the search so far this run -
+  // grows as Phase 2 explores, reset fresh on every START TUNING click.
+  const testedRangeByReel = reelFrequencyTables.map(() => ({}));
 
   const options = {
     reelsCount: tuneConfig.reelsCount,
@@ -437,7 +474,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   logEl.style.display = 'block';
   logEl.innerHTML = '';
   liveTableEl.style.display = 'block';
-  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, null);
+  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null);
 
   const appendLog = (line) => {
     const row = document.createElement('div');
@@ -458,7 +495,16 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // search entirely, so every value symbol's frequency is still exactly its baseline
         // value during Phase 1 anyway; nothing to update yet.
         if (phase === 'shape' && r.trial) {
-          liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, r.trial);
+          r.trial.forEach((reelTableWrapper, reelIdx) => {
+            const symbolsTable = reelTableWrapper.symbols || reelTableWrapper;
+            const range = testedRangeByReel[reelIdx];
+            Object.keys(symbolsTable).forEach(symbol => {
+              const freq = symbolsTable[symbol].frequency;
+              const prev = range[symbol];
+              range[symbol] = prev ? { min: Math.min(prev.min, freq), max: Math.max(prev.max, freq) } : { min: freq, max: freq };
+            });
+          });
+          liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, r.trial);
         }
       }
     });
