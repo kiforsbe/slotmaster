@@ -154,7 +154,7 @@ test('tuneFrequencies honors a per-reel reversed ordering preference (orderingBi
     targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
     orderingPenaltyWeight: 5, orderingBiasByReel: [-1, 1, -1],
   });
-  const reversedReel = reelFrequencyTables[1];
+  const reversedReel = reelFrequencyTables[1].symbols;
   assert.ok(reversedReel.bar.frequency >= reversedReel.cherries.frequency,
     `expected bar (highest pay) >= cherries (lowest tier) on the bias-reversed reel, got bar=${reversedReel.bar.frequency} cherries=${reversedReel.cherries.frequency}`);
   assert.ok(diagnostics.rtpPhase.orderingViolations.every(v => v.reel !== 1 || v.bias === 1),
@@ -166,7 +166,7 @@ test('tuneFrequencies leaves a symbol untouched on a reel where its own entry se
   // paytable's `type` - a perfectly ordinary value symbol (bar) can be pinned on one specific
   // reel while staying freely tunable everywhere else.
   const reelTablesWithFixedBar = [
-    { ...FREQUENCY_REEL1, bar: { ...FREQUENCY_REEL1.bar, fixed: true } },
+    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, fixed: true } } },
     FREQUENCY_REEL2,
     FREQUENCY_REEL3,
   ];
@@ -175,16 +175,16 @@ test('tuneFrequencies leaves a symbol untouched on a reel where its own entry se
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
     targetRtp: 96, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 20,
   });
-  assert.equal(reelFrequencyTables[0].bar.frequency, FREQUENCY_REEL1.bar.frequency,
-    `expected bar's frequency on reel 1 to stay exactly at its baseline (fixed: true), got ${reelFrequencyTables[0].bar.frequency}`);
+  assert.equal(reelFrequencyTables[0].symbols.bar.frequency, FREQUENCY_REEL1.symbols.bar.frequency,
+    `expected bar's frequency on reel 1 to stay exactly at its baseline (fixed: true), got ${reelFrequencyTables[0].symbols.bar.frequency}`);
   // bar is only fixed on reel 1 - reel 3 (which also carries bar, not fixed there) should
   // remain freely tunable, i.e. is not expected to equal its own baseline.
 });
 
 test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limitPenaltyWeight)', async () => {
-  const cap = FREQUENCY_REEL1.bar.frequency / 2;
+  const cap = FREQUENCY_REEL1.symbols.bar.frequency / 2;
   const cappedTables = [
-    { ...FREQUENCY_REEL1, bar: { ...FREQUENCY_REEL1.bar, max: cap } },
+    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, max: cap } } },
     FREQUENCY_REEL2,
     FREQUENCY_REEL3,
   ];
@@ -194,8 +194,8 @@ test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limi
     targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
     limitPenaltyWeight: 10,
   });
-  assert.ok(reelFrequencyTables[0].bar.frequency <= cap + 2,
-    `expected bar's frequency to stay close to its soft cap of ${cap}, got ${reelFrequencyTables[0].bar.frequency}`);
+  assert.ok(reelFrequencyTables[0].symbols.bar.frequency <= cap + 2,
+    `expected bar's frequency to stay close to its soft cap of ${cap}, got ${reelFrequencyTables[0].symbols.bar.frequency}`);
   assert.ok(Array.isArray(diagnostics.rtpPhase.limitViolations), 'limitViolations must be reported (possibly empty), never omitted');
 });
 
@@ -207,10 +207,28 @@ test('tuneFrequencies never gives a reel-absent symbol (frequency 0) a nonzero f
   });
   // FREQUENCY_REEL1 and FREQUENCY_REEL2 both define star/strawberry at frequency: 0 (only
   // reel 3 carries them) - tuning must never turn those into nonzero frequencies.
-  assert.equal(reelFrequencyTables[0].star.frequency, 0);
-  assert.equal(reelFrequencyTables[0].strawberry.frequency, 0);
-  assert.equal(reelFrequencyTables[1].star.frequency, 0);
-  assert.equal(reelFrequencyTables[1].strawberry.frequency, 0);
+  assert.equal(reelFrequencyTables[0].symbols.star.frequency, 0);
+  assert.equal(reelFrequencyTables[0].symbols.strawberry.frequency, 0);
+  assert.equal(reelFrequencyTables[1].symbols.star.frequency, 0);
+  assert.equal(reelFrequencyTables[1].symbols.strawberry.frequency, 0);
+});
+
+test('tuneFrequencies\' scatter phase keys off triggerFreeSpins, not type', async () => {
+  // A type: 'scatter' symbol with triggerFreeSpins: false must NOT be scaled by Phase 1;
+  // conversely (not tested here, since fruitmachine/bookbookbook always agree on the two),
+  // this only proves the filter reads triggerFreeSpins rather than type.
+  const paytableWithMismatch = {
+    ...PAYTABLE,
+    bar: { ...PAYTABLE.bar, type: 'scatter', triggerFreeSpins: false },
+  };
+  const { diagnostics } = await tuneFrequencies(paytableWithMismatch, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 3,
+  });
+  // No symbol in this paytable actually has triggerFreeSpins: true, so Phase 1 must be a
+  // no-op (scatterPhase null) even though `bar` is type: 'scatter'.
+  assert.equal(diagnostics.scatterPhase, null);
 });
 
 test('tuneFrequencies diagnostics expose a per-step error via onProgress, without a reel/round context', async () => {

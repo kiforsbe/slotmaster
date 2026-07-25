@@ -430,9 +430,10 @@ export async function nelderMead({
  * returned unchanged (not included in the return value at all).
  *
  * Strategy:
- *  1. Scale every 'scatter'-typed symbol's frequency by one shared multiplier, applied
- *     identically to every reel's table (gradientDescent1D), until the free-spin trigger
- *     rate lands on target. A symbol with frequency 0 on a given reel stays 0 (0 * mult = 0).
+ *  1. Scale every symbol with `paytable[symbol].triggerFreeSpins === true`'s frequency by one
+ *     shared multiplier, applied identically to every reel's table (gradientDescent1D), until
+ *     the free-spin trigger rate lands on target. A symbol with frequency 0 on a given reel
+ *     stays 0 (0 * mult = 0).
  *  2. Jointly tune every reel's value-symbol weights via one Nelder-Mead simplex search
  *     over one free weight per (value symbol, reel) pair - true multi-dimensional
  *     optimization, not coordinate descent over reels. "A higher-paying symbol should not
@@ -451,14 +452,17 @@ export async function nelderMead({
  *
  * @param {Object} paytable - Rules only (payout, type, wild, wildPenalty, wildExcludes,
  *   aloneBonus, friendlyName) - no `.frequency` field. Not mutated, not returned.
- * @param {Object[]} reelFrequencyTables - One table per reel, each `{ symbol: { frequency,
- *   fixed?, min?, max? } }`. `frequency` is the same shape generateReel already accepts.
- *   `fixed: true` is optional (defaults to falsy/tunable) and excludes that symbol from
- *   Phase 2 on that specific reel only - its frequency is left exactly as passed in. `min`
- *   and/or `max` are optional soft bounds (same units as `frequency`) on that symbol's
- *   frequency on that specific reel - like the ordering preference, a discouraged-but-not-
- *   forbidden preference (see `limitPenaltyWeight` below), not a hard clamp. Not mutated; a
- *   tuned clone is returned.
+ * @param {Object[]} reelFrequencyTables - One table per reel, each
+ *   `{ defaults?: { minGap?, maxStack? }, symbols: { symbol: { frequency, fixed?, min?, max?,
+ *   minGap?, maxStack? } } }` (see generateReel's own doc in core/SlotMath.js for the shape
+ *   and its `minGap`/`maxStack` fields - `tuneFrequencies` itself only reads/writes
+ *   `.symbols[symbol].frequency`, `.fixed`, `.min`, `.max`; `.defaults` and any
+ *   `.symbols[symbol].minGap`/`.maxStack` pass through untouched). `fixed: true` is optional
+ *   (defaults to falsy/tunable) and excludes that symbol from Phase 2 on that specific reel
+ *   only - its frequency is left exactly as passed in. `min` and/or `max` are optional soft
+ *   bounds (same units as `frequency`) on that symbol's frequency on that specific reel -
+ *   like the ordering preference, a discouraged-but-not-forbidden preference (see
+ *   `limitPenaltyWeight` below), not a hard clamp. Not mutated; a tuned clone is returned.
  * @param {Object} [options]
  * @param {number} [options.reelsCount=reelFrequencyTables.length]
  * @param {number} [options.rowsCount=3]
@@ -546,7 +550,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   }
 
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
-  const scatterSymbols = Object.keys(paytable).filter(s => paytable[s].type === 'scatter');
+  const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
 
   function buildReelStrips(reelTables) {
     // paytable (this function's outer `paytable` param, the real canonical rules table) is
@@ -573,18 +577,18 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return { rtp: rtpSum / trialsPerPoint, triggerRate: triggerSum / trialsPerPoint };
   }
 
-  // ---- Phase 1: scale scatter symbol(s) to hit the target trigger rate ----
+  // ---- Phase 1: scale trigger symbol(s) to hit the target trigger rate ----
   // One shared multiplier applied identically to every reel's table - a symbol with
   // frequency 0 on a given reel stays 0 (0 * mult = 0), so this is safe even for reels
-  // that don't carry the scatter symbol at all.
+  // that don't carry the trigger symbol at all.
   //
-  // This is the ONLY place a scatter-typed symbol's frequency can change - Phase 2 (below)
-  // explicitly excludes scatter symbols from its dimensions entirely (they're filtered out
+  // This is the ONLY place a triggerFreeSpins symbol's frequency can change - Phase 2 (below)
+  // explicitly excludes trigger symbols from its dimensions entirely (they're filtered out
   // of nonScatterSymbols before valueSymbols/fixedShapeSymbols are even computed), so a
-  // scatter symbol untouched here stays untouched for the rest of the run.
+  // trigger symbol untouched here stays untouched for the rest of the run.
   //
   // It's expected - not a bug - for this phase to converge with mult staying at its
-  // gradientDescent1D starting value of 1 (i.e. the scatter symbol's frequency doesn't
+  // gradientDescent1D starting value of 1 (i.e. the trigger symbol's frequency doesn't
   // change at all): the search starts there and stops as soon as the measured trigger rate
   // is within `triggerRateTolerancePct` of `targetTriggerRatePct`, so if the *baseline*
   // frequency already lands inside that band, there's simply nothing to correct. Confirmed
@@ -593,7 +597,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // comes back exactly 1 and `book`'s frequency is unchanged on every reel.
   let currentReelTables = baseReelTables;
   let scatterPhase = null;
-  if (scatterSymbols.length > 0) {
+  if (triggerSymbols.length > 0) {
     scatterPhase = await gradientDescent1D({
       initialParam: 1,
       minParam: 0.05,
@@ -602,7 +606,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       tolerance: triggerRateTolerancePct,
       buildTrial: (mult) => baseReelTables.map(rt => {
         const trial = JSON.parse(JSON.stringify(rt));
-        scatterSymbols.forEach(s => { if (trial[s]) trial[s].frequency = rt[s].frequency * mult; });
+        triggerSymbols.forEach(s => { if (trial.symbols[s]) trial.symbols[s].frequency = rt.symbols[s].frequency * mult; });
         return trial;
       }),
       metricOf: (result) => result.triggerRate,
@@ -628,31 +632,32 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   const dims = []; // [{ reelIndex, symbol }] - one entry per free parameter
   const valueBudgetByReel = [];
   const tierOfByReel = [];
-  const isFixed = (reelTable, s) => reelTable[s].fixed === true;
+  const isFixed = (symbolsTable, s) => symbolsTable[s].fixed === true;
   currentReelTables.forEach((reelTable, r) => {
-    const nonScatterSymbols = Object.keys(reelTable).filter(s => !scatterSymbols.includes(s) && reelTable[s].frequency > 0);
-    const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
-    const fixedShapeSymbols = nonScatterSymbols.filter(s => isFixed(reelTable, s));
-    const valueSymbols = nonScatterSymbols.filter(s => !isFixed(reelTable, s));
-    const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + reelTable[s].frequency, 0);
+    const symbolsTable = reelTable.symbols;
+    const nonScatterSymbols = Object.keys(symbolsTable).filter(s => !triggerSymbols.includes(s) && symbolsTable[s].frequency > 0);
+    const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + symbolsTable[s].frequency, 0);
+    const fixedShapeSymbols = nonScatterSymbols.filter(s => isFixed(symbolsTable, s));
+    const valueSymbols = nonScatterSymbols.filter(s => !isFixed(symbolsTable, s));
+    const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + symbolsTable[s].frequency, 0);
     const valueBudget = nonScatterTotal - fixedShapeTotal;
     valueBudgetByReel[r] = valueBudget;
     tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
     if (valueSymbols.length > 0 && valueBudget > 0) {
-      valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s, min: reelTable[s].min, max: reelTable[s].max }));
+      valueSymbols.forEach(s => dims.push({ reelIndex: r, symbol: s, min: symbolsTable[s].min, max: symbolsTable[s].max }));
     }
   });
 
   let rtpPhaseResult = null;
 
   if (dims.length > 0) {
-    const initialPoint = dims.map(d => Math.log(currentReelTables[d.reelIndex][d.symbol].frequency));
+    const initialPoint = dims.map(d => Math.log(currentReelTables[d.reelIndex].symbols[d.symbol].frequency));
     // Generous per-dimension bounds (relative to that dimension's own starting frequency,
     // not a shared absolute range) - wide enough to not artificially constrain the search,
     // just enough to keep the simplex from drifting to a degenerate near-zero or runaway
     // value on a reel whose other symbols have a very different scale.
     const dimBounds = dims.map(d => {
-      const base = currentReelTables[d.reelIndex][d.symbol].frequency;
+      const base = currentReelTables[d.reelIndex].symbols[d.symbol].frequency;
       return { minX: Math.log(base * 0.001), maxX: Math.log(base * 1000) };
     });
 
@@ -671,7 +676,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       Object.keys(rawByReel).forEach(rIdxStr => {
         const rIdx = Number(rIdxStr);
         const renormalized = renormalizeWeights(rawByReel[rIdx], valueBudgetByReel[rIdx]);
-        Object.keys(renormalized).forEach(s => { reelTables[rIdx][s].frequency = renormalized[s]; });
+        Object.keys(renormalized).forEach(s => { reelTables[rIdx].symbols[s].frequency = renormalized[s]; });
       });
       return reelTables;
     }
@@ -694,7 +699,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         const tierOf = tierOfByReel[r];
         dims.forEach(({ reelIndex: r2, symbol: b }) => {
           if (r !== r2 || a === b || tierOf[a] >= tierOf[b]) return;
-          const diff = bias * (reelTables[r][b].frequency - reelTables[r][a].frequency);
+          const diff = bias * (reelTables[r].symbols[b].frequency - reelTables[r].symbols[a].frequency);
           if (diff > 0) {
             total += diff;
             violations.push({ reel: r, higherPaySymbol: a, lowerPaySymbol: b, amount: diff, bias });
@@ -715,7 +720,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       let total = 0;
       const violations = [];
       dims.forEach(({ reelIndex: r, symbol: s, min, max }) => {
-        const freq = reelTables[r][s].frequency;
+        const freq = reelTables[r].symbols[s].frequency;
         if (min != null && freq < min) {
           const amount = min - freq;
           total += amount;
