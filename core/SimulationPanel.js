@@ -231,6 +231,15 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
     tuneContainer.style.fontSize = '0.9em';
     simModal.appendChild(tuneContainer);
 
+    const biasSelectorsHtml = Array.from({ length: tuneConfig.reelsCount }, (_, r) => `
+        <label style="font-size: 0.8em; color: #ccc;">Reel ${r + 1} preference<br>
+          <select id="tune-bias-${r}" style="width: 100%; margin-top: 4px;">
+            <option value="-1" selected>High pay rarer (default)</option>
+            <option value="0">No preference</option>
+            <option value="1">High pay more frequent</option>
+          </select>
+        </label>`).join('');
+
     tuneContainer.innerHTML = `
       <h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner</h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
@@ -252,13 +261,22 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
           <input id="tune-max-iterations" type="number" value="150" step="10" min="10" max="1000" style="width: 100%; margin-top: 4px;">
         </label>
+        <label style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
+          <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
+        ${biasSelectorsHtml}
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
         Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
-        Nelder-Mead simplex search. A higher-paying symbol being no more frequent than a
-        lower-paying one on the same reel is a soft preference, not an absolute rule - the
-        search will accept a small violation rather than push RTP far off target. Any
-        violation still present at the end is listed below.
+        Nelder-Mead simplex search. Each reel has its own ordering preference (above): the
+        default discourages a higher-paying symbol from being more frequent than a
+        lower-paying one on that reel; "more frequent" reverses it (e.g. for a near-miss feel -
+        premium symbols show up often on some reels but rarely on another, so lines look
+        close but rarely land); "no preference" disables it for that reel. It's always a soft
+        preference, not an absolute rule - the search will accept a small violation rather
+        than push RTP far off target. Any violation still present at the end is listed below.
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
@@ -285,7 +303,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     trialSpins: tuneContainer.querySelector('#tune-trial-spins'),
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
+    orderingPenaltyWeight: tuneContainer.querySelector('#tune-ordering-weight'),
   };
+  const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
 
   const options = {
     reelsCount: tuneConfig.reelsCount,
@@ -303,9 +323,12 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 150,
+    orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
+    orderingBiasByReel: biasSelects.map(el => parseInt(el.value, 10)),
   };
 
   Object.values(inputs).forEach(el => { el.disabled = true; });
+  biasSelects.forEach(el => { el.disabled = true; });
   startBtn.disabled = true;
   startBtn.textContent = 'TUNING...';
   resultsEl.innerHTML = '';
@@ -355,7 +378,12 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
       const rows = violations.map(v => {
         const higher = paytable[v.higherPaySymbol]?.friendlyName || v.higherPaySymbol;
         const lower = paytable[v.lowerPaySymbol]?.friendlyName || v.lowerPaySymbol;
-        return `Reel ${v.reel + 1}: ${higher} is ${v.amount.toFixed(3)} more frequent than ${lower}`;
+        // bias -1 (default) wants higher rarer than lower, so a violation means higher ended
+        // up more frequent; bias +1 wants higher no less frequent than lower, so a violation
+        // means lower ended up more frequent instead - phrase whichever one actually happened.
+        return v.bias < 0
+          ? `Reel ${v.reel + 1}: ${higher} is ${v.amount.toFixed(3)} more frequent than ${lower}`
+          : `Reel ${v.reel + 1}: ${lower} is ${v.amount.toFixed(3)} more frequent than ${higher} (reel prefers ${higher} more frequent)`;
       });
       html += `<p style="font-size: 0.8em; color: #e6b800; background: rgba(230,184,0,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
                  <strong>⚠ ${violations.length} ordering violation${violations.length > 1 ? 's' : ''} remain</strong> (accepted to keep RTP close to target):<br>
@@ -420,6 +448,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     appendLog(`Error: ${error.message}`);
   } finally {
     Object.values(inputs).forEach(el => { el.disabled = false; });
+    biasSelects.forEach(el => { el.disabled = false; });
     startBtn.disabled = false;
     startBtn.textContent = 'START TUNING';
   }
