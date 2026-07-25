@@ -5,6 +5,33 @@ import { resolveFrequencyBounds } from './SlotMath.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
+// Shared symbol-type -> color mapping, used anywhere a symbol name is listed next to others of
+// mixed type (the TUNE FREQUENCIES live/results tables) so type is visible at a glance without
+// needing a separate column or section per type. Deliberately distinct from the gauge's own
+// palette (configured/tested bands, current tick) so the two don't read as related.
+function symbolTypeColor(type) {
+  switch (type) {
+    case 'scatter': return '#ffd700';
+    case 'wild': return '#c792ea';
+    case 'premium': return '#7ec8ff';
+    case 'regular': return '#eee';
+    default: return '#888';
+  }
+}
+
+// A symbol name span colored by its paytable type, with a title (hover) attribute spelling out
+// the friendly name and type explicitly for anyone who can't rely on color alone. `displayText`
+// defaults to the raw symbol key (compact, for the space-constrained live gauge table) but can
+// be overridden (e.g. to the friendly name) where there's room for it.
+function renderSymbolLabel(symbol, paytable, displayText = symbol) {
+  const meta = paytable?.[symbol];
+  const type = meta?.type || 'other';
+  const friendlyName = meta?.friendlyName || symbol;
+  const color = symbolTypeColor(type);
+  const title = `${friendlyName} (${type})`;
+  return `<span title="${title}" style="color: ${color}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayText}</span>`;
+}
+
 /**
  * Runs tuneFrequencies() in a dedicated Worker (core/tuneFrequenciesWorker.js) instead of on
  * this thread, so the potentially long Monte Carlo search never blocks page rendering/input -
@@ -440,11 +467,15 @@ function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, 
 // caller on every Phase 2 iteration - grows monotonically, never shrinks, until the next run
 // resets it). Every symbol's gauge on a given reel shares that reel's own scale (0 -> the
 // highest value seen anywhere on that reel), not its own - see renderFrequencyGauge's doc.
-function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial) {
+function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial, paytable) {
   let html = `<div style="font-size: 0.7em; color: #888; margin-bottom: 6px;">
                  <span style="color: #7ec8ff;">▮</span> configured range &nbsp;
                  <span style="color: #ddd;">▮</span> tested range &nbsp;
-                 <span style="color: #e6b800;">|</span> current
+                 <span style="color: #e6b800;">|</span> current &nbsp; &nbsp;
+                 <span style="color: ${symbolTypeColor('scatter')};">●</span> scatter &nbsp;
+                 <span style="color: ${symbolTypeColor('wild')};">●</span> wild &nbsp;
+                 <span style="color: ${symbolTypeColor('premium')};">●</span> premium &nbsp;
+                 <span style="color: ${symbolTypeColor('regular')};">●</span> regular
                </div>`;
   html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">`;
   reelFrequencyTables.forEach((baseReelTableWrapper, reelIdx) => {
@@ -468,7 +499,7 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
       const tested = testedRange[symbol];
       const gauge = renderFrequencyGauge(current, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null, reelMax);
       html += `<div style="display: grid; grid-template-columns: 66px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em;">
-                  <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${symbol}</span>
+                  ${renderSymbolLabel(symbol, paytable)}
                   <span style="text-align: right; color: #ddd;">${current.toFixed(3)}</span>
                   ${gauge}
                 </div>`;
@@ -551,7 +582,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   logEl.style.display = 'block';
   logEl.innerHTML = '';
   liveTableEl.style.display = 'block';
-  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null);
+  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, paytable);
 
   const appendLog = (line) => {
     const row = document.createElement('div');
@@ -580,7 +611,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
               range[symbol] = prev ? { min: Math.min(prev.min, freq), max: Math.max(prev.max, freq) } : { min: freq, max: freq };
             });
           });
-          liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, r.trial);
+          liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, r.trial, paytable);
         }
       }
     );
@@ -680,7 +711,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         const delta = suggested - current;
         const deltaColor = Math.abs(delta) < 0.001 ? '#888' : (delta > 0 ? '#7fd97f' : '#e67f7f');
         html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                    <td style="padding: 3px;">${paytable[symbol]?.friendlyName || symbol}</td>
+                    <td style="padding: 3px;">${renderSymbolLabel(symbol, paytable, paytable[symbol]?.friendlyName || symbol)}</td>
                     <td style="text-align: right; padding: 3px;">${current.toFixed(4)}</td>
                     <td style="text-align: right; padding: 3px; font-weight: bold;">${suggested.toFixed(4)}</td>
                     <td style="text-align: right; padding: 3px; color: ${deltaColor};">${delta >= 0 ? '+' : ''}${delta.toFixed(4)}</td>
