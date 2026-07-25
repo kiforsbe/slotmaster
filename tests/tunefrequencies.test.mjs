@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, tuneFrequencies } from '../core/SpinSimulator.js';
+import { gradientDescent1D, nelderMead, tuneFrequencies } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -69,6 +69,62 @@ test('gradientDescent1D reports a distinct error per step, not a single frozen v
   });
   const distinct = new Set(errors.map(e => e.toFixed(8)));
   assert.ok(distinct.size > 1, `expected per-step error to vary, got ${errors}`);
+});
+
+test('nelderMead minimizes a simple 2D quadratic bowl', async () => {
+  // loss(x, y) = (x-3)^2 + (y+2)^2 - deterministic, minimum at (3, -2), loss 0 there.
+  const { point, loss, converged } = await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 100,
+    convergenceTolerance: 1e-6,
+    onProgress: null,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.ok(converged, `expected convergence, got loss=${loss}`);
+  assert.ok(Math.abs(point[0] - 3) < 0.01, `expected x near 3, got ${point[0]}`);
+  assert.ok(Math.abs(point[1] - (-2)) < 0.01, `expected y near -2, got ${point[1]}`);
+});
+
+test('nelderMead respects maxIterations and still returns the best point found', async () => {
+  const { loss, iterations } = await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 3,
+    convergenceTolerance: 1e-9, // unreachable in 3 iterations, forces the cap
+    onProgress: null,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.ok(iterations <= 3, `expected iterations capped at 3, got ${iterations}`);
+  assert.ok(loss < 13, `expected some improvement over the initial loss (9+4=13), got ${loss}`);
+});
+
+test('nelderMead carries extra evaluate() fields through onto the returned result', async () => {
+  const { result } = await nelderMead({
+    initialPoint: [0],
+    initialStepSize: 1,
+    evaluate: ([x]) => ({ loss: (x - 5) ** 2, tag: 'custom-field' }),
+    maxIterations: 20,
+    onProgress: null,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(result.tag, 'custom-field');
+});
+
+test('nelderMead reports per-iteration progress via onProgress', async () => {
+  const iterationsSeen = [];
+  await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 10,
+    convergenceTolerance: 1e-9, // unreachable, so all 10 iterations run
+    onProgress: (i, point, result, best) => { iterationsSeen.push(i); },
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.deepEqual(iterationsSeen, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 });
 
 const REEL_TABLES = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3];

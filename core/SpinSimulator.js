@@ -349,6 +349,110 @@ export async function gradientDescent1D({
 }
 
 /**
+ * Generic Nelder-Mead simplex minimizer over an n-dimensional parameter vector.
+ * Derivative-free - compares function values across n+1 simplex vertices (reflect, expand,
+ * contract, shrink) rather than estimating a gradient - the standard choice (same algorithm
+ * behind scipy.optimize.minimize(method='Nelder-Mead') / MATLAB's fminsearch) for objectives
+ * that are noisy or expensive to differentiate, both true here: `evaluate` wraps a Monte
+ * Carlo RTP measurement, not a closed-form function, and a numerical gradient across many
+ * dimensions would need one extra evaluation per dimension per iteration, where Nelder-Mead
+ * typically needs only one or two.
+ *
+ * Callers are responsible for their own CRN (common random numbers) discipline if
+ * `evaluate` wraps something stochastic - e.g. closing over one fixed RNG seed for the
+ * whole call, so every point (old or new) is evaluated under directly comparable
+ * conditions and vertices never need re-evaluating just because time passed.
+ *
+ * @param {Object} args
+ * @param {number[]} args.initialPoint - Starting parameter vector.
+ * @param {number} args.initialStepSize - Perturbation used to build the initial simplex
+ *   (vertex i = initialPoint with dimension i-1 offset by this amount).
+ * @param {(point: number[]) => ({ loss: number, [key: string]: any })} args.evaluate -
+ *   Evaluates one point; must return at least `{ loss }` (lower is better). Any extra
+ *   fields are carried through onto the vertex object returned via onProgress/result.
+ * @param {number} args.maxIterations
+ * @param {number} [args.convergenceTolerance=1e-4] - Stop early once the spread between the
+ *   simplex's best and worst loss is at or below this.
+ * @param {(iteration: number, point: number[], result: Object, best: Object) => (void|Promise<void>)} [args.onProgress]
+ * @param {() => Promise<void>} args.yieldToEventLoop
+ * @returns {Promise<{ point: number[], loss: number, result: Object, iterations: number, converged: boolean }>} -
+ *   `converged` is true iff the search stopped because the simplex's spread collapsed below
+ *   `convergenceTolerance`, not because `maxIterations` ran out.
+ */
+export async function nelderMead({
+  initialPoint, initialStepSize, evaluate, maxIterations,
+  convergenceTolerance = 1e-4, onProgress, yieldToEventLoop,
+}) {
+  const n = initialPoint.length;
+  const ALPHA = 1, GAMMA = 2, RHO = 0.5, SIGMA = 0.5;
+
+  const evalPoint = (point) => ({ point, ...evaluate(point) });
+
+  // Initial simplex: vertex 0 = initialPoint, vertex i (1..n) = initialPoint with dimension
+  // i-1 perturbed by initialStepSize - the standard right-angled starting simplex.
+  let vertices = [evalPoint(initialPoint.slice())];
+  for (let i = 0; i < n; i++) {
+    const p = initialPoint.slice();
+    p[i] += initialStepSize;
+    vertices.push(evalPoint(p));
+  }
+
+  let best = vertices.reduce((a, b) => (b.loss < a.loss ? b : a));
+  let iterations = 0;
+  let converged = false;
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    iterations = iter + 1;
+    vertices.sort((a, b) => a.loss - b.loss);
+    if (vertices[0].loss < best.loss) best = vertices[0];
+
+    if (onProgress) await onProgress(iter, vertices[0].point, vertices[0], best);
+    await yieldToEventLoop();
+
+    if (vertices[n].loss - vertices[0].loss <= convergenceTolerance) { converged = true; break; }
+
+    const worst = vertices[n];
+    const centroid = new Array(n).fill(0);
+    for (let i = 0; i < n; i++) {
+      vertices[i].point.forEach((x, d) => { centroid[d] += x / n; });
+    }
+
+    const reflectedPoint = centroid.map((c, d) => c + ALPHA * (c - worst.point[d]));
+    const reflected = evalPoint(reflectedPoint);
+
+    if (reflected.loss < vertices[0].loss) {
+      // Better than the current best - try pushing further in the same direction.
+      const expandedPoint = centroid.map((c, d) => c + GAMMA * (reflectedPoint[d] - c));
+      const expanded = evalPoint(expandedPoint);
+      vertices[n] = expanded.loss < reflected.loss ? expanded : reflected;
+    } else if (reflected.loss < vertices[n - 1].loss) {
+      // Better than the second-worst - accept the plain reflection.
+      vertices[n] = reflected;
+    } else {
+      // Reflection didn't help enough - contract toward whichever of {reflected, worst} is
+      // better ("outside" vs "inside" contraction), or shrink the whole simplex toward the
+      // best vertex if even that fails.
+      const useOutside = reflected.loss < worst.loss;
+      const basePoint = useOutside ? reflectedPoint : worst.point;
+      const contractedPoint = centroid.map((c, d) => c + RHO * (basePoint[d] - c));
+      const contracted = evalPoint(contractedPoint);
+      const contractedBetter = useOutside ? contracted.loss <= reflected.loss : contracted.loss < worst.loss;
+      if (contractedBetter) {
+        vertices[n] = contracted;
+      } else {
+        const bestPoint = vertices[0].point;
+        vertices = vertices.map(v => evalPoint(bestPoint.map((b, d) => b + SIGMA * (v.point[d] - b))));
+      }
+    }
+  }
+
+  vertices.sort((a, b) => a.loss - b.loss);
+  if (vertices[0].loss < best.loss) best = vertices[0];
+
+  return { point: best.point, loss: best.loss, result: best, iterations, converged };
+}
+
+/**
  * Automatically tunes each reel's own `frequency` values (one table per reel - see
  * `reelFrequencyTables`) to hit a target RTP and a target free-spin trigger rate, without
  * touching any payout values or the paytable itself. Runs the real simulator against
