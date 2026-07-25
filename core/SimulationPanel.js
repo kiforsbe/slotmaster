@@ -234,14 +234,30 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
     tuneContainer.style.fontSize = '0.9em';
     simModal.appendChild(tuneContainer);
 
-    const biasSelectorsHtml = Array.from({ length: tuneConfig.reelsCount }, (_, r) => `
+    // Pre-selected default per reel, not a change to tuneFrequencies' own default (which
+    // stays -1/"high pay rarer" everywhere unless orderingBiasByReel is passed): splits the
+    // reels into thirds by position for a near-miss-shaped starting point - early reels
+    // default to favoring high pay more frequent (builds a "you can see it's close" feel),
+    // middle reels to the traditional high-pay-rarer direction, late reels to no preference.
+    // Still just a default selection - each dropdown can be changed before starting a tune.
+    function defaultBiasForReel(r, count) {
+      if (count <= 1) return 1;
+      const bucket = Math.floor(r * 3 / count);
+      return bucket === 0 ? 1 : bucket === 1 ? -1 : 0;
+    }
+
+    const biasSelectorsHtml = Array.from({ length: tuneConfig.reelsCount }, (_, r) => {
+      const def = defaultBiasForReel(r, tuneConfig.reelsCount);
+      const opt = (value, label) => `<option value="${value}"${def === value ? ' selected' : ''}>${label}</option>`;
+      return `
         <label style="font-size: 0.8em; color: #ccc;">Reel ${r + 1} preference<br>
           <select id="tune-bias-${r}" style="width: 100%; margin-top: 4px;">
-            <option value="-1" selected>High pay rarer (default)</option>
-            <option value="0">No preference</option>
-            <option value="1">High pay more frequent</option>
+            ${opt(1, 'High pay more frequent')}
+            ${opt(-1, 'High pay rarer')}
+            ${opt(0, 'No preference')}
           </select>
-        </label>`).join('');
+        </label>`;
+    }).join('');
 
     tuneContainer.innerHTML = `
       <h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner</h3>
@@ -276,12 +292,13 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
         Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
-        Nelder-Mead simplex search. Each reel has its own ordering preference (above): the
-        default discourages a higher-paying symbol from being more frequent than a
-        lower-paying one on that reel; "more frequent" reverses it (e.g. for a near-miss feel -
-        premium symbols show up often on some reels but rarely on another, so lines look
-        close but rarely land); "no preference" disables it for that reel. It's always a soft
-        preference, not an absolute rule - the search will accept a small violation rather
+        Nelder-Mead simplex search. Each reel has its own ordering preference (above,
+        pre-selected in a near-miss shape - early reels favor high pay more frequent, middle
+        reels favor it rarer, late reels no preference - adjust any of them freely): "more
+        frequent" discourages a higher-paying symbol from being less frequent than a
+        lower-paying one on that reel (premium symbols show up often, so lines look close);
+        "rarer" is the traditional direction; "no preference" disables it for that reel. It's
+        always a soft preference, not an absolute rule - the search will accept a small violation rather
         than push RTP far off target. A symbol can also carry its own soft <code>min</code>/
         <code>max</code> frequency bounds directly in its FREQUENCY_REELn entry (edit that in
         game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
