@@ -3,6 +3,7 @@ import { checkWins, checkExpandingWins, createSeededRng, generateTargetGrid } fr
 import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
+import { computeGridLayout } from './GridLayout.js';
 
 // Caps SlotEngine.spinLog's size (see its own doc) - generous for a dev-tooling export, small
 // enough that an unattended autoplay/turbo session doesn't grow memory usage without bound.
@@ -195,51 +196,22 @@ export class SlotEngine {
   resize() {
     const parentRect = this.canvas.parentElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
+    const layout = computeGridLayout(parentRect.width, parentRect.height, dpr, this.config.reelsCount, this.config.rowsCount);
 
-    // Slot Cabinet Margin Layout (fraction of the canvas box on each axis)
-    const marginXFrac = 0.05;
-    const marginYFrac = 0.08;
-
-    // Symbol art is square, so cells must be square too. Rather than filling the
-    // parent's box as-is (which stretches/letterboxes the grid depending on its
-    // shape), size the canvas itself to the aspect ratio the grid needs so the
-    // reel area — and therefore every tile — fills the whole canvas with no
-    // leftover slack, then center that canvas within the parent.
-    const targetAspect =
-      (this.config.reelsCount * (1 - 2 * marginYFrac)) /
-      (this.config.rowsCount * (1 - 2 * marginXFrac));
-
-    let layoutW = parentRect.width;
-    let layoutH = parentRect.width / targetAspect;
-    if (layoutH > parentRect.height) {
-      layoutH = parentRect.height;
-      layoutW = parentRect.height * targetAspect;
-    }
-
-    // Set display (CSS) size — centered within the parent via CSS (see canvas styling)
-    this.canvas.style.width = `${layoutW}px`;
-    this.canvas.style.height = `${layoutH}px`;
-
-    // Set buffer size with high DPI support
-    this.canvas.width = layoutW * dpr;
-    this.canvas.height = layoutH * dpr;
+    this.canvas.style.width = `${layout.cssWidth}px`;
+    this.canvas.style.height = `${layout.cssHeight}px`;
+    this.canvas.width = layout.canvasWidth;
+    this.canvas.height = layout.canvasHeight;
 
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
 
-    // Calculate layouts
-    const marginX = layoutW * marginXFrac;
-    const marginY = layoutH * marginYFrac;
-    const availW = layoutW - (2 * marginX);
-    const availH = layoutH - (2 * marginY);
-
-    const cellSize = Math.min(availW / this.config.reelsCount, availH / this.config.rowsCount);
-    this.symbolWidth = cellSize;
-    this.symbolHeight = cellSize;
-    this.reelsWidth = cellSize * this.config.reelsCount;
-    this.reelsHeight = cellSize * this.config.rowsCount;
-    this.reelsX = marginX + (availW - this.reelsWidth) / 2;
-    this.reelsY = marginY + (availH - this.reelsHeight) / 2;
+    this.symbolWidth = layout.cellSize;
+    this.symbolHeight = layout.cellSize;
+    this.reelsWidth = layout.reelsWidth;
+    this.reelsHeight = layout.reelsHeight;
+    this.reelsX = layout.reelsX;
+    this.reelsY = layout.reelsY;
   }
 
   // --- Game Loop ---
