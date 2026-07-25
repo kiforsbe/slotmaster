@@ -140,6 +140,14 @@ export class SlotEngine {
       }
 
       this.reels.push({
+        // `symbols` and `strip` are NOT redundant, despite both being arrays of symbol
+        // names: `strip` is the full, static, correctly-weighted virtual reel (built once
+        // by generateReel - more entries for common symbols, fewer for rare ones), the
+        // canonical probability data. `symbols` is a small rolling window (rowsCount + 3
+        // entries) of what's currently drawn on screen - refilled every frame from `strip`
+        // while spinning, set to a specific consecutive slice of `strip` on landing. It has
+        // no weighting logic of its own because it doesn't need any - it's a view into
+        // `strip`, not a second, independent source of randomness.
         symbols: symbols,           // Array of symbol names (e.g. ['tut', 'jack', 'ace', ...])
         offsetY: 0,                 // Vertical scrolling pixel offset
         speed: 0,                   // Speed in pixels/frame - cosmetic, only used while 'spinning'
