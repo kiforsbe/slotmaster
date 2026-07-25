@@ -206,18 +206,28 @@ function formatFrequencyForCopy(freq) {
 
 export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
   return reelFrequencyTables.map((table, i) => {
-    const symbols = Object.keys(table);
-    if (symbols.length === 0) return `export const FREQUENCY_REEL${i + 1} = {};`;
+    const defaults = table.defaults || {};
+    const symbolsTable = table.symbols || table;
+    const symbols = Object.keys(symbolsTable);
+    if (symbols.length === 0) return `export const FREQUENCY_REEL${i + 1} = {\n  defaults: {},\n  symbols: {},\n};`;
+
+    const defaultsParts = [];
+    if (defaults.minGap != null) defaultsParts.push(`minGap: ${defaults.minGap}`);
+    if (defaults.maxStack != null) defaultsParts.push(`maxStack: ${defaults.maxStack}`);
+    const defaultsLine = `  defaults: { ${defaultsParts.join(', ')} },`;
 
     const keyWidth = Math.max(...symbols.map(s => s.length + 1));
     const lines = symbols.map(symbol => {
+      const entry = symbolsTable[symbol];
       const keyPart = `${symbol}:`.padEnd(keyWidth);
-      const fixedPart = table[symbol].fixed ? ', fixed: true' : '';
-      const minPart = table[symbol].min != null ? `, min: ${table[symbol].min}` : '';
-      const maxPart = table[symbol].max != null ? `, max: ${table[symbol].max}` : '';
-      return `  ${keyPart} { frequency: ${formatFrequencyForCopy(table[symbol].frequency)}${fixedPart}${minPart}${maxPart} },`;
+      const minGapPart = entry.minGap != null ? `, minGap: ${entry.minGap}` : '';
+      const maxStackPart = entry.maxStack != null ? `, maxStack: ${entry.maxStack}` : '';
+      const fixedPart = entry.fixed ? ', fixed: true' : '';
+      const minPart = entry.min != null ? `, min: ${entry.min}` : '';
+      const maxPart = entry.max != null ? `, max: ${entry.max}` : '';
+      return `    ${keyPart} { frequency: ${formatFrequencyForCopy(entry.frequency)}${minGapPart}${maxStackPart}${fixedPart}${minPart}${maxPart} },`;
     });
-    return `export const FREQUENCY_REEL${i + 1} = {\n${lines.join('\n')}\n};`;
+    return `export const FREQUENCY_REEL${i + 1} = {\n${defaultsLine}\n  symbols: {\n${lines.join('\n')}\n  },\n};`;
   }).join('\n\n');
 }
 
@@ -444,8 +454,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     }
 
     html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">`;
-    reelFrequencyTables.forEach((baseReelTable, reelIdx) => {
-      const tunedReelTable = tunedReelTables[reelIdx];
+    reelFrequencyTables.forEach((baseReelTableWrapper, reelIdx) => {
+      const baseReelTable = baseReelTableWrapper.symbols || baseReelTableWrapper;
+      const tunedReelTable = (tunedReelTables[reelIdx].symbols || tunedReelTables[reelIdx]);
       html += `<div><h4 style="margin: 0 0 6px; font-size: 0.8em; color: #aaa; text-transform: uppercase;">Reel ${reelIdx + 1}</h4>`;
       html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">`;
       html += `<thead><tr style="color: #888; font-size: 0.75em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
