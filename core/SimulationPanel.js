@@ -2,6 +2,7 @@
 // core/SpinSimulator.js's pure simulateSpins/tuneFrequencies functions.
 // Every game's game.js calls into this instead of maintaining its own copy.
 import { tuneFrequencies } from './SpinSimulator.js';
+import { resolveFrequencyBounds } from './SlotMath.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -214,6 +215,9 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
     const defaultsParts = [];
     if (defaults.minGap != null) defaultsParts.push(`minGap: ${defaults.minGap}`);
     if (defaults.maxStack != null) defaultsParts.push(`maxStack: ${defaults.maxStack}`);
+    if (defaults.minStack != null) defaultsParts.push(`minStack: ${defaults.minStack}`);
+    if (defaults.minFrequency != null) defaultsParts.push(`minFrequency: ${defaults.minFrequency}`);
+    if (defaults.maxFrequency != null) defaultsParts.push(`maxFrequency: ${defaults.maxFrequency}`);
     const defaultsLine = `  defaults: { ${defaultsParts.join(', ')} },`;
 
     const keyWidth = Math.max(...symbols.map(s => s.length + 1));
@@ -222,10 +226,11 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
       const keyPart = `${symbol}:`.padEnd(keyWidth);
       const minGapPart = entry.minGap != null ? `, minGap: ${entry.minGap}` : '';
       const maxStackPart = entry.maxStack != null ? `, maxStack: ${entry.maxStack}` : '';
+      const minStackPart = entry.minStack != null ? `, minStack: ${entry.minStack}` : '';
       const fixedPart = entry.fixed ? ', fixed: true' : '';
-      const minPart = entry.min != null ? `, min: ${entry.min}` : '';
-      const maxPart = entry.max != null ? `, max: ${entry.max}` : '';
-      return `    ${keyPart} { frequency: ${formatFrequencyForCopy(entry.frequency)}${minGapPart}${maxStackPart}${fixedPart}${minPart}${maxPart} },`;
+      const minPart = entry.minFrequency != null ? `, minFrequency: ${entry.minFrequency}` : '';
+      const maxPart = entry.maxFrequency != null ? `, maxFrequency: ${entry.maxFrequency}` : '';
+      return `    ${keyPart} { frequency: ${formatFrequencyForCopy(entry.frequency)}${minGapPart}${maxStackPart}${minStackPart}${fixedPart}${minPart}${maxPart} },`;
     });
     return `export const FREQUENCY_REEL${i + 1} = {\n${defaultsLine}\n  symbols: {\n${lines.join('\n')}\n  },\n};`;
   }).join('\n\n');
@@ -327,6 +332,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         present at the end is listed below.
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
+      <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
     `;
@@ -338,6 +344,43 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
   simModal.style.display = 'block';
   simModal.style.maxWidth = '900px';
   simModal.style.width = '95%';
+}
+
+// Renders the TUNE FREQUENCIES panel's live per-reel table: each value symbol's current
+// frequency (from the live candidate being evaluated, or the untouched baseline before Phase 2
+// starts moving anything) alongside its resolved min/maxFrequency bounds, so it's visible at a
+// glance whether the search is currently inside or outside a symbol's configured range. Bounds
+// are static for the whole run (only frequency itself moves), so `boundsByReel` is resolved
+// once, before tuning starts, not recomputed on every render.
+function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, liveTrial) {
+  let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">`;
+  reelFrequencyTables.forEach((baseReelTableWrapper, reelIdx) => {
+    const baseReelTable = baseReelTableWrapper.symbols || baseReelTableWrapper;
+    const liveReelTable = liveTrial ? (liveTrial[reelIdx].symbols || liveTrial[reelIdx]) : null;
+    html += `<div><h4 style="margin: 0 0 4px; font-size: 0.75em; color: #aaa; text-transform: uppercase;">Reel ${reelIdx + 1}</h4>`;
+    html += `<table style="width: 100%; border-collapse: collapse; font-size: 0.78em;">`;
+    html += `<thead><tr style="color: #888; font-size: 0.75em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.15);">
+                <th style="text-align: left; padding: 2px;">Symbol</th>
+                <th style="text-align: right; padding: 2px;">Current</th>
+                <th style="text-align: right; padding: 2px;">Min</th>
+                <th style="text-align: right; padding: 2px;">Max</th>
+              </tr></thead><tbody>`;
+    Object.keys(baseReelTable).forEach(symbol => {
+      const current = liveReelTable ? liveReelTable[symbol].frequency : baseReelTable[symbol].frequency;
+      const { minFrequency, maxFrequency } = boundsByReel[reelIdx][symbol];
+      const outOfBounds = (minFrequency != null && current < minFrequency) || (maxFrequency != null && current > maxFrequency);
+      const currentColor = outOfBounds ? '#e6b800' : '#ddd';
+      html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 2px;">${symbol}</td>
+                  <td style="text-align: right; padding: 2px; color: ${currentColor};">${current.toFixed(3)}</td>
+                  <td style="text-align: right; padding: 2px; color: #888;">${minFrequency != null ? minFrequency.toFixed(3) : '–'}</td>
+                  <td style="text-align: right; padding: 2px; color: #888;">${maxFrequency != null ? maxFrequency.toFixed(3) : '–'}</td>
+                </tr>`;
+    });
+    html += `</tbody></table></div>`;
+  });
+  html += `</div>`;
+  return html;
 }
 
 async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer }) {
@@ -355,6 +398,15 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
+
+  // Resolved once, up front - these bounds don't change during the run, only frequency does.
+  const boundsByReel = reelFrequencyTables.map(reelTableWrapper => {
+    const symbolsTable = reelTableWrapper.symbols || reelTableWrapper;
+    const bounds = {};
+    Object.keys(symbolsTable).forEach(symbol => { bounds[symbol] = resolveFrequencyBounds(reelTableWrapper, symbol); });
+    return bounds;
+  });
+  const liveTableEl = tuneContainer.querySelector('#tune-live-table');
 
   const options = {
     reelsCount: tuneConfig.reelsCount,
@@ -384,6 +436,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   resultsEl.innerHTML = '';
   logEl.style.display = 'block';
   logEl.innerHTML = '';
+  liveTableEl.style.display = 'block';
+  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, null);
 
   const appendLog = (line) => {
     const row = document.createElement('div');
@@ -399,6 +453,13 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
         appendLog(`[${label}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
+        // Only Phase 2 ('shape') carries a full live candidate reel table (r.trial) - Phase 1
+        // ('scatter') only ever scales trigger symbols, which are excluded from Phase 2's
+        // search entirely, so every value symbol's frequency is still exactly its baseline
+        // value during Phase 1 anyway; nothing to update yet.
+        if (phase === 'shape' && r.trial) {
+          liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, r.trial);
+        }
       }
     });
 

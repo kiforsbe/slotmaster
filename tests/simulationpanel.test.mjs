@@ -29,14 +29,26 @@ test('formatReelFrequencyTablesForCopy still reads cleanly for larger fruitmachi
   assert.match(output, /clover:\s*\{ frequency: 8 \}/);
 });
 
-test('formatReelFrequencyTablesForCopy still includes fixed/min/max fields', () => {
+test('formatReelFrequencyTablesForCopy still includes fixed/minFrequency/maxFrequency fields', () => {
   const table = {
     defaults: {},
-    symbols: { star: { frequency: 24, fixed: true }, bar: { frequency: 10, min: 2, max: 20 } },
+    symbols: { star: { frequency: 24, fixed: true }, bar: { frequency: 10, minFrequency: 2, maxFrequency: 20 } },
   };
   const output = formatReelFrequencyTablesForCopy([table]);
   assert.match(output, /star:\s*\{ frequency: 24, fixed: true \}/);
-  assert.match(output, /bar:\s*\{ frequency: 10, min: 2, max: 20 \}/);
+  assert.match(output, /bar:\s*\{ frequency: 10, minFrequency: 2, maxFrequency: 20 \}/);
+});
+
+test('formatReelFrequencyTablesForCopy includes minStack on a symbol that sets it', () => {
+  const table = { defaults: {}, symbols: { stacked: { frequency: 10, minStack: 3 } } };
+  const output = formatReelFrequencyTablesForCopy([table]);
+  assert.match(output, /stacked:\s*\{ frequency: 10, minStack: 3 \}/);
+});
+
+test('formatReelFrequencyTablesForCopy emits minStack/minFrequency/maxFrequency in a non-empty defaults block', () => {
+  const table = { defaults: { minStack: 2, minFrequency: 1, maxFrequency: 50 }, symbols: { bar: { frequency: 10 } } };
+  const output = formatReelFrequencyTablesForCopy([table]);
+  assert.match(output, /defaults:\s*\{ minStack: 2, minFrequency: 1, maxFrequency: 50 \}/);
 });
 
 test('formatReelFrequencyTablesForCopy emits a non-empty defaults block', () => {
