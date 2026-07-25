@@ -86,18 +86,29 @@ function csvField(value) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
-// Formats one spin-log entry's line/scatter/expanding wins into a single readable cell instead
-// of separate variable-width columns per win - a spin can have anywhere from zero to several
-// line wins, so a fixed column layout would either truncate or need a ragged header.
+const round2 = (n) => Math.round(n * 100) / 100;
+
+// Formats one spin-log entry's line/scatter/expanding wins into a single compact, regex-friendly
+// cell instead of separate variable-width columns per win (a spin can have anywhere from zero to
+// several line wins, so a fixed column layout would either truncate or need a ragged header).
+// Each win is `TYPE:symbol:count:amount[:flags]`, wins joined by `|`, with no other delimiters
+// (no spaces, no parens) so a parser never needs more than split-on-delimiter or one regex pass:
+//   TYPE   - 'S' (scatter), 'X' (expanding), or 'L<lineIndex>' (a line win, e.g. 'L4')
+//   count  - scatter/line hit count, or expanding's reel count
+//   amount - this win's payout, rounded to 2dp (avoids float noise like 2.8000000000000003)
+//   flags  - line wins only: 'W' (wild-completed), 'A' (alone bonus), 'WA' (both), omitted if
+//            neither applies
+// e.g. "S:book:3:2|L4:ace:3:5:W|X:tut:2:30" - parse per-win with
+// /(S|X|L\d+):([^:|]+):(\d+):(-?[\d.]+)(?::([WA]+))?/g
 export function summarizeSpinWins(entry) {
   const parts = [];
-  if (entry.scatterCount > 0) parts.push(`scatter:${entry.scatterSymbol}x${entry.scatterCount}=${entry.scatterWin}`);
+  if (entry.scatterCount > 0) parts.push(`S:${entry.scatterSymbol}:${entry.scatterCount}:${round2(entry.scatterWin)}`);
   entry.lineWins.forEach(lw => {
-    const flags = [lw.wildUsed ? 'wild' : null, lw.alone ? 'alone' : null].filter(Boolean).join('+');
-    parts.push(`line${lw.lineIndex}:${lw.symbol}x${lw.count}=${lw.payout}${flags ? `(${flags})` : ''}`);
+    const flags = (lw.wildUsed ? 'W' : '') + (lw.alone ? 'A' : '');
+    parts.push(`L${lw.lineIndex}:${lw.symbol}:${lw.count}:${round2(lw.payout)}${flags ? `:${flags}` : ''}`);
   });
-  if (entry.expandingReels > 0) parts.push(`expanding:${entry.expandingSymbol}x${entry.expandingReels}reels=${entry.expandingWin}`);
-  return parts.join(' | ');
+  if (entry.expandingReels > 0) parts.push(`X:${entry.expandingSymbol}:${entry.expandingReels}:${round2(entry.expandingWin)}`);
+  return parts.join('|');
 }
 
 // Builds the per-spin CSV export. One function serves both spin-log sources:

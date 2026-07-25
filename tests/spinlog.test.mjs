@@ -92,9 +92,12 @@ test('summarizeSpinWins renders scatter, line, and expanding wins into one reada
   applyExpandingWinToSpinLogEntry(entry, { expandingSymbol: 'tut', expandingReels: 2, expandingWin: 30 });
 
   const summary = summarizeSpinWins(entry);
-  assert.match(summary, /scatter:book/);
-  assert.match(summary, /line4:ace/);
-  assert.match(summary, /expanding:tut/);
+  assert.equal(summary, 'S:book:3:20|L4:ace:3:5:W|X:tut:2:30');
+
+  const WIN_RE = /(S|X|L\d+):([^:|]+):(\d+):(-?[\d.]+)(?::([WA]+))?/g;
+  const matches = [...summary.matchAll(WIN_RE)];
+  assert.equal(matches.length, 3, 'the parsing regex documented on summarizeSpinWins must find exactly one match per win');
+  assert.deepEqual(matches.map(m => m[1]), ['S', 'L4', 'X'], 'each win type token must round-trip through the regex');
 });
 
 test('summarizeSpinWins returns an empty string for a losing spin', () => {
