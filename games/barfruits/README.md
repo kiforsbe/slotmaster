@@ -1,7 +1,7 @@
 # Bar Fruits (barfruits)
 
 A classic bar-and-fruit slot, built as a fresh game on top of fruitmachine's asset pack and
-conventions: 5 reels, 4 rows, 20 fixed paylines, no wild, and a star scatter that pays
+conventions: 5 reels, 3 rows, 10 fixed paylines, no wild, and a star scatter that pays
 anywhere and triggers free spins.
 
 See the top-level [README](../../README.md) for how reel frequency tables, `minGap`/
@@ -10,10 +10,10 @@ this game.
 
 ## Paylines
 
-20 fixed lines across the 5x4 grid (`PAYLINES` in `game.js`) - a standard line count for this
-grid size (not all-ways/megaways). Straight rows, then increasingly deep V/inverted-V, W/M,
-step, and zigzag shapes, so all 4 rows actually get used rather than the 4th row only ever
-appearing in straight-row lines.
+10 fixed lines across the 5x3 grid (`PAYLINES` in `game.js`) - the standard 10-line template
+for this grid size (see `docs/PAYLINES-TEMPLATES.md`'s "5x3 playfield"), the same lines
+bookbookbook uses: 3 horizontal rows, V/inverted-V, step down-up/up-down, U-shape top/bottom,
+and a zigzag.
 
 ## Symbols and paytable
 
@@ -50,10 +50,11 @@ Unlike bookbookbook, there's **no expanding symbol** - `game.js` calls
 the same win math as the base game with no bet deducted per spin. "Plain old free spins," per
 spec.
 
-Each reel's `star` entry sets an explicit `minGap: 4` (equal to `ROWS_COUNT`) rather than
-relying on `generateReel`'s automatic triggerFreeSpins-based default (which is only `3`) -
-with 4 visible rows, a gap of 3 could still place two stars in the same reel's visible window
-at once. `maxStack: 1` additionally guarantees it never repeats back-to-back on the strip.
+Each reel's `star` entry sets an explicit `minGap: 3` (equal to `ROWS_COUNT`) so two stars can
+never land inside the same reel's visible window at once - this happens to equal
+`generateReel`'s own triggerFreeSpins-based default (also `3`), so it's redundant today, but
+written explicitly so it stays correct if `ROWS_COUNT` ever changes. `maxStack: 1`
+additionally guarantees it never repeats back-to-back on the strip.
 
 ## Reels
 
@@ -66,7 +67,7 @@ already present in that pack's tile atlas.
 
 ## Betting
 
-Per-line bet: `$0.10` default and step, up to `$10` max. Lines: 1-20, adjustable
+Per-line bet: `$0.10` default and step, up to `$10` max. Lines: 1-10, adjustable
 independently of bet size (same pattern as fruitmachine); total bet is always `betPerLine ×
 linesCount`.
 

@@ -7,38 +7,27 @@ import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/Sim
 // frequency tuner - a single source of truth so all three actually model the same reels
 // instead of the simulation/tuner silently drifting onto their own hardcoded defaults.
 export const REELS_COUNT = 5;
-export const ROWS_COUNT = 4;
+export const ROWS_COUNT = 3;
 export const REEL_LENGTH = 500;
 export const REEL_SEEDS = [4231, 8765, 123, 9981, 5567];
 export const BET_PER_LINE = 0.10;
 export const BET_PER_LINE_STEP = 0.10;
 export const BET_PER_LINE_MAX = 10;
-export const LINES_COUNT = 20;
+export const LINES_COUNT = 10;
 
-// Payline definitions - 5 reels x 4 rows, 20 fixed lines (a standard count for this grid
-// size - not all-ways/megaways). Straight rows, then progressively deeper V/inverted-V,
-// W/M, step, and zigzag shapes so the extra 4th row actually gets used, not just tacked on.
+// Payline definitions - 5 reels x 3 rows, the standard 10-line template for this grid size
+// (see docs/PAYLINES-TEMPLATES.md's "5x3 playfield" - same lines as bookbookbook's).
 export const PAYLINES = [
-  [0, 0, 0, 0, 0], // Line 1: Row 1 (Top)
-  [1, 1, 1, 1, 1], // Line 2: Row 2 (Upper-Middle)
-  [2, 2, 2, 2, 2], // Line 3: Row 3 (Lower-Middle)
-  [3, 3, 3, 3, 3], // Line 4: Row 4 (Bottom)
-  [0, 1, 3, 1, 0], // Line 5: Deep V (Top-Bottom-Top)
-  [3, 2, 0, 2, 3], // Line 6: Deep Inverted V (Bottom-Top-Bottom)
-  [1, 2, 3, 2, 1], // Line 7: Shallow V (Rows 2-4)
-  [2, 1, 0, 1, 2], // Line 8: Shallow Inverted V (Rows 1-3)
-  [0, 3, 0, 3, 0], // Line 9: W-Shape (Top/Bottom)
-  [3, 0, 3, 0, 3], // Line 10: M-Shape (Bottom/Top)
-  [1, 2, 1, 2, 1], // Line 11: W-Shape (Middle Rows)
-  [2, 1, 2, 1, 2], // Line 12: M-Shape (Middle Rows)
-  [0, 0, 1, 2, 3], // Line 13: Step Down (Top to Bottom)
-  [3, 3, 2, 1, 0], // Line 14: Step Up (Bottom to Top)
-  [0, 1, 1, 2, 3], // Line 15: Step Down, Delayed
-  [3, 2, 2, 1, 0], // Line 16: Step Up, Delayed
-  [0, 1, 0, 1, 0], // Line 17: Zigzag (Top Rows)
-  [3, 2, 3, 2, 3], // Line 18: Zigzag (Bottom Rows)
-  [0, 1, 2, 3, 3], // Line 19: Descending Run
-  [3, 2, 1, 0, 0], // Line 20: Ascending Run
+  [1, 1, 1, 1, 1], // Line 1: Horizontal Middle Row
+  [0, 0, 0, 0, 0], // Line 2: Horizontal Top Row
+  [2, 2, 2, 2, 2], // Line 3: Horizontal Bottom Row
+  [0, 1, 2, 1, 0], // Line 4: V-Shape
+  [2, 1, 0, 1, 2], // Line 5: Inverted V-Shape
+  [0, 0, 1, 2, 2], // Line 6: Step Down-Up
+  [2, 2, 1, 0, 0], // Line 7: Step Up-Down
+  [1, 2, 2, 2, 1], // Line 8: U-Shape Bottom
+  [1, 0, 0, 0, 1], // Line 9: U-Shape Top
+  [0, 1, 0, 1, 0], // Line 10: Zigzag
 ];
 
 // Paytable. No wild - only a scatter (`star`, pays anywhere, triggers free spins) plus 10
@@ -65,11 +54,11 @@ export const PAYTABLE = {
 // bookbookbook - a pure baseline, differentiate per reel via TUNE FREQUENCIES) - each is
 // still its own separate object, not a shared reference, so hand-editing one later (e.g.
 // pasting a tuned result back for a single reel) can't silently affect the others. `star`
-// carries an explicit `minGap: 4` (equal to ROWS_COUNT) rather than relying on
-// generateReel's automatic triggerFreeSpins-based fallback (which defaults to 3) - with 4
-// visible rows, a gap of only 3 could still place two stars inside the same visible window
-// on one reel; `maxStack: 1` additionally guarantees it never repeats back-to-back on the
-// strip.
+// carries an explicit `minGap: 3` (equal to ROWS_COUNT) so two stars can never land inside
+// the same reel's visible window at once - this happens to equal generateReel's own
+// triggerFreeSpins-based fallback (also 3 by default), so it's redundant here, but written
+// explicitly so it stays correct if ROWS_COUNT ever changes. `maxStack: 1` additionally
+// guarantees it never repeats back-to-back on the strip.
 export const FREQUENCY_REEL1 = {
   defaults: {},
   symbols: {
@@ -83,7 +72,7 @@ export const FREQUENCY_REEL1 = {
     grapes:     { frequency: 7 },
     orange:     { frequency: 8 },
     melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 4, maxStack: 1 },
+    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
   },
 };
 
@@ -100,7 +89,7 @@ export const FREQUENCY_REEL2 = {
     grapes:     { frequency: 7 },
     orange:     { frequency: 8 },
     melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 4, maxStack: 1 },
+    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
   },
 };
 
@@ -117,7 +106,7 @@ export const FREQUENCY_REEL3 = {
     grapes:     { frequency: 7 },
     orange:     { frequency: 8 },
     melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 4, maxStack: 1 },
+    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
   },
 };
 
@@ -134,7 +123,7 @@ export const FREQUENCY_REEL4 = {
     grapes:     { frequency: 7 },
     orange:     { frequency: 8 },
     melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 4, maxStack: 1 },
+    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
   },
 };
 
@@ -151,7 +140,7 @@ export const FREQUENCY_REEL5 = {
     grapes:     { frequency: 7 },
     orange:     { frequency: 8 },
     melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 4, maxStack: 1 },
+    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
   },
 };
 
@@ -170,7 +159,7 @@ function awardedFreeSpinsFor(scatterCount) {
 // PAYTABLE.star.triggerFreeSpins (not used here since star's minGap is set explicitly above,
 // but kept for consistency with fruitmachine/bookbookbook - see generateReel's own doc in
 // core/SlotMath.js).
-export const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i], [], 4, PAYTABLE));
+export const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i], [], 3, PAYTABLE));
 
 // UI Dom Selectors - initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;

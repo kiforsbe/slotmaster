@@ -6,7 +6,7 @@ import {
 } from '../games/barfruits/game.js';
 
 test('bar fruits paylines and reel strips have consistent shapes', () => {
-  assert.equal(PAYLINES.length, 20);
+  assert.equal(PAYLINES.length, 10);
   PAYLINES.forEach(path => {
     assert.equal(path.length, REELS_COUNT);
     path.forEach(row => assert.ok(row >= 0 && row < ROWS_COUNT));
@@ -16,8 +16,8 @@ test('bar fruits paylines and reel strips have consistent shapes', () => {
 });
 
 test('bar fruits reels space the star scatter at least ROWS_COUNT apart (minGap)', () => {
-  // With 4 visible rows, two stars closer than that on the same reel strip could land in
-  // the same visible window at once - FREQUENCY_REELn sets an explicit minGap: 4 on star
+  // With 3 visible rows, two stars closer than that on the same reel strip could land in
+  // the same visible window at once - FREQUENCY_REELn sets an explicit minGap: 3 on star
   // specifically to prevent that (see the comment above FREQUENCY_REEL1 in game.js).
   REEL_STRIPS.forEach(strip => {
     const positions = [];
