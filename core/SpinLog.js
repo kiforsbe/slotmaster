@@ -65,6 +65,65 @@ export function createSpinLogEntry({
   };
 }
 
+/**
+ * Builds one spin-log entry for a cascading cluster-pays spin (Candy Frenzy) - same
+ * top-level shape as createSpinLogEntry (spinIndex/timestamp/seed/phase/totalBet/totalWin/
+ * scatter fields) so SpinLogPanel.js's existing table/CSV export work unchanged, plus a
+ * clusterWins breakdown across every cascade step instead of lineWins.
+ * @param {Object} args
+ * @param {number} args.spinIndex
+ * @param {'base'|'free'} args.phase
+ * @param {number} args.betAmount - this game's single flat bet (no bet-per-line/lines concept).
+ * @param {number} args.chargedBet - what this spin actually cost (0 during free spins).
+ * @param {number} [args.freeSpinsMultiplier=1] - 2 during free spins per this game's rules.
+ * @param {Array<{clusterWins: Array<{symbol,count,payout}>}>} args.cascadeSteps - from
+ *   resolveCascadeSequence's own result shape (core/CascadeMath.js); a step's `payout` field
+ *   there is a currency-scaled sum and isn't re-derived here, only its per-cluster multiplier
+ *   entries are.
+ * @param {string|null} [args.scatterSymbol=null]
+ * @param {{count:number}|null} [args.scatterWin=null] - bonus has no direct cash payout in v1.
+ * @param {number|null} [args.seed=null]
+ * @param {number|null} [args.timestamp=null]
+ */
+export function createCascadeSpinLogEntry({
+  spinIndex, phase, betAmount, chargedBet, freeSpinsMultiplier = 1,
+  cascadeSteps, scatterSymbol = null, scatterWin = null, seed = null, timestamp = null
+}) {
+  const clusterWins = [];
+  cascadeSteps.forEach((step, stepIndex) => {
+    step.clusterWins.forEach(cw => {
+      clusterWins.push({
+        cascadeStep: stepIndex,
+        symbol: cw.symbol,
+        count: cw.count,
+        payout: cw.payout * betAmount * freeSpinsMultiplier,
+      });
+    });
+  });
+  const cascadeWinTotal = clusterWins.reduce((sum, cw) => sum + cw.payout, 0);
+  const scatterCount = scatterWin ? scatterWin.count : 0;
+
+  return {
+    spinIndex,
+    timestamp,
+    seed,
+    phase,
+    betPerLine: betAmount,
+    linesCount: 1,
+    totalBet: chargedBet,
+    totalWin: cascadeWinTotal,
+    scatterSymbol: scatterCount > 0 ? scatterSymbol : null,
+    scatterCount,
+    scatterWin: 0,
+    lineWins: [],
+    clusterWins,
+    cascadeStepCount: cascadeSteps.length,
+    expandingSymbol: null,
+    expandingReels: 0,
+    expandingWin: 0,
+  };
+}
+
 /** Mutates `entry` in place once its expanding win (if any) is known, folding it into totalWin. */
 export function applyExpandingWinToSpinLogEntry(entry, { expandingSymbol, expandingReels, expandingWin }) {
   entry.expandingSymbol = expandingSymbol;
@@ -88,18 +147,20 @@ function csvField(value) {
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
-// Formats one spin-log entry's line/scatter/expanding wins into a single compact, regex-friendly
-// cell instead of separate variable-width columns per win (a spin can have anywhere from zero to
-// several line wins, so a fixed column layout would either truncate or need a ragged header).
-// Each win is `TYPE:symbol:count:amount[:flags]`, wins joined by `|`, with no other delimiters
-// (no spaces, no parens) so a parser never needs more than split-on-delimiter or one regex pass:
-//   TYPE   - 'S' (scatter), 'X' (expanding), or 'L<lineIndex>' (a line win, e.g. 'L4')
-//   count  - scatter/line hit count, or expanding's reel count
+// Formats one spin-log entry's line/scatter/expanding/cluster wins into a single compact,
+// regex-friendly cell instead of separate variable-width columns per win (a spin can have
+// anywhere from zero to several line wins, so a fixed column layout would either truncate or
+// need a ragged header). Each win is `TYPE:symbol:count:amount[:flags]`, wins joined by `|`,
+// with no other delimiters (no spaces, no parens) so a parser never needs more than
+// split-on-delimiter or one regex pass:
+//   TYPE   - 'S' (scatter), 'X' (expanding), 'L<lineIndex>' (a line win, e.g. 'L4'), or
+//            'K<cascadeStep>' (a cluster win from a cascading spin, e.g. 'K1')
+//   count  - scatter/line/cluster hit count, or expanding's reel count
 //   amount - this win's payout, rounded to 2dp (avoids float noise like 2.8000000000000003)
 //   flags  - line wins only: 'W' (wild-completed), 'A' (alone bonus), 'WA' (both), omitted if
 //            neither applies
-// e.g. "S:book:3:2|L4:ace:3:5:W|X:tut:2:30" - parse per-win with
-// /(S|X|L\d+):([^:|]+):(\d+):(-?[\d.]+)(?::([WA]+))?/g
+// e.g. "S:book:3:2|L4:ace:3:5:W|X:tut:2:30|K1:mint:7:0.8" - parse per-win with
+// /(S|X|L\d+|K\d+):([^:|]+):(\d+):(-?[\d.]+)(?::([WA]+))?/g
 export function summarizeSpinWins(entry) {
   const parts = [];
   if (entry.scatterCount > 0) parts.push(`S:${entry.scatterSymbol}:${entry.scatterCount}:${round2(entry.scatterWin)}`);
@@ -108,6 +169,9 @@ export function summarizeSpinWins(entry) {
     parts.push(`L${lw.lineIndex}:${lw.symbol}:${lw.count}:${round2(lw.payout)}${flags ? `:${flags}` : ''}`);
   });
   if (entry.expandingReels > 0) parts.push(`X:${entry.expandingSymbol}:${entry.expandingReels}:${round2(entry.expandingWin)}`);
+  (entry.clusterWins || []).forEach(cw => {
+    parts.push(`K${cw.cascadeStep}:${cw.symbol}:${cw.count}:${round2(cw.payout)}`);
+  });
   return parts.join('|');
 }
 

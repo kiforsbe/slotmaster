@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSpinLogEntry, applyExpandingWinToSpinLogEntry, summarizeSpinWins } from '../core/SpinLog.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry, summarizeSpinWins, createCascadeSpinLogEntry } from '../core/SpinLog.js';
 
 test('createSpinLogEntry reports zeroed win fields for a losing spin', () => {
   const entry = createSpinLogEntry({
@@ -111,4 +111,63 @@ test('summarizeSpinWins returns an empty string for a losing spin', () => {
     winData: { lineWins: [], scatterWin: null, totalLinePayoutMultiplier: 0 }
   });
   assert.equal(summarizeSpinWins(entry), '');
+});
+
+test('createCascadeSpinLogEntry scales cluster payouts by betAmount and freeSpinsMultiplier, folding them into totalWin', () => {
+  const cascadeSteps = [
+    { clusterWins: [] }, // the initial fill - no wins yet
+    { clusterWins: [{ symbol: 'mint', count: 7, payout: 0.20 }] },
+    { clusterWins: [{ symbol: 'cottoncandy', count: 5, payout: 0.25 }] },
+    { clusterWins: [] }, // terminal step - no more wins
+  ];
+  const entry = createCascadeSpinLogEntry({
+    spinIndex: 1,
+    phase: 'free',
+    betAmount: 2,
+    chargedBet: 0, // free spins cost nothing to spin
+    freeSpinsMultiplier: 2,
+    cascadeSteps,
+    scatterSymbol: 'bonus',
+    scatterWin: null,
+  });
+
+  assert.equal(entry.totalBet, 0);
+  assert.equal(entry.cascadeStepCount, 4);
+  assert.equal(entry.clusterWins.length, 2);
+  assert.equal(entry.clusterWins[0].cascadeStep, 1);
+  assert.equal(entry.clusterWins[0].payout, 0.20 * 2 * 2, 'multiplier * betAmount * freeSpinsMultiplier');
+  assert.equal(entry.clusterWins[1].cascadeStep, 2);
+  assert.equal(entry.clusterWins[1].payout, 0.25 * 2 * 2);
+  assert.equal(entry.totalWin, (0.20 * 2 * 2) + (0.25 * 2 * 2));
+  assert.equal(entry.scatterCount, 0);
+  assert.equal(entry.scatterSymbol, null, 'no scatter hit -> not recorded, even though one is configured');
+});
+
+test('createCascadeSpinLogEntry records a scatter hit without a cash payout', () => {
+  const entry = createCascadeSpinLogEntry({
+    spinIndex: 2,
+    phase: 'base',
+    betAmount: 1,
+    chargedBet: 1,
+    freeSpinsMultiplier: 1,
+    cascadeSteps: [{ clusterWins: [] }],
+    scatterSymbol: 'bonus',
+    scatterWin: { count: 3, triggerFreeSpins: true },
+  });
+  assert.equal(entry.scatterSymbol, 'bonus');
+  assert.equal(entry.scatterCount, 3);
+  assert.equal(entry.totalWin, 0);
+});
+
+test('summarizeSpinWins serializes clusterWins additively, without disturbing line/scatter output', () => {
+  const lineEntry = { scatterCount: 0, lineWins: [], expandingReels: 0 };
+  assert.equal(summarizeSpinWins(lineEntry), '', 'an entry with no clusterWins field behaves exactly as before');
+
+  const cascadeEntry = {
+    scatterCount: 0,
+    lineWins: [],
+    expandingReels: 0,
+    clusterWins: [{ cascadeStep: 1, symbol: 'mint', count: 7, payout: 0.8 }],
+  };
+  assert.equal(summarizeSpinWins(cascadeEntry), 'K1:mint:7:0.8');
 });
