@@ -59,41 +59,41 @@ const PAYTABLE = {
 // trigger rate (~0.57%) already sits inside the tuner's default target band (0.6% +/- 0.15),
 // so there's nothing for that phase to correct.
 export const FREQUENCY_REEL1 = {
-  defaults: {  },
+  defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
-    book:     { frequency: 0.051 },
-    explorer: { frequency: 0.08063 },
-    tut:      { frequency: 0.1581 },
-    anubis:   { frequency: 0.2322 },
-    scarab:   { frequency: 0.2324 },
-    ace:      { frequency: 0.2028 },
-    king:     { frequency: 0.2029 },
-    queen:    { frequency: 0.2002 },
-    jack:     { frequency: 0.2 },
-    ten:      { frequency: 0.1999 },
+    book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
+    explorer: { frequency: 0.1621 },
+    tut:      { frequency: 0.1502 },
+    anubis:   { frequency: 0.2206 },
+    scarab:   { frequency: 0.2208 },
+    ace:      { frequency: 0.1926 },
+    king:     { frequency: 0.1927 },
+    queen:    { frequency: 0.1902 },
+    jack:     { frequency: 0.19 },
+    ten:      { frequency: 0.1899 },
   },
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: {  },
+  defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
-    book:     { frequency: 0.051 },
-    explorer: { frequency: 0.07851 },
-    tut:      { frequency: 0.1547 },
-    anubis:   { frequency: 0.231 },
-    scarab:   { frequency: 0.2313 },
-    ace:      { frequency: 0.2027 },
-    king:     { frequency: 0.2027 },
-    queen:    { frequency: 0.2027 },
-    jack:     { frequency: 0.2027 },
-    ten:      { frequency: 0.2027 },
+    book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
+    explorer: { frequency: 0.1257 },
+    tut:      { frequency: 0.1502 },
+    anubis:   { frequency: 0.2243 },
+    scarab:   { frequency: 0.2246 },
+    ace:      { frequency: 0.1968 },
+    king:     { frequency: 0.1968 },
+    queen:    { frequency: 0.1968 },
+    jack:     { frequency: 0.1968 },
+    ten:      { frequency: 0.1968 },
   },
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: {  },
+  defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
-    book:     { frequency: 0.051 },
+    book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
     explorer: { frequency: 0.0798 },
     tut:      { frequency: 0.1586 },
     anubis:   { frequency: 0.2317 },
@@ -107,9 +107,9 @@ export const FREQUENCY_REEL3 = {
 };
 
 export const FREQUENCY_REEL4 = {
-  defaults: {  },
+  defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
-    book:     { frequency: 0.051 },
+    book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
     explorer: { frequency: 0.07716 },
     tut:      { frequency: 0.1498 },
     anubis:   { frequency: 0.2176 },
@@ -123,9 +123,9 @@ export const FREQUENCY_REEL4 = {
 };
 
 export const FREQUENCY_REEL5 = {
-  defaults: {  },
+  defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
-    book:     { frequency: 0.051 },
+    book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
     explorer: { frequency: 0.07939 },
     tut:      { frequency: 0.1547 },
     anubis:   { frequency: 0.2314 },
