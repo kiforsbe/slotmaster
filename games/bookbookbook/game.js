@@ -287,6 +287,12 @@ window.addEventListener('load', async () => {
           // given. Retriggers scale by scatter count instead (RETRIGGER_FREE_SPINS_AWARD) -
           // without this, tuned RTP estimates missed the retrigger mechanic entirely.
           retriggerFreeSpinsAwardTable: RETRIGGER_FREE_SPINS_AWARD,
+          // This game's free spins DO include the Book-of-Dead-style expanding wild (see
+          // handleInitialFreeSpinsTrigger/EXPANDING_CANDIDATES below) - without opting in here,
+          // simulateSpins now assumes no expanding-wild mechanic at all (see its own doc for why
+          // that default changed) and tuned RTP would miss a real, meaningful chunk of this
+          // game's payout.
+          hasExpandingWild: true,
         },
         domRefs: { simModal, simStats },
       });
@@ -318,6 +324,9 @@ window.addEventListener('load', async () => {
     // Read by engine.runSimulation() (-> simulateSpins) so RUN SIMULATION matches this game's
     // real retrigger schedule instead of assuming no retriggers at all.
     retriggerFreeSpinsAwardTable: RETRIGGER_FREE_SPINS_AWARD,
+    // This game's free spins really do include an expanding wild (see EXPANDING_CANDIDATES) -
+    // without this, RUN SIMULATION would assume no expanding-wild mechanic at all.
+    hasExpandingWild: true,
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),

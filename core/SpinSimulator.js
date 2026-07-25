@@ -20,6 +20,15 @@ import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, create
  *   what enables retrigger simulation at all - if neither table is set, free spins run for
  *   exactly `freeSpinsCount` spins with no retriggers, matching this function's original
  *   behavior exactly.
+ * @param {boolean} [config.hasExpandingWild=false] - Whether free spins here include a
+ *   Book-of-Dead-style expanding-wild bonus (a random non-scatter symbol picked fresh each
+ *   free-spins session, expanding to fill any reel it lands on - see checkExpandingWins).
+ *   Off by default - without this, free spins pay out exactly like the base game, just at no
+ *   cost. Omitting it for a game that doesn't actually have this mechanic isn't just "leaving
+ *   a feature off": this used to run unconditionally for ANY game with free spins regardless
+ *   of whether its real engine flow ever calls enterFreeSpins with an expanding symbol,
+ *   fabricating extra "expanding win" payouts (against a real, randomly-chosen paytable
+ *   symbol, so not even a harmless no-op) that inflated RTP for any such game.
  * @param {number} numBaseSpins - Number of base spins to simulate (default 100000)
  * @param {number} betPerLine - Bet per line (default 1)
  * @param {number} linesCount - Number of active paylines (default 10)
@@ -80,7 +89,8 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   // configured frequencies are.
   const FREE_SPINS_GLOBAL_CAP = Math.max(numBaseSpins * 20, 50000);
   let totalFreeSpinsRun = 0;
-  let expandingSymbol = simConfig.expandingSymbol || 'anubis';
+  const hasExpandingWild = !!simConfig.hasExpandingWild;
+  let expandingSymbol = null;
 
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
@@ -90,14 +100,17 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     // spins budget is already exhausted - base spins keep running either way, so the base-game
     // RTP/trigger-rate signal stays representative even once free-spin payouts are truncated).
     if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins && totalFreeSpinsRun < FREE_SPINS_GLOBAL_CAP) {
-      // Randomize the expanding symbol for each new free spin session.
-      // Scatter symbols (e.g. book) can never be the expanding symbol - derive
-      // eligibility from the paytable's own type rather than hardcoding a symbol name.
-      const eligibleSymbols = Object.keys(simConfig.paytable || {})
-        .filter(s => simConfig.paytable[s].type !== 'scatter');
-      expandingSymbol = eligibleSymbols.length > 0
-        ? eligibleSymbols[Math.floor(rng() * eligibleSymbols.length)]
-        : expandingSymbol;
+      // Randomize the expanding symbol for each new free spin session - only for games that
+      // actually have this mechanic (see hasExpandingWild's own doc). Scatter symbols (e.g.
+      // book) can never be the expanding symbol - derive eligibility from the paytable's own
+      // type rather than hardcoding a symbol name.
+      if (hasExpandingWild) {
+        const eligibleSymbols = Object.keys(simConfig.paytable || {})
+          .filter(s => simConfig.paytable[s].type !== 'scatter');
+        expandingSymbol = eligibleSymbols.length > 0
+          ? eligibleSymbols[Math.floor(rng() * eligibleSymbols.length)]
+          : expandingSymbol;
+      }
 
       // A real free-spins round can retrigger itself (another qualifying scatter hit during
       // the bonus adds more spins on top, same as the live engine's retriggerFreeSpins) - the
@@ -194,7 +207,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     // For simplicity in simulation, we'll assume expansion happens if it's a free spin 
     // and there are multiple of the same high-value symbol on a reel.
     let expandingResults = null;
-    if (isFreeSpin) {
+    if (isFreeSpin && hasExpandingWild) {
       // Check for expanding wins using the configured expanding symbol and paytable
       expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, simConfig.paylines, linesCount);
     }
@@ -589,10 +602,37 @@ export async function nelderMead({
  *   simulateSpins as `config.retriggerFreeSpinsAwardTable` - omitting both this and
  *   `freeSpinsAwardTable` measures with no retriggers at all, which understates RTP for any
  *   game whose live engine does support retriggering.
- * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: Object) => (void|Promise<void>)} [options.onProgress] -
- *   Called (and awaited, if it returns a promise) after each candidate is measured.
- *   `multiplier` is always `null` during phase 'shape' (Phase 2 moves every dimension
- *   together each iteration, so there's no longer one scalar to report per step).
+ * @param {boolean} [options.hasExpandingWild] - Passed straight through to simulateSpins as
+ *   `config.hasExpandingWild` - see its own doc. Omitting this for a game that really does have
+ *   an expanding-wild free-spins bonus understates its RTP.
+ * @param {'provided'|'uniform'|'normal'} [options.initialWeightStrategy='provided'] - How Phase
+ *   2's starting point is chosen for a dimension that has BOTH a minFrequency and a
+ *   maxFrequency configured (via `resolveFrequencyBounds` - a symbol missing either bound has
+ *   no defined range to sample from, so it always starts from its provided baseline frequency
+ *   regardless of this setting). `'provided'` (the default) starts every dimension at whatever
+ *   frequency `reelFrequencyTables` already had - unchanged behavior. `'uniform'` picks a value
+ *   uniformly at random between that dimension's min and max. `'normal'` picks from a normal
+ *   distribution centered at the midpoint of min/max (std = a quarter of the range, clamped
+ *   back into [min, max] as a backstop against the rare extreme tail sample) - useful for
+ *   exploring whether the search reliably converges to the same answer from a meaningfully
+ *   different starting shape, or gets stuck depending on where it started. Sampling is drawn
+ *   from a dedicated RNG seeded off `searchSeed`, so the whole run - including which random
+ *   starting point gets used - stays a pure function of `searchSeed` (same determinism
+ *   guarantee as every other seeded part of this search).
+ * @param {(phase: 'initial'|'scatter'|'shape'|'restart', iteration: number, multiplier: number|null, result: Object, best: Object) => (void|Promise<void>)} [options.onProgress] -
+ *   Called (and awaited, if it returns a promise) at several points during the search:
+ *   - `'initial'`: fired exactly once, before Phase 1 runs, with `result.trial` set to Phase
+ *     2's actual starting reel tables (reflecting `initialWeightStrategy`) - `multiplier` and
+ *     `best` are both `null` here, nothing has been measured yet.
+ *   - `'scatter'`: one call per Phase 1 iteration, `result` is `{rtp, triggerRate, error}`.
+ *   - `'shape'`: one call per Phase 2 iteration, after each candidate is measured. `multiplier`
+ *     is always `null` here (Phase 2 moves every dimension together each iteration, so there's
+ *     no longer one scalar to report per step).
+ *   - `'restart'`: fired whenever a stalled round triggers a restart, with `result` set to
+ *     `{stepSize, restarts, stallStreak, maxStallRestarts, willStopNow}` - `multiplier` is
+ *     `null`; `best` is the best vertex found so far. Without this, a stall/restart is
+ *     invisible to a caller: the per-iteration `'shape'` log looks identical whether or not a
+ *     restart just happened underneath it.
  * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
 export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
@@ -637,6 +677,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     freeSpinsCount,
     freeSpinsAwardTable,
     retriggerFreeSpinsAwardTable,
+    hasExpandingWild,
+    initialWeightStrategy = 'provided',
     onProgress = null,
   } = options;
 
@@ -672,7 +714,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const reelStrips = buildReelStrips(reelTables);
     const config = {
       reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
-      freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable,
+      freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
     };
     let rtpSum = 0, triggerSum = 0;
     for (let i = 0; i < trialsPerPoint; i++) {
@@ -682,6 +724,57 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       triggerSum += (results.freeSpinsTriggered / results.baseSpins) * 100;
     }
     return { rtp: rtpSum / trialsPerPoint, triggerRate: triggerSum / trialsPerPoint };
+  }
+
+  // ---- Early preview: report Phase 2's chosen starting point immediately, before Phase 1 runs ----
+  // Without this, initialWeightStrategy's effect stayed invisible in a live caller (e.g. the
+  // TUNE FREQUENCIES panel) until well after Phase 1's scatter-frequency rounds finished AND
+  // Phase 2's own first Nelder-Mead iteration completed - and even then, that first reported
+  // vertex can be one of the simplex's *perturbed* corners rather than the literal sampled
+  // starting point (nelderMead sorts its initial n+1 vertices by loss before its own first
+  // onProgress call, so whichever corner happens to score lowest is reported, not necessarily
+  // vertex 0). This block independently recomputes just the starting shape - using the exact
+  // same seed formula and dims iteration order as Phase 2's own setup further below, so the
+  // sampled values agree exactly - purely to report it early; it doesn't feed into or replace
+  // Phase 2's own computation, so there's no risk of the two ever disagreeing about what the
+  // real search actually starts from.
+  if (onProgress) {
+    const previewRng = createSeededRng(searchSeed + 424242);
+    const previewSampleUniform = (min, max) => min + previewRng() * (max - min);
+    const previewSampleNormal = (min, max) => {
+      const mean = (min + max) / 2, std = (max - min) / 4;
+      const u1 = Math.max(previewRng(), Number.EPSILON), u2 = previewRng();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      return Math.min(max, Math.max(min, mean + z * std));
+    };
+    const previewTrial = baseReelTables.map(rt => JSON.parse(JSON.stringify(rt)));
+    baseReelTables.forEach((reelTable, r) => {
+      const symbolsTable = reelTable.symbols;
+      const nonScatterSymbols = Object.keys(symbolsTable).filter(s => !triggerSymbols.includes(s) && symbolsTable[s].frequency > 0);
+      const valueSymbols = nonScatterSymbols.filter(s => symbolsTable[s].fixed !== true);
+      if (valueSymbols.length === 0) return;
+      const nonScatterTotal = nonScatterSymbols.reduce((sum, s) => sum + symbolsTable[s].frequency, 0);
+      const fixedShapeTotal = nonScatterSymbols.filter(s => symbolsTable[s].fixed === true)
+        .reduce((sum, s) => sum + symbolsTable[s].frequency, 0);
+      const valueBudget = nonScatterTotal - fixedShapeTotal;
+      if (valueBudget <= 0) return;
+      const raw = {};
+      valueSymbols.forEach(s => {
+        const bounds = resolveFrequencyBounds(reelTable, s);
+        const provided = symbolsTable[s].frequency;
+        if (initialWeightStrategy === 'provided' || bounds.minFrequency == null || bounds.maxFrequency == null) {
+          raw[s] = provided;
+        } else {
+          const sampled = initialWeightStrategy === 'normal'
+            ? previewSampleNormal(bounds.minFrequency, bounds.maxFrequency)
+            : previewSampleUniform(bounds.minFrequency, bounds.maxFrequency);
+          raw[s] = Math.max(sampled, Number.MIN_VALUE);
+        }
+      });
+      const renormalized = renormalizeWeights(raw, valueBudget);
+      Object.keys(renormalized).forEach(s => { previewTrial[r].symbols[s].frequency = renormalized[s]; });
+    });
+    await onProgress('initial', 0, null, { trial: previewTrial }, null);
   }
 
   // ---- Phase 1: scale trigger symbol(s) to hit the target trigger rate ----
@@ -765,7 +858,38 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   let rtpPhaseResult = null;
 
   if (dims.length > 0) {
-    const initialPoint = dims.map(d => Math.log(currentReelTables[d.reelIndex].symbols[d.symbol].frequency));
+    // Dedicated RNG for initialWeightStrategy sampling, seeded off searchSeed like every other
+    // random part of this search - so which random starting point gets used (when the
+    // strategy isn't 'provided') stays a pure function of searchSeed, not of call order or
+    // wall-clock time.
+    const initialWeightRng = createSeededRng(searchSeed + 424242);
+    function sampleUniformFrequency(min, max) {
+      return min + initialWeightRng() * (max - min);
+    }
+    // Box-Muller transform, centered at the min/max midpoint with std = a quarter of the
+    // range (so [min, max] covers roughly the middle 95%) - clamped back into [min, max] as a
+    // backstop against the rare sample landing outside that range in either tail.
+    function sampleNormalFrequency(min, max) {
+      const mean = (min + max) / 2;
+      const std = (max - min) / 4;
+      const u1 = Math.max(initialWeightRng(), Number.EPSILON); // avoid log(0)
+      const u2 = initialWeightRng();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      return Math.min(max, Math.max(min, mean + z * std));
+    }
+    // A dimension only has a defined [min, max] to sample from once both bounds are
+    // configured (via resolveFrequencyBounds - symbol override or reel default) - one missing
+    // either bound, or the strategy being 'provided', always starts at its baseline frequency.
+    const initialPoint = dims.map(d => {
+      const provided = currentReelTables[d.reelIndex].symbols[d.symbol].frequency;
+      if (initialWeightStrategy === 'provided' || d.min == null || d.max == null) {
+        return Math.log(provided);
+      }
+      const sampled = initialWeightStrategy === 'normal'
+        ? sampleNormalFrequency(d.min, d.max)
+        : sampleUniformFrequency(d.min, d.max);
+      return Math.log(Math.max(sampled, Number.MIN_VALUE));
+    });
     // Generous per-dimension bounds (relative to that dimension's own starting frequency,
     // not a shared absolute range) - wide enough to not artificially constrain the search,
     // just enough to keep the simplex from drifting to a degenerate near-zero or runaway
@@ -981,6 +1105,14 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         restarts++;
         point = best.point;
         stepSize *= stallWidenFactor;
+        // A distinct progress event (not folded into the per-iteration 'shape' one above) so a
+        // caller can announce the restart explicitly - otherwise a stall is invisible in a live
+        // view: the per-iteration log line looks the same whether or not a restart just fired,
+        // even though the search jumped back to `best.point` with a wider step underneath it.
+        if (onProgress) {
+          await onProgress('restart', iterationsUsed, null,
+            { stepSize, restarts, stallStreak, maxStallRestarts, willStopNow: stallStreak >= maxStallRestarts }, best);
+        }
         if (stallStreak >= maxStallRestarts) {
           stalledOut = true;
           break;

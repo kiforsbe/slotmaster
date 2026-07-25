@@ -124,3 +124,41 @@ test('simulateSpins keeps simulating every base spin even after the global free-
   assert.equal(results.totalBets, 3, 'expected all 3 base spins to have been charged for, cap or no cap');
   assert.equal(results.totalSpins, 3 + 50000, 'only the first triggering base spin should consume the shared 50000 cap');
 });
+
+// A 4-reel, single-row setup where reels 1-3 are always 'star' (guaranteed 3-scatter trigger)
+// and reel 4 is always 'other' (a plain, non-scatter symbol) - since 'other' is the ONLY
+// non-scatter symbol in this paytable, it's the sole candidate checkExpandingWins' random pick
+// could ever land on, making the outcome deterministic despite the randomization inside
+// simulateSpins.
+const EXPANDING_PAYTABLE = {
+  star: { payout: [0, 0, 0], type: 'scatter', paymode: 'any', triggerFreeSpins: true },
+  other: { payout: [5, 5, 5, 5] },
+};
+const EXPANDING_CONFIG = {
+  reelsCount: 4,
+  rowsCount: 1,
+  paytable: EXPANDING_PAYTABLE,
+  reelStrips: [['star'], ['star'], ['star'], ['other']],
+  paylines: [[0, 0, 0, 0]],
+  scatterSymbol: 'star',
+  freeSpinsAwardTable: { 3: 1 }, // exactly one free spin per trigger, keeps this fast and exact
+  // Every free spin is itself a qualifying 3-scatter hit (same all-star reels as the base
+  // trigger) - without this, retriggerFreeSpinsAwardTable defaults to freeSpinsAwardTable (see
+  // its own doc), so every free spin would also retrigger, running until the safety cap rather
+  // than the single awarded spin this test is isolating.
+  retriggerFreeSpinsAwardTable: { 3: 0 },
+};
+
+test('simulateSpins never simulates expanding wilds unless hasExpandingWild is set (legacy behavior)', () => {
+  const results = simulateSpins({ ...EXPANDING_CONFIG }, 1, 1, 1);
+  const expandingWins = results.detailedWins.filter(w => w.type === 'expanding');
+  assert.equal(expandingWins.length, 0,
+    'expected no expanding wins when hasExpandingWild is omitted, even though the free spin landed a real, winning symbol on reel 4');
+});
+
+test('simulateSpins simulates an expanding wild bonus when hasExpandingWild is set', () => {
+  const results = simulateSpins({ ...EXPANDING_CONFIG, hasExpandingWild: true }, 1, 1, 1);
+  const expandingWins = results.detailedWins.filter(w => w.type === 'expanding');
+  assert.equal(expandingWins.length, 1, 'expected exactly one expanding win, from the one awarded free spin');
+  assert.equal(expandingWins[0].symbol, 'other', "expected 'other' - the only non-scatter symbol in this paytable");
+});

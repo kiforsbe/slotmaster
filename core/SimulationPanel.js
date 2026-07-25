@@ -339,7 +339,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       const opt = (value, label) => `<option value="${value}"${def === value ? ' selected' : ''}>${label}</option>`;
       return `
         <div style="display: flex; gap: 6px; align-items: flex-end;">
-          <label style="font-size: 0.8em; color: #ccc; flex: 1;">Reel ${r + 1} preference<br>
+          <label title="Which direction (if any) this reel's ordering preference pushes higher-paying vs lower-paying symbols - see the explanation below." style="font-size: 0.8em; color: #ccc; flex: 1;">Reel ${r + 1} preference<br>
             <select id="tune-bias-${r}" style="width: 100%; margin-top: 4px;">
               ${opt(1, 'High pay more frequent')}
               ${opt(-1, 'High pay rarer')}
@@ -355,32 +355,39 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
     tuneContainer.innerHTML = `
       <h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner</h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
-        <label style="font-size: 0.8em; color: #ccc;">Target RTP (%)<br>
+        <label title="The RTP percent the search tries to hit (e.g. 96 for 96%). Phase 2 stops adjusting once within its tolerance band, balanced against the Ordering/Limit/Uniformity penalties below." style="font-size: 0.8em; color: #ccc;">Target RTP (%)<br>
           <input id="tune-target-rtp" type="number" value="96" step="0.5" min="1" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Target Trigger Rate (%)<br>
+        <label title="The percent of spins that should trigger free spins - only matters if this paytable has a triggerFreeSpins: true symbol. Phase 1 scales that symbol's frequency (identically on every reel) until the measured rate lands within tolerance of this, before Phase 2 touches anything else." style="font-size: 0.8em; color: #ccc;">Target Trigger Rate (%)<br>
           <input id="tune-target-trigger" type="number" value="0.6" step="0.05" min="0.01" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Reel Length<br>
+        <label title="Virtual reel strip length used to build each candidate's reel strips - defaults to this game's own REEL_LENGTH. Longer reels let low frequencies round to more distinct symbol counts, at the cost of a slower simulation per candidate." style="font-size: 0.8em; color: #ccc;">Reel Length<br>
           <input id="tune-reel-length" type="number" value="${tuneConfig.reelLength}" step="10" min="30" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
+        <label title="How many spins are simulated to measure each candidate's RTP/trigger rate. Higher reduces Monte Carlo noise but makes every iteration slower - see also Trials Averaged." style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
           <input id="tune-trial-spins" type="number" value="300000" step="50000" min="10000" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
+        <label title="How many independent Trial Spins runs are averaged per candidate measurement. Higher further reduces noise in the RTP/trigger estimate, at a proportional cost in time (2 trials ≈ 2x the work per iteration)." style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
           <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
+        <label title="Upper bound on Nelder-Mead iterations for the joint frequency search (Phase 2). The search may stop earlier if it converges, stalls out after repeated restarts, or is already essentially resolved - see the reason reported after a run." style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
           <input id="tune-max-iterations" type="number" value="150" step="10" min="10" max="1000" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
+        <label title="How strongly each reel's ordering preference (below) is enforced as a soft penalty on the search's loss, relative to hitting Target RTP. Higher makes the search work harder to satisfy every reel's preference even at some cost to RTP accuracy." style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
           <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
-        <label style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
+        <label title="How strongly a symbol's own soft minFrequency/maxFrequency bounds (set directly in its FREQUENCY_REELn entry in game.js, not from this panel) are enforced as a penalty on the search's loss. Higher discourages the search from letting a bounded symbol drift outside its configured range." style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
           <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
         <label title="Discourages any one tunable symbol's frequency on a reel from sitting drastically far from what an equal split of that reel's budget would give it - 0 (default) is off; raise it if the search keeps producing one or two outlier symbols next to a pack of much smaller ones." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
           <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
+        <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
+          <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
+            <option value="provided" selected>Use configured baseline (default)</option>
+            <option value="uniform">Random (uniform) within min/max</option>
+            <option value="normal">Random (normal) within min/max</option>
+          </select>
         </label>
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
@@ -415,7 +422,10 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
     `;
-    tuneContainer.querySelector('#tune-start-btn').addEventListener('click', () => startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer }));
+    tuneContainer.querySelector('#tune-start-btn').addEventListener('click', () => startTuning({
+      paytable, reelFrequencyTables, tuneConfig, tuneContainer,
+      originalReelFrequencyTables: reelFrequencyTables,
+    }));
   }
 
   if (simStats) simStats.style.display = 'none';
@@ -510,7 +520,7 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
   return html;
 }
 
-async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer }) {
+async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables }) {
   const startBtn = tuneContainer.querySelector('#tune-start-btn');
   const logEl = tuneContainer.querySelector('#tune-progress-log');
   const resultsEl = tuneContainer.querySelector('#tune-results');
@@ -524,6 +534,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     orderingPenaltyWeight: tuneContainer.querySelector('#tune-ordering-weight'),
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
     uniformityPenaltyWeight: tuneContainer.querySelector('#tune-uniformity-weight'),
+    initialWeightStrategy: tuneContainer.querySelector('#tune-initial-weight-strategy'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
   const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
@@ -553,6 +564,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     freeSpinsCount: tuneConfig.freeSpinsCount,
     freeSpinsAwardTable: tuneConfig.freeSpinsAwardTable,
     retriggerFreeSpinsAwardTable: tuneConfig.retriggerFreeSpinsAwardTable,
+    hasExpandingWild: tuneConfig.hasExpandingWild,
     reelLength: parseInt(inputs.reelLength.value, 10) || tuneConfig.reelLength,
     targetRtp: parseFloat(inputs.targetRtp.value) || 96,
     targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
@@ -562,6 +574,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
     uniformityPenaltyWeight: parseFloat(inputs.uniformityPenaltyWeight.value) || 0,
+    initialWeightStrategy: inputs.initialWeightStrategy.value,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
     // strength of 0 mutes the preference the same way "No preference" does, without losing
     // the dropdown's own selection; above 1 enforces it harder than the shared Ordering
@@ -592,8 +605,41 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   };
 
   try {
+    const initialWeightStrategyLabels = {
+      provided: 'configured baseline', uniform: 'random, uniform', normal: 'random, normal',
+    };
+    // Shared by the 'initial' preview event and every 'shape' iteration - folds a candidate's
+    // trial reel tables into the running tested-range tracker and re-renders the live gauges.
+    const updateLiveTable = (trial) => {
+      trial.forEach((reelTableWrapper, reelIdx) => {
+        const symbolsTable = reelTableWrapper.symbols || reelTableWrapper;
+        const range = testedRangeByReel[reelIdx];
+        Object.keys(symbolsTable).forEach(symbol => {
+          const freq = symbolsTable[symbol].frequency;
+          const prev = range[symbol];
+          range[symbol] = prev ? { min: Math.min(prev.min, freq), max: Math.max(prev.max, freq) } : { min: freq, max: freq };
+        });
+      });
+      liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, trial, paytable);
+    };
+
     const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await runTuneFrequenciesInWorker(paytable, reelFrequencyTables, options,
       (phase, i, mult, r, best) => {
+        // Fired once, before Phase 1 even runs, with Phase 2's actual starting point (reflecting
+        // Initial Frequency Strategy) - without this the live table stayed frozen on the raw
+        // baseline all through Phase 1's scatter rounds, making the strategy look like it
+        // hadn't taken effect until well after the fact.
+        if (phase === 'initial') {
+          appendLog(`Starting point selected (${initialWeightStrategyLabels[options.initialWeightStrategy] || options.initialWeightStrategy})`);
+          if (r.trial) updateLiveTable(r.trial);
+          return;
+        }
+        // A stalled round restarting with a wider step is otherwise invisible here - the next
+        // 'shape' log line looks identical whether or not a restart just happened underneath it.
+        if (phase === 'restart') {
+          appendLog(`⚠ Round stalled - restarting with a wider step (stepSize=${r.stepSize.toFixed(4)}, stall ${r.stallStreak}/${r.maxStallRestarts} in a row, ${r.restarts} restart${r.restarts === 1 ? '' : 's'} total${r.willStopNow ? ' - giving up after this' : ''})`);
+          return;
+        }
         const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
         appendLog(`[${label}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
@@ -602,16 +648,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // search entirely, so every value symbol's frequency is still exactly its baseline
         // value during Phase 1 anyway; nothing to update yet.
         if (phase === 'shape' && r.trial) {
-          r.trial.forEach((reelTableWrapper, reelIdx) => {
-            const symbolsTable = reelTableWrapper.symbols || reelTableWrapper;
-            const range = testedRangeByReel[reelIdx];
-            Object.keys(symbolsTable).forEach(symbol => {
-              const freq = symbolsTable[symbol].frequency;
-              const prev = range[symbol];
-              range[symbol] = prev ? { min: Math.min(prev.min, freq), max: Math.max(prev.max, freq) } : { min: freq, max: freq };
-            });
-          });
-          liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, r.trial, paytable);
+          updateLiveTable(r.trial);
         }
       }
     );
@@ -720,7 +757,14 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
       html += `</tbody></table></div>`;
     });
     html += `</div>`;
-    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by replacing FREQUENCY_REEL1/2/3 in game.js and reloading, so REEL_STRIPS regenerates from the new weights.</p>`;
+    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by replacing FREQUENCY_REEL1/2/3 in game.js and reloading, so REEL_STRIPS regenerates from the new weights. Or keep refining it right here without leaving the panel:</p>`;
+
+    html += `<div style="margin: 8px 0 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                <button id="tune-continue-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.8em;">CONTINUE TUNING FROM THIS RESULT</button>
+                ${reelFrequencyTables !== originalReelFrequencyTables
+                  ? `<button id="tune-reset-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.8em; opacity: 0.75;">RESET TO ORIGINAL BASELINE</button>`
+                  : ''}
+              </div>`;
 
     html += `<div style="margin-top: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -731,6 +775,22 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
               </div>`;
 
     resultsEl.innerHTML = html;
+
+    // Re-runs startTuning with this result as the new baseline (whatever's currently in the
+    // form - Target RTP, Trial Spins, etc. - carries over untouched, since none of that is
+    // rebuilt here) - lets the user iteratively refine across multiple runs without leaving
+    // the panel to copy-paste back into game.js and reload each time.
+    resultsEl.querySelector('#tune-continue-btn').addEventListener('click', () => {
+      startTuning({ paytable, reelFrequencyTables: tunedReelTables, tuneConfig, tuneContainer, originalReelFrequencyTables });
+    });
+    // Only rendered once a run has actually diverged from the original baseline (see the html
+    // build above) - lets the user back out of a chain of continued runs without reloading.
+    const resetBtn = resultsEl.querySelector('#tune-reset-btn');
+    if (resetBtn) {
+      resetBtn.addEventListener('click', () => {
+        startTuning({ paytable, reelFrequencyTables: originalReelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables });
+      });
+    }
 
     const paytableOutput = resultsEl.querySelector('#tune-paytable-output');
     paytableOutput.value = formatReelFrequencyTablesForCopy(tunedReelTables);

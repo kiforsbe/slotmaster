@@ -36,6 +36,10 @@ test('bookbookbook RTP stays in expected band after payline-agnostic core refact
   const config = {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paytable: PAYTABLE, reelStrips,
     paylines: PAYLINES, wildSymbol: null, scatterSymbol: 'book',
+    // This game's free spins really do include an expanding wild - simulateSpins no longer
+    // assumes that by default (see its own hasExpandingWild doc), so it must be requested
+    // explicitly to mirror bookbookbook/game.js's real engine config.
+    hasExpandingWild: true,
   };
   const results = simulateSpins(config, 300000, BET_PER_LINE, LINES_COUNT);
 

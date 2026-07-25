@@ -444,3 +444,129 @@ test('tuneFrequencies uniformityPenaltyWeight defaults to off and never blocks a
   assert.equal(result.diagnostics.rtpPhase.reason, 'converged');
   assert.ok(typeof result.diagnostics.rtpPhase.uniformityPenaltyRemaining === 'number');
 });
+
+// d and e deliberately have no minFrequency/maxFrequency at all - initialWeightStrategy only
+// has a defined [min, max] range to sample from once both bounds are configured, so neither is
+// ever resampled regardless of strategy. Their post-renormalization frequencies still shift
+// alongside a/b/c's though (renormalizeWeights rescales every tunable symbol on a reel by the
+// same factor to fit the reel's fixed budget) - so "was d resampled" isn't observable from d's
+// own absolute value. What IS invariant if - and only if - neither is being resampled is their
+// *ratio* to each other (7:3), since a uniform rescale preserves ratios between the untouched
+// symbols even while it moves their absolute values. initialStepSize is tiny so every vertex in
+// the very first simplex - whichever one onProgress's first call (i===0) reports post-sort -
+// is within a hair of its unperturbed values, keeping the assertions robust regardless of which
+// vertex happens to sort first under Monte Carlo noise.
+const INITIAL_WEIGHT_PAYTABLE = {
+  a: { payout: [3] }, b: { payout: [3] }, c: { payout: [3] }, d: { payout: [3] }, e: { payout: [3] },
+};
+const INITIAL_WEIGHT_REEL_TABLES = [
+  { defaults: {}, symbols: {
+    a: { frequency: 5, minFrequency: 1, maxFrequency: 20 },
+    b: { frequency: 5, minFrequency: 1, maxFrequency: 20 },
+    c: { frequency: 5, minFrequency: 1, maxFrequency: 20 },
+    d: { frequency: 7 },
+    e: { frequency: 3 },
+  } },
+];
+const INITIAL_WEIGHT_COMMON_OPTIONS = {
+  reelsCount: 1, rowsCount: 1, paylines: [[0]],
+  reelSeeds: [11], betPerLine: 1, linesCount: 1, reelLength: 200,
+  targetRtp: 50, rtpTolerancePct: 40, trialSpins: 500, trialsPerPoint: 1,
+  maxIterations: 1, orderingBiasByReel: [0], initialStepSize: 0.0001,
+};
+
+async function captureFirstCandidate(strategy, searchSeed) {
+  let captured = null;
+  await tuneFrequencies(INITIAL_WEIGHT_PAYTABLE, INITIAL_WEIGHT_REEL_TABLES, {
+    ...INITIAL_WEIGHT_COMMON_OPTIONS,
+    initialWeightStrategy: strategy,
+    searchSeed,
+    onProgress: (phase, i, mult, r) => {
+      if (phase === 'shape' && i === 0 && !captured) captured = { ...r.trial[0].symbols };
+    },
+  });
+  return captured;
+}
+
+test('tuneFrequencies initialWeightStrategy defaults to "provided" (unchanged baseline start)', async () => {
+  const candidate = await captureFirstCandidate('provided', 7);
+  assert.ok(Math.abs(candidate.a.frequency - 5) < 0.01, `expected a to start at its baseline 5, got ${candidate.a.frequency}`);
+  assert.ok(Math.abs(candidate.d.frequency - 7) < 0.01, `expected d to start at its baseline 7, got ${candidate.d.frequency}`);
+  assert.ok(Math.abs(candidate.e.frequency - 3) < 0.01, `expected e to start at its baseline 3, got ${candidate.e.frequency}`);
+});
+
+test('tuneFrequencies initialWeightStrategy never resamples a symbol missing either bound', async () => {
+  for (const strategy of ['provided', 'uniform', 'normal']) {
+    const candidate = await captureFirstCandidate(strategy, 7);
+    const ratio = candidate.d.frequency / candidate.e.frequency;
+    assert.ok(Math.abs(ratio - 7 / 3) < 0.01,
+      `expected unbounded d:e to keep their baseline 7:3 ratio under strategy '${strategy}' (only a uniform rescale from a/b/c's resampling should move them), got ${ratio}`);
+  }
+});
+
+test('tuneFrequencies initialWeightStrategy "uniform"/"normal" sample a meaningfully different starting point than "provided"', async () => {
+  const provided = await captureFirstCandidate('provided', 7);
+  const uniform = await captureFirstCandidate('uniform', 7);
+  const normal = await captureFirstCandidate('normal', 7);
+
+  assert.ok(['a', 'b', 'c'].some(s => Math.abs(uniform[s].frequency - provided[s].frequency) > 0.1),
+    'expected "uniform" to sample a meaningfully different starting point than "provided"');
+  assert.ok(['a', 'b', 'c'].some(s => Math.abs(normal[s].frequency - provided[s].frequency) > 0.1),
+    'expected "normal" to sample a meaningfully different starting point than "provided"');
+});
+
+test('tuneFrequencies initialWeightStrategy sampling stays deterministic for a given searchSeed', async () => {
+  const first = await captureFirstCandidate('uniform', 12345);
+  const second = await captureFirstCandidate('uniform', 12345);
+  assert.deepEqual(first, second, 'expected identical searchSeed to reproduce an identical sampled starting point');
+});
+
+test('tuneFrequencies fires an "initial" onProgress event before Phase 1, with the real Phase 2 starting point', async () => {
+  const phasesSeen = [];
+  let initialTrialSymbols = null;
+  await tuneFrequencies(INITIAL_WEIGHT_PAYTABLE, INITIAL_WEIGHT_REEL_TABLES, {
+    ...INITIAL_WEIGHT_COMMON_OPTIONS,
+    initialWeightStrategy: 'uniform',
+    searchSeed: 7,
+    onProgress: (phase, i, mult, r) => {
+      phasesSeen.push(phase);
+      if (phase === 'initial') initialTrialSymbols = { ...r.trial[0].symbols };
+    },
+  });
+  assert.equal(phasesSeen[0], 'initial', `expected 'initial' to be the very first onProgress event, got order: ${phasesSeen.slice(0, 3)}`);
+  assert.ok(initialTrialSymbols, "expected the 'initial' event to carry r.trial");
+
+  // The preview must match the real search's own starting point exactly - both use the same
+  // seed formula and dims iteration order, so they should never disagree.
+  const realStart = await captureFirstCandidate('uniform', 7);
+  for (const symbol of ['a', 'b', 'c', 'd', 'e']) {
+    assert.ok(Math.abs(initialTrialSymbols[symbol].frequency - realStart[symbol].frequency) < 0.01,
+      `expected the 'initial' preview's ${symbol} to match the real search's own starting value, got preview=${initialTrialSymbols[symbol].frequency} real=${realStart[symbol].frequency}`);
+  }
+});
+
+test('tuneFrequencies fires a "restart" onProgress event when a round stalls, before giving up', async () => {
+  const restartEvents = [];
+  const opts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    // Mirrors the existing "genuinely infeasible target" test below - reliably stalls and
+    // restarts rather than converging, which is exactly the scenario this event exists for.
+    targetRtp: 100000, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 100,
+    stallWindowIterations: 8, maxStallRestarts: 3, orderingBiasByReel: [0, 0, 0],
+    onProgress: (phase, i, mult, r, best) => {
+      if (phase === 'restart') restartEvents.push(r);
+    },
+  };
+  const result = await tuneFrequencies(PAYTABLE, REEL_TABLES, opts);
+  assert.equal(result.diagnostics.rtpPhase.reason, 'stalled');
+  assert.ok(restartEvents.length > 0, 'expected at least one "restart" event to fire');
+  assert.equal(restartEvents.length, result.diagnostics.rtpPhase.restarts,
+    'expected one "restart" event per restart actually recorded in diagnostics');
+  // stepSize should be strictly growing across successive restarts (stallWidenFactor > 1).
+  for (let i = 1; i < restartEvents.length; i++) {
+    assert.ok(restartEvents[i].stepSize > restartEvents[i - 1].stepSize,
+      `expected stepSize to grow with each restart, got ${restartEvents.map(e => e.stepSize)}`);
+  }
+  assert.equal(restartEvents.at(-1).willStopNow, true, 'expected the final restart event to flag that the search is giving up');
+});
