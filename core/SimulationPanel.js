@@ -352,6 +352,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
           <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
+        <label title="Discourages any one tunable symbol's frequency on a reel from sitting drastically far from what an equal split of that reel's budget would give it - 0 (default) is off; raise it if the search keeps producing one or two outlier symbols next to a pack of much smaller ones." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
+          <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
         ${biasSelectorsHtml}
@@ -372,8 +375,13 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         below. A symbol can also carry its own soft <code>min</code>/
         <code>max</code> frequency bounds directly in its FREQUENCY_REELn entry (edit that in
         game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
-        strongly those are enforced, same soft-preference semantics. Any violation still
-        present at the end is listed below.
+        strongly those are enforced, same soft-preference semantics. Uniformity Penalty Weight
+        (off by default) is a separate, reel-wide soft preference: it discourages any one
+        tunable symbol from landing drastically far from an equal split of its reel's budget,
+        independently of ordering or of any per-symbol min/max - raise it if the search keeps
+        producing one or two outlier symbols (e.g. 1.45 next to a pack sitting at 0.02-0.065)
+        rather than a comparatively gradual spread. Any violation still present at the end is
+        listed below.
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
@@ -484,6 +492,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
     orderingPenaltyWeight: tuneContainer.querySelector('#tune-ordering-weight'),
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
+    uniformityPenaltyWeight: tuneContainer.querySelector('#tune-uniformity-weight'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
   const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
@@ -521,6 +530,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 150,
     orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
+    uniformityPenaltyWeight: parseFloat(inputs.uniformityPenaltyWeight.value) || 0,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
     // strength of 0 mutes the preference the same way "No preference" does, without losing
     // the dropdown's own selection; above 1 enforces it harder than the shared Ordering
@@ -585,6 +595,13 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     console.log('Frequency tuner diagnostics:', diagnostics);
 
     let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+
+    // Only shown when the user actually asked for uniformity to be enforced - it's a soft
+    // steer, never a pass/fail state, so this is informational only (see uniformityPenaltyWeight's
+    // own doc for why it never gates the reason banner above/below).
+    if (options.uniformityPenaltyWeight > 0 && diagnostics.rtpPhase) {
+      html += `<p style="font-size: 0.78em; color: #999; margin: 0 0 10px;">Uniformity penalty remaining: <strong>${diagnostics.rtpPhase.uniformityPenaltyRemaining.toFixed(3)}</strong> (lower means the tunable symbols on each reel ended up closer to an equal split of that reel's budget).</p>`;
+    }
 
     const targetRtp = options.targetRtp;
     const reason = diagnostics.rtpPhase?.reason;

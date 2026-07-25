@@ -401,3 +401,46 @@ test('tuneFrequencies throws if reelFrequencyTables.length does not match reelsC
     /reelFrequencyTables/
   );
 });
+
+// Fully synthetic (not fruitmachine's live/hand-tuned data) so these stay stable regardless of
+// anyone's in-progress edits elsewhere - a single reel, single payline, four value symbols that
+// all pay identically. Since every spin always lands exactly one symbol and every symbol pays
+// the same, RTP is structurally constant (500%) no matter how the frequency budget is split
+// between them - this isolates uniformityPenaltyWeight's effect on the loss entirely from RTP
+// pressure, so any reshaping toward an equal split is unambiguously the uniformity term at work.
+const UNIFORMITY_PAYTABLE = {
+  a: { payout: [5] }, b: { payout: [5] }, c: { payout: [5] }, d: { payout: [5] },
+};
+const UNIFORMITY_REEL_TABLES = [
+  { defaults: {}, symbols: { a: { frequency: 20 }, b: { frequency: 1 }, c: { frequency: 1 }, d: { frequency: 1 } } },
+];
+const UNIFORMITY_COMMON_OPTIONS = {
+  reelsCount: 1, rowsCount: 1, paylines: [[0]],
+  reelSeeds: [42], betPerLine: 1, linesCount: 1, reelLength: 200,
+  targetRtp: 500, rtpTolerancePct: 5, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 40,
+  orderingBiasByReel: [0], // isolates uniformity from the (unrelated) ordering preference entirely
+};
+
+test('tuneFrequencies pulls tunable frequencies toward an equal per-reel split when uniformityPenaltyWeight is set', async () => {
+  const withoutUniformity = await tuneFrequencies(UNIFORMITY_PAYTABLE, UNIFORMITY_REEL_TABLES, {
+    ...UNIFORMITY_COMMON_OPTIONS, uniformityPenaltyWeight: 0,
+  });
+  const withUniformity = await tuneFrequencies(UNIFORMITY_PAYTABLE, UNIFORMITY_REEL_TABLES, {
+    ...UNIFORMITY_COMMON_OPTIONS, uniformityPenaltyWeight: 5,
+  });
+
+  assert.ok(
+    withUniformity.diagnostics.rtpPhase.uniformityPenaltyRemaining < withoutUniformity.diagnostics.rtpPhase.uniformityPenaltyRemaining,
+    `expected uniformity weighting to reduce the spread - without=${withoutUniformity.diagnostics.rtpPhase.uniformityPenaltyRemaining}, with=${withUniformity.diagnostics.rtpPhase.uniformityPenaltyRemaining}`
+  );
+
+  const values = Object.values(withUniformity.reelFrequencyTables[0].symbols).map(s => s.frequency);
+  const spread = Math.max(...values) - Math.min(...values);
+  assert.ok(spread < 5, `expected the uniformity-weighted run's frequencies to land much closer together (equal share is 5.75 each), got spread=${spread} (values: ${values})`);
+});
+
+test('tuneFrequencies uniformityPenaltyWeight defaults to off and never blocks a converged reason', async () => {
+  const result = await tuneFrequencies(UNIFORMITY_PAYTABLE, UNIFORMITY_REEL_TABLES, UNIFORMITY_COMMON_OPTIONS);
+  assert.equal(result.diagnostics.rtpPhase.reason, 'converged');
+  assert.ok(typeof result.diagnostics.rtpPhase.uniformityPenaltyRemaining === 'number');
+});

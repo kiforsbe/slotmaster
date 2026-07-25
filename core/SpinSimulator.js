@@ -540,6 +540,18 @@ export async function nelderMead({
  * @param {number} [options.limitPenaltyWeight=0.5] - Weight of the soft per-symbol min/max
  *   frequency penalty (see `reelFrequencyTables`' `min`/`max` above) added to Phase 2's loss
  *   alongside RTP error and the ordering penalty - same soft-preference semantics.
+ * @param {number} [options.uniformityPenaltyWeight=0] - Weight of a soft per-reel penalty
+ *   discouraging any one tunable symbol's frequency from landing drastically far from that
+ *   reel's "equal share" (that reel's fixed value-symbol budget split evenly across every
+ *   tunable symbol on it) - e.g. one symbol ending up at 1.45 while its reel-mates sit at
+ *   0.02-0.065. Off by default (0) since it's an opt-in extra preference, not a default
+ *   assumption about what a good distribution looks like; independent of orderingPenaltyWeight
+ *   (a reel can be perfectly ordered by payout tier and still have one wildly disproportionate
+ *   symbol) and of limitPenaltyWeight (which only fires for symbols with an explicit min/max
+ *   configured, not every tunable symbol on the reel). Like the other two, always a soft
+ *   preference - it steers the search but never blocks 'converged'/'converged-with-violations'
+ *   classification (real payout-tiered reels are essentially never perfectly uniform, so
+ *   requiring this to hit exactly 0 would make 'converged' unreachable whenever it's enabled).
  * @param {number[]} [options.orderingBiasByReel] - Per-reel direction/strength for the
  *   ordering preference, indexed by reel. `-1` (the default for every reel, if omitted or if
  *   a specific reel's entry is missing) keeps today's behavior: a higher-paying symbol is
@@ -614,6 +626,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     maxIterations = 150,
     orderingPenaltyWeight = 0.5,
     limitPenaltyWeight = 0.5,
+    uniformityPenaltyWeight = 0,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchSeed = 12345,
@@ -727,6 +740,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   const fixedSymbols = []; // [{ reel, symbol }] - excluded from the search entirely (fixed: true)
   const valueBudgetByReel = [];
   const tierOfByReel = [];
+  const equalShareByReel = []; // valueBudgetByReel[r] / (tunable symbol count on reel r)
   const isFixed = (symbolsTable, s) => symbolsTable[s].fixed === true;
   currentReelTables.forEach((reelTable, r) => {
     const symbolsTable = reelTable.symbols;
@@ -740,6 +754,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
     fixedShapeSymbols.forEach(s => fixedSymbols.push({ reel: r, symbol: s }));
     if (valueSymbols.length > 0 && valueBudget > 0) {
+      equalShareByReel[r] = valueBudget / valueSymbols.length;
       valueSymbols.forEach(s => {
         const bounds = resolveFrequencyBounds(reelTable, s);
         dims.push({ reelIndex: r, symbol: s, min: bounds.minFrequency, max: bounds.maxFrequency });
@@ -834,6 +849,29 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return { total, violations };
     }
 
+    // Soft uniformity penalty: discourages any one tunable symbol's frequency on a reel from
+    // sitting drastically far from that reel's "equal share" (valueBudget split evenly across
+    // every tunable symbol on that reel) - e.g. one symbol at 1.45 while its reel-mates sit at
+    // 0.02-0.065. Deliberately measured as a *relative* deviation (how many multiples of
+    // equalShare a symbol's frequency is off by), not an absolute one, so it means the same
+    // thing on a reel whose budget is spread thin across many symbols as on one with few -
+    // and left unbounded above (no cap on how "high" a symbol can be penalized) so a single
+    // runaway outlier costs proportionally more than a handful of comparatively modest ones,
+    // matching what actually goes wrong in practice. This is independent of - and can pull in
+    // a different direction than - orderingPenaltyOf: ordering only cares that higher-paying
+    // symbols land on the correct side of lower-paying ones, not by how much, so a reel can be
+    // perfectly ordered and still have one symbol drastically more/less frequent than the rest.
+    function uniformityPenaltyOf(reelTables) {
+      let total = 0;
+      dims.forEach(({ reelIndex: r, symbol: s }) => {
+        const equalShare = equalShareByReel[r];
+        if (!(equalShare > 0)) return;
+        const freq = reelTables[r].symbols[s].frequency;
+        total += Math.abs(freq - equalShare) / equalShare;
+      });
+      return total;
+    }
+
     // Base seed for Phase 2's common-random-numbers comparability - every point evaluated
     // within one round needs to stay directly comparable. A stalled restart shifts this by a
     // large offset per restart (see the round loop below) so it explores under genuinely
@@ -850,16 +888,18 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         const measured = measure(reelTables, nmSeed);
         const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
         const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
+        const uniformityPenalty = uniformityPenaltyOf(reelTables);
         const error = Math.abs(measured.rtp - targetRtp);
         if (measured.rtp < rtpMin) rtpMin = measured.rtp;
         if (measured.rtp > rtpMax) rtpMax = measured.rtp;
         return {
-          loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty,
+          loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty,
           rtp: measured.rtp,
           triggerRate: measured.triggerRate,
           error,
           orderingPenalty: orderPenalty,
           limitPenalty: boundsPenalty,
+          uniformityPenalty,
           orderingViolations,
           limitViolations,
           trial: reelTables,
@@ -892,9 +932,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     let best = null; // best-ever vertex across all rounds, by RTP error
     let bestOrderingPenalty = Infinity;
     let bestLimitPenalty = Infinity;
+    let bestUniformityPenalty = Infinity;
     let stallStreak = 0;
     let stalledOut = false;
-    let stillImproving = { rtp: true, ordering: true, limits: true };
+    let stillImproving = { rtp: true, ordering: true, limits: true, uniformity: true };
 
     do {
       const roundIterations = Math.min(stallWindowIterations, maxIterations - iterationsUsed);
@@ -915,21 +956,24 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       const prevBestError = best ? best.error : Infinity;
       const prevBestOrdering = bestOrderingPenalty;
       const prevBestLimit = bestLimitPenalty;
+      const prevBestUniformity = bestUniformityPenalty;
 
       if (!best || nm.result.loss < best.loss) best = nm.result;
       if (nm.result.orderingPenalty < bestOrderingPenalty) bestOrderingPenalty = nm.result.orderingPenalty;
       if (nm.result.limitPenalty < bestLimitPenalty) bestLimitPenalty = nm.result.limitPenalty;
+      if (nm.result.uniformityPenalty < bestUniformityPenalty) bestUniformityPenalty = nm.result.uniformityPenalty;
 
       stillImproving = {
         rtp: improved(best.error, prevBestError),
         ordering: improved(bestOrderingPenalty, prevBestOrdering),
         limits: improved(bestLimitPenalty, prevBestLimit),
+        uniformity: improved(bestUniformityPenalty, prevBestUniformity),
       };
 
       const fullyResolved = best.error <= earlyAcceptErrorPct && bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
       if (fullyResolved) break;
 
-      if (stillImproving.rtp || stillImproving.ordering || stillImproving.limits) {
+      if (stillImproving.rtp || stillImproving.ordering || stillImproving.limits || stillImproving.uniformity) {
         stallStreak = 0;
         point = nm.point;
       } else {
@@ -962,6 +1006,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       rtpRange: { min: rtpMin, max: rtpMax },
       orderingPenaltyRemaining: bestOrderingPenalty,
       limitPenaltyRemaining: bestLimitPenalty,
+      uniformityPenaltyRemaining: bestUniformityPenalty,
       stillImproving,
       fixedSymbols,
     };
@@ -992,6 +1037,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         orderingPenaltyRemaining: rtpPhaseResult.orderingPenaltyRemaining,
         limitViolations: rtpPhaseResult.limitViolations,
         limitPenaltyRemaining: rtpPhaseResult.limitPenaltyRemaining,
+        uniformityPenaltyRemaining: rtpPhaseResult.uniformityPenaltyRemaining,
         stillImproving: rtpPhaseResult.stillImproving,
         fixedSymbols: rtpPhaseResult.fixedSymbols,
       } : null,
