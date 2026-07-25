@@ -468,6 +468,15 @@ export async function nelderMead({
  * @param {number} [options.orderingPenaltyWeight=0.5] - Weight of the soft ordering-violation
  *   penalty added to Phase 2's loss alongside RTP error - higher discourages violations more
  *   strongly, but RTP convergence always wins when the two genuinely conflict.
+ * @param {number[]} [options.orderingBiasByReel] - Per-reel direction/strength for the
+ *   ordering preference, indexed by reel. `-1` (the default for every reel, if omitted or if
+ *   a specific reel's entry is missing) keeps today's behavior: a higher-paying symbol is
+ *   discouraged from being *more* frequent than a lower-paying one on that reel. `1` reverses
+ *   it for that reel: a higher-paying symbol is discouraged from being *less* frequent than a
+ *   lower-paying one - useful for engineering a near-miss feel (e.g. reels 1 and 3 show
+ *   premium symbols often, reel 2 almost never does, so lines rarely complete despite looking
+ *   close). `0` disables the preference entirely for that reel. Any other magnitude scales
+ *   how strongly that reel's preference is enforced relative to `orderingPenaltyWeight`.
  * @param {number} [options.initialStepSize=0.5] - Log-space perturbation used to build Phase
  *   2's initial Nelder-Mead simplex.
  * @param {string[]} [options.valueOrderExcludeTypes=['wild']] - Symbol `type`s excluded from
@@ -511,11 +520,14 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     trialsPerPoint = 3,
     maxIterations = 150,
     orderingPenaltyWeight = 0.5,
+    orderingBiasByReel = null,
     initialStepSize = 0.5,
     valueOrderExcludeTypes = ['wild'],
     searchSeed = 12345,
     onProgress = null,
   } = options;
+
+  const orderingBiasFor = (r) => (orderingBiasByReel && orderingBiasByReel[r] != null) ? orderingBiasByReel[r] : -1;
 
   const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -636,19 +648,28 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return reelTables;
     }
 
-    // Soft ordering penalty: sums, per reel, how much any higher-paying symbol's frequency
-    // exceeds a lower-paying symbol's frequency on that same reel (0 if none present).
+    // Soft ordering penalty: sums, per reel, how much that reel's own preferred direction is
+    // violated for each pair of value symbols present. Direction/strength is per-reel via
+    // orderingBiasFor(r): bias -1 (default) penalizes a higher-paying symbol (a) being more
+    // frequent than a lower-paying one (b) on the same reel; bias +1 reverses that (penalizes
+    // a being *less* frequent than b instead - e.g. for a "near-miss" reel design where
+    // premium symbols should show up often but rarely align); bias 0 disables the preference
+    // for that reel. diff = bias * (freq(b) - freq(a)) unifies both directions: it's positive
+    // exactly when that reel's own preference is violated, by construction, for either sign
+    // of bias.
     function orderingPenaltyOf(reelTables) {
       let total = 0;
       const violations = [];
       dims.forEach(({ reelIndex: r, symbol: a }) => {
+        const bias = orderingBiasFor(r);
+        if (bias === 0) return;
         const tierOf = tierOfByReel[r];
         dims.forEach(({ reelIndex: r2, symbol: b }) => {
           if (r !== r2 || a === b || tierOf[a] >= tierOf[b]) return;
-          const diff = reelTables[r][a].frequency - reelTables[r][b].frequency;
+          const diff = bias * (reelTables[r][b].frequency - reelTables[r][a].frequency);
           if (diff > 0) {
             total += diff;
-            violations.push({ reel: r, higherPaySymbol: a, lowerPaySymbol: b, amount: diff });
+            violations.push({ reel: r, higherPaySymbol: a, lowerPaySymbol: b, amount: diff, bias });
           }
         });
       });

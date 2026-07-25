@@ -143,6 +143,24 @@ test('tuneFrequencies converges RTP close to target even when baseline data has 
   assert.ok(typeof diagnostics.rtpPhase.orderingViolations === 'object', 'orderingViolations must be reported (possibly empty), never omitted');
 });
 
+test('tuneFrequencies honors a per-reel reversed ordering preference (orderingBiasByReel)', async () => {
+  // bias +1 on reel index 1 reverses that reel's preference: a higher-paying symbol should
+  // end up no *less* frequent than a lower-paying one there - the opposite of the default -1
+  // behavior, useful for a "near-miss" design (premium symbols show up often on some reels,
+  // rarely on another, so lines look close but rarely land).
+  const { reelFrequencyTables, diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
+    orderingPenaltyWeight: 5, orderingBiasByReel: [-1, 1, -1],
+  });
+  const reversedReel = reelFrequencyTables[1];
+  assert.ok(reversedReel.bar.frequency >= reversedReel.cherries.frequency,
+    `expected bar (highest pay) >= cherries (lowest tier) on the bias-reversed reel, got bar=${reversedReel.bar.frequency} cherries=${reversedReel.cherries.frequency}`);
+  assert.ok(diagnostics.rtpPhase.orderingViolations.every(v => v.reel !== 1 || v.bias === 1),
+    'any violation reported on the bias-reversed reel must itself carry bias: 1');
+});
+
 test('tuneFrequencies never gives a reel-absent symbol (frequency 0) a nonzero frequency', async () => {
   const { reelFrequencyTables } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
