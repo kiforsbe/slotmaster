@@ -5,6 +5,7 @@ import { simulateSpins } from './SpinSimulator.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
 import { computeGridLayout } from './GridLayout.js';
 import { drawSpriteSymbol } from './SpriteDrawer.js';
+import { ParticleSystem } from './ParticleSystem.js';
 
 // Caps SlotEngine.spinLog's size (see its own doc) - generous for a dev-tooling export, small
 // enough that an unattended autoplay/turbo session doesn't grow memory usage without bound.
@@ -87,7 +88,7 @@ export class SlotEngine {
     this.debugMode = false;
 
     // Visual Effects
-    this.particles = [];
+    this.particleSystem = new ParticleSystem();
     this.expandedReelsState = []; // Track which reels are currently expanded [false, false, ...]
     this.expansionProgress = 0; // 0..1 for expanding animation
     this.expansionReelsToAnimate = []; // indices of reels to expand
@@ -244,13 +245,7 @@ export class SlotEngine {
     // }
 
     // Update Particles
-    this.particles = this.particles.filter(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.alpha -= p.decay;
-      p.rotation += p.vRotation;
-      return p.alpha > 0;
-    });
+    this.particleSystem.update();
 
     // Update Reels Spin Physics
     for (let r = 0; r < this.reels.length; r++) {
@@ -1178,58 +1173,21 @@ export class SlotEngine {
   }
 
   spawnWinParticles() {
-    // Limit total particles to prevent performance issues
-    const MAX_PARTICLES = 200;
-    this.particles = [];
     const totalWins = (this.expandingWinData ? this.expandingWinData.wins : this.winData.lineWins) || [];
-    
     let spots = [];
     totalWins.forEach(w => spots.push(...w.winningPositions));
     if (this.winData.scatterWin) {
       spots.push(...this.winData.scatterWin.winningPositions);
     }
-
-    // Limit number of spots to prevent too many particles
-    const maxSpots = Math.min(spots.length, Math.floor(MAX_PARTICLES / 20));
-    spots = spots.slice(0, maxSpots);
-
-    spots.forEach(([col, row]) => {
-      const cx = this.reelsX + (col * this.symbolWidth) + (this.symbolWidth / 2);
-      const cy = this.reelsY + (row * this.symbolHeight) + (this.symbolHeight / 2);
-
-      // Create 20 gold star/bubble particles per spot
-      for (let i = 0; i < 20; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const speed = 1 + Math.random() * 5;
-        this.particles.push({
-          x: cx,
-          y: cy,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - 1.5, // slightly upward force
-          size: 2 + Math.random() * 6,
-          alpha: 1.0,
-          decay: 0.015 + Math.random() * 0.02,
-          color: `hsl(${45 + Math.random() * 15}, 100%, ${50 + Math.random() * 30}%)`, // Gold gradients
-          rotation: Math.random() * Math.PI * 2,
-          vRotation: -0.1 + Math.random() * 0.2
-        });
-      }
-    });
+    const points = spots.map(([col, row]) => ({
+      x: this.reelsX + (col * this.symbolWidth) + (this.symbolWidth / 2),
+      y: this.reelsY + (row * this.symbolHeight) + (this.symbolHeight / 2),
+    }));
+    this.particleSystem.spawn(points);
   }
 
   renderParticles() {
-    this.particles.forEach(p => {
-      this.ctx.save();
-      this.ctx.globalAlpha = p.alpha;
-      this.ctx.fillStyle = p.color;
-
-      // Draw star shape or glowing circle
-      this.ctx.beginPath();
-      this.ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      this.ctx.fill();
-      
-      this.ctx.restore();
-    });
+    this.particleSystem.render(this.ctx);
   }
 
     /**
