@@ -58,79 +58,83 @@ const PAYTABLE = {
 // Phase 1 comment above tuneFrequencies() in core/SpinSimulator.js. In short, book's baseline
 // trigger rate (~0.57%) already sits inside the tuner's default target band (0.6% +/- 0.15),
 // so there's nothing for that phase to correct.
-const FREQUENCY_REEL1 = {
-  defaults: {},
+export const FREQUENCY_REEL1 = {
+  defaults: {  },
   symbols: {
     book:     { frequency: 0.051 },
-    explorer: { frequency: 0.079 },
-    tut:      { frequency: 0.157 },
-    anubis:   { frequency: 0.234 },
-    scarab:   { frequency: 0.234 },
-    ace:      { frequency: 0.201 },
-    king:     { frequency: 0.201 },
-    queen:    { frequency: 0.201 },
-    jack:     { frequency: 0.201 },
-    ten:      { frequency: 0.201 },
+    explorer: { frequency: 0.08063 },
+    tut:      { frequency: 0.1581 },
+    anubis:   { frequency: 0.2322 },
+    scarab:   { frequency: 0.2324 },
+    ace:      { frequency: 0.2028 },
+    king:     { frequency: 0.2029 },
+    queen:    { frequency: 0.2002 },
+    jack:     { frequency: 0.2 },
+    ten:      { frequency: 0.1999 },
   },
 };
-const FREQUENCY_REEL2 = {
-  defaults: {},
+
+export const FREQUENCY_REEL2 = {
+  defaults: {  },
   symbols: {
     book:     { frequency: 0.051 },
-    explorer: { frequency: 0.079 },
-    tut:      { frequency: 0.157 },
-    anubis:   { frequency: 0.234 },
-    scarab:   { frequency: 0.234 },
-    ace:      { frequency: 0.201 },
-    king:     { frequency: 0.201 },
-    queen:    { frequency: 0.201 },
-    jack:     { frequency: 0.201 },
-    ten:      { frequency: 0.201 },
+    explorer: { frequency: 0.07851 },
+    tut:      { frequency: 0.1547 },
+    anubis:   { frequency: 0.231 },
+    scarab:   { frequency: 0.2313 },
+    ace:      { frequency: 0.2027 },
+    king:     { frequency: 0.2027 },
+    queen:    { frequency: 0.2027 },
+    jack:     { frequency: 0.2027 },
+    ten:      { frequency: 0.2027 },
   },
 };
-const FREQUENCY_REEL3 = {
-  defaults: {},
+
+export const FREQUENCY_REEL3 = {
+  defaults: {  },
   symbols: {
     book:     { frequency: 0.051 },
-    explorer: { frequency: 0.079 },
-    tut:      { frequency: 0.157 },
-    anubis:   { frequency: 0.234 },
-    scarab:   { frequency: 0.234 },
-    ace:      { frequency: 0.201 },
-    king:     { frequency: 0.201 },
-    queen:    { frequency: 0.201 },
-    jack:     { frequency: 0.201 },
-    ten:      { frequency: 0.201 },
+    explorer: { frequency: 0.0798 },
+    tut:      { frequency: 0.1586 },
+    anubis:   { frequency: 0.2317 },
+    scarab:   { frequency: 0.2235 },
+    ace:      { frequency: 0.2031 },
+    king:     { frequency: 0.2031 },
+    queen:    { frequency: 0.203 },
+    jack:     { frequency: 0.2031 },
+    ten:      { frequency: 0.203 },
   },
 };
-const FREQUENCY_REEL4 = {
-  defaults: {},
+
+export const FREQUENCY_REEL4 = {
+  defaults: {  },
   symbols: {
     book:     { frequency: 0.051 },
-    explorer: { frequency: 0.079 },
-    tut:      { frequency: 0.157 },
-    anubis:   { frequency: 0.234 },
-    scarab:   { frequency: 0.234 },
-    ace:      { frequency: 0.201 },
-    king:     { frequency: 0.201 },
-    queen:    { frequency: 0.201 },
-    jack:     { frequency: 0.201 },
-    ten:      { frequency: 0.201 },
+    explorer: { frequency: 0.07716 },
+    tut:      { frequency: 0.1498 },
+    anubis:   { frequency: 0.2176 },
+    scarab:   { frequency: 0.2274 },
+    ace:      { frequency: 0.1963 },
+    king:     { frequency: 0.1963 },
+    queen:    { frequency: 0.252 },
+    jack:     { frequency: 0.1963 },
+    ten:      { frequency: 0.1963 },
   },
 };
-const FREQUENCY_REEL5 = {
-  defaults: {},
+
+export const FREQUENCY_REEL5 = {
+  defaults: {  },
   symbols: {
     book:     { frequency: 0.051 },
-    explorer: { frequency: 0.079 },
-    tut:      { frequency: 0.157 },
-    anubis:   { frequency: 0.234 },
-    scarab:   { frequency: 0.234 },
-    ace:      { frequency: 0.201 },
-    king:     { frequency: 0.201 },
-    queen:    { frequency: 0.201 },
-    jack:     { frequency: 0.201 },
-    ten:      { frequency: 0.201 },
+    explorer: { frequency: 0.07939 },
+    tut:      { frequency: 0.1547 },
+    anubis:   { frequency: 0.2314 },
+    scarab:   { frequency: 0.2343 },
+    ace:      { frequency: 0.2019 },
+    king:     { frequency: 0.2018 },
+    queen:    { frequency: 0.2019 },
+    jack:     { frequency: 0.2019 },
+    ten:      { frequency: 0.2019 },
   },
 };
 const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQUENCY_REEL4, FREQUENCY_REEL5];
@@ -140,8 +144,9 @@ const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQ
 const EXPANDING_CANDIDATES = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type !== 'scatter');
 
 // 2. Reel Strips Generation (Randomized for each reel, from each reel's own frequency table).
-// PAYTABLE is passed as the 6th arg so generateReel's scatter min-gap spacing works from the
-// real paytable's `type`, since these per-reel tables don't carry one themselves.
+// PAYTABLE is passed as the 6th arg so generateReel's default minGap spacing can read
+// PAYTABLE.book.triggerFreeSpins, since these per-reel tables don't carry that field
+// themselves (see generateReel's own doc in core/SlotMath.js).
 const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i], [], 3, PAYTABLE));
 
 // 3. UI Dom Selectors - will be initialized in load handler
