@@ -78,7 +78,10 @@ export function checkWins(grid, paytable, paylines, activeLinesCount = 10, wildS
     // Paying them again per-line would double-count. Gate on the paytable's own paymode
     // rather than the wild symbol, since a symbol can be scatter-only without being wild.
     const targetMeta = targetSymbol && paytable[targetSymbol];
-    if (targetSymbol && targetSymbol !== wildSymbol && targetMeta && targetMeta.paymode === 'line') {
+    // paymode defaults to 'any' for a scatter-typed symbol (it's paid separately below, not
+    // per-line) and 'line' otherwise - only needs to be written explicitly to override that.
+    const paymode = targetMeta && (targetMeta.paymode ?? (targetMeta.type === 'scatter' ? 'any' : 'line'));
+    if (targetSymbol && targetSymbol !== wildSymbol && targetMeta && paymode === 'line') {
       const payouts = targetMeta.payout;
       // payout[i] is the payout for (i+1) matching symbols (index 0 = 1 match, ... index 4 = 5 matches).
       if (payouts && payouts[matchCount - 1] > 0) {

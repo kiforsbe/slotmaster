@@ -154,6 +154,31 @@ test('checkWins accepts arbitrary grid shapes (3x3)', () => {
   assert.equal(result.totalLinePayoutMultiplier, 15);
 });
 
+test('checkWins pays a line win when paymode is omitted (defaults to line)', () => {
+  const grid3x3 = [
+    ['a', 'a', 'a'],
+    ['a', 'a', 'a'],
+    ['a', 'a', 'a'],
+  ];
+  const paylines3 = [[0, 0, 0], [1, 1, 1], [2, 2, 2]];
+  const paytable3 = { a: { payout: [0, 0, 5] } }; // no paymode field at all
+  const result = checkWins(grid3x3, paytable3, paylines3, 3, null, null);
+  assert.equal(result.lineWins.length, 3);
+  assert.equal(result.totalLinePayoutMultiplier, 15);
+});
+
+test('checkWins does not pay a scatter-typed symbol as a line win when paymode is omitted (defaults to any)', () => {
+  const grid3x3 = [
+    ['s', 's', 's'],
+    ['s', 's', 's'],
+    ['s', 's', 's'],
+  ];
+  const paylines3 = [[0, 0, 0], [1, 1, 1], [2, 2, 2]];
+  const paytable3 = { s: { payout: [0, 0, 10, 0, 0], type: 'scatter' } }; // no paymode field
+  const result = checkWins(grid3x3, paytable3, paylines3, 3, null, 's');
+  assert.equal(result.lineWins.length, 0, 'a scatter-typed symbol with implicit paymode "any" must not be paid as a line win');
+});
+
 test('checkWins preserves original 5-reel behavior', () => {
   const grid5x3 = [
     ['a', 'a', 'a'], ['a', 'a', 'a'], ['a', 'a', 'a'], ['a', 'a', 'a'], ['a', 'a', 'a']
