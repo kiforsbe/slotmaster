@@ -390,19 +390,18 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
   simModal.style.width = '95%';
 }
 
-// One symbol's gauge: a single horizontal track auto-scaled to fit whatever's relevant (the
-// configured soft bounds, the range actually explored so far, and the current value) - a light
-// blue band for the configured minFrequency/maxFrequency range, a brighter band for the
-// tested min/max range (the actual low/high frequency this symbol has been assigned to across
-// every candidate evaluated so far this run), and a gold tick for the current value. When only
-// one distinct value is known so far (e.g. before Phase 2 has moved anything), the scale can't
-// derive a span - the tick renders centered with no bands rather than dividing by zero.
-function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, testedMax) {
-  const values = [current, configuredMin, configuredMax, testedMin, testedMax].filter(v => v != null);
-  const scaleMin = Math.min(...values);
-  const scaleMax = Math.max(...values);
-  const span = scaleMax - scaleMin;
-  const pct = (v) => span > 0 ? ((v - scaleMin) / span) * 100 : 50;
+// One symbol's gauge: a single horizontal track, scaled 0 -> reelMax (the highest frequency
+// value seen anywhere on this symbol's own reel - configured bounds, tested range, or current
+// value, across every symbol on that reel, not just this one) so every symbol's bar on a given
+// reel is directly comparable at a glance - a symbol at 26 fills most of the track while one at
+// 1.6 is a sliver, instead of each bar independently stretching to fill its own box regardless
+// of magnitude. A light blue band for the configured minFrequency/maxFrequency range, a
+// brighter band for the tested min/max range (the actual low/high frequency this symbol has
+// been assigned to across every candidate evaluated so far this run), and a gold tick for the
+// current value. reelMax <= 0 can't derive a span (e.g. every symbol on the reel is 0) - the
+// tick renders centered with no bands rather than dividing by zero.
+function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, testedMax, reelMax) {
+  const pct = (v) => reelMax > 0 ? (v / reelMax) * 100 : 50;
 
   const configuredBand = (configuredMin != null && configuredMax != null)
     ? `<div style="position: absolute; left: ${pct(configuredMin)}%; width: ${Math.max(pct(configuredMax) - pct(configuredMin), 1)}%; top: 0; height: 100%; background: rgba(126,200,255,0.18); border-left: 1px solid rgba(126,200,255,0.5); border-right: 1px solid rgba(126,200,255,0.5);"></div>`
@@ -431,7 +430,8 @@ function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, 
 // minFrequency/maxFrequency bounds (resolved once up front - static for the whole run) and the
 // min/max it's actually been tested at so far this run (`testedRangeByReel`, updated by the
 // caller on every Phase 2 iteration - grows monotonically, never shrinks, until the next run
-// resets it).
+// resets it). Every symbol's gauge on a given reel shares that reel's own scale (0 -> the
+// highest value seen anywhere on that reel), not its own - see renderFrequencyGauge's doc.
 function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial) {
   let html = `<div style="font-size: 0.7em; color: #888; margin-bottom: 6px;">
                  <span style="color: #7ec8ff;">▮</span> configured range &nbsp;
@@ -443,12 +443,22 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
     const baseReelTable = baseReelTableWrapper.symbols || baseReelTableWrapper;
     const liveReelTable = liveTrial ? (liveTrial[reelIdx].symbols || liveTrial[reelIdx]) : null;
     const testedRange = testedRangeByReel[reelIdx];
+    // Reel-wide scale ceiling: the highest of every symbol's current/configured-max/tested-max
+    // on this reel - computed once per reel, then shared by every symbol's gauge below so bars
+    // are comparable to each other, not just internally consistent with their own min/max.
+    let reelMax = 0;
+    Object.keys(baseReelTable).forEach(symbol => {
+      const current = liveReelTable ? liveReelTable[symbol].frequency : baseReelTable[symbol].frequency;
+      const { maxFrequency } = boundsByReel[reelIdx][symbol];
+      const tested = testedRange[symbol];
+      [current, maxFrequency, tested ? tested.max : null].forEach(v => { if (v != null && v > reelMax) reelMax = v; });
+    });
     html += `<div><h4 style="margin: 0 0 4px; font-size: 0.75em; color: #aaa; text-transform: uppercase;">Reel ${reelIdx + 1}</h4>`;
     Object.keys(baseReelTable).forEach(symbol => {
       const current = liveReelTable ? liveReelTable[symbol].frequency : baseReelTable[symbol].frequency;
       const { minFrequency, maxFrequency } = boundsByReel[reelIdx][symbol];
       const tested = testedRange[symbol];
-      const gauge = renderFrequencyGauge(current, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null);
+      const gauge = renderFrequencyGauge(current, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null, reelMax);
       html += `<div style="display: grid; grid-template-columns: 66px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em;">
                   <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${symbol}</span>
                   <span style="text-align: right; color: #ddd;">${current.toFixed(3)}</span>
