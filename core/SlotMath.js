@@ -410,22 +410,43 @@ export function generateTargetGrid(reelStrips, rowsCount, rng) {
 }
 
 /**
- * Builds one weighted reel strip.
- * @param {Object} reelWeights - `{ symbol: { frequency } }` - this reel's own weights.
+ * Builds one weighted reel strip, with optional per-symbol spacing constraints.
+ *
+ * `reelWeights` is either the structured shape `{ defaults?: { minGap?, maxStack? },
+ * symbols: { symbol: { frequency, minGap?, maxStack?, ... } } }`, or a flat legacy shape
+ * (`{ symbol: { frequency, ... } }` directly, no `.symbols` wrapper) - auto-detected by the
+ * presence of a `.symbols` key. The flat shape has no way to express reel-level defaults.
+ *
+ * Two independent spacing constraints, each resolved per symbol as: symbol-level override ->
+ * reel `defaults` -> built-in fallback (`minGap: 1` / `maxStack: Infinity`, i.e.
+ * unconstrained - except a symbol with `paytable[symbol].triggerFreeSpins === true` falls
+ * back to `defaultTriggerMinGap` instead of 1, so a free-spins-triggering symbol is spaced
+ * out by default without needing to be configured):
+ *   - `minGap`: minimum circular distance enforced between any two occurrences of that
+ *     symbol on the built strip (self-spacing only - a symbol's minGap constrains its own
+ *     occurrences relative to each other, not to other symbols).
+ *   - `maxStack`: maximum run length of consecutive identical occurrences of that symbol
+ *     allowed on the built strip (circular - a run can wrap from the end to the start).
+ * Both are best-effort: a reel too dense to fully satisfy a constraint just gets as close as
+ * it can, it doesn't throw or infinite-loop.
+ *
+ * @param {Object} reelWeights - This reel's own weights (see shape above).
  * @param {number} targetLength - Desired reel strip length.
- * @param {number} seed - RNG seed for the shuffle (deterministic/reproducible).
+ * @param {number} seed - RNG seed for the shuffle and constraint repairs (deterministic).
  * @param {string[]} [exclude=[]] - Symbols to omit from this reel entirely.
- * @param {number} [minScatterGap=3] - Minimum circular distance enforced between any two
- *   `type: 'scatter'` symbols on the built strip (see _enforceMinScatterGap).
- * @param {Object} [paytable=reelWeights] - Rules table read only for `.type` (scatter min-gap
- *   spacing) - defaults to `reelWeights` itself, so a caller passing one combined
- *   frequency+type table (the pre-per-reel-frequency-model style) keeps working unchanged.
- *   A per-reel frequency table (games/*\/game.js's FREQUENCY_REELn, which carries only
- *   `.frequency`) needs the real canonical paytable passed here explicitly instead of
- *   duplicating `type: 'scatter'` onto every reel's own table.
+ * @param {number} [defaultTriggerMinGap=3] - Fallback `minGap` for a symbol with
+ *   `paytable[symbol].triggerFreeSpins === true`, when neither the symbol nor the reel's
+ *   `defaults` specify one.
+ * @param {Object} [paytable=reelWeights] - Rules table read only for `.triggerFreeSpins` -
+ *   defaults to `reelWeights` itself so a caller passing one flat combined table (frequency +
+ *   triggerFreeSpins together) keeps working unchanged. A per-reel weights table (which
+ *   carries neither) needs the real canonical paytable passed here explicitly instead.
  * @returns {string[]} The built reel strip (symbol names, length ~targetLength).
  */
-export function generateReel(reelWeights, targetLength, seed, exclude=[], minScatterGap=3, paytable=reelWeights) {
+export function generateReel(reelWeights, targetLength, seed, exclude=[], defaultTriggerMinGap=3, paytable=reelWeights) {
+  const symbolsTable = reelWeights.symbols || reelWeights;
+  const reelDefaults = reelWeights.defaults || {};
+
   function _shuffle(array, rng) {
     for (let i = array.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1));
@@ -434,23 +455,17 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], minSca
     return array;
   }
 
-  // A plain weighted shuffle can, by chance, place the same scatter symbol twice within
-  // any minScatterGap-wide window (the visible row window), which silently invalidates
-  // the intended scatter-count rarity: two "books" on one reel would let 2 reels produce
-  // a 3+ scatter hit instead of needing 3 separate reels. Spread scatter-type symbols out
-  // so at most one can ever land in the same visible window.
-  function _enforceMinScatterGap(reel, targetSymbols, minGap, rng) {
+  // A plain weighted shuffle can, by chance, place two occurrences of the same
+  // minGap-constrained symbol within `minGap` positions of each other. Spread them out so no
+  // two ever land within that circular distance.
+  function _enforceMinGap(reel, symbol, minGap, rng) {
     const n = reel.length;
-    if (n === 0 || targetSymbols.size === 0) return reel;
-    const isTarget = (s) => targetSymbols.has(s);
-    const circularDist = (a, b) => {
-      const d = Math.abs(a - b);
-      return Math.min(d, n - d);
-    };
+    if (n === 0 || minGap <= 1) return reel;
+    const circularDist = (a, b) => { const d = Math.abs(a - b); return Math.min(d, n - d); };
 
     for (let pass = 0; pass < n; pass++) {
       const positions = [];
-      for (let i = 0; i < n; i++) if (isTarget(reel[i])) positions.push(i);
+      for (let i = 0; i < n; i++) if (reel[i] === symbol) positions.push(i);
       if (positions.length <= 1) return reel;
 
       let violation = null;
@@ -466,7 +481,7 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], minSca
 
       const candidates = [];
       for (let k = 0; k < n; k++) {
-        if (isTarget(reel[k])) continue;
+        if (reel[k] === symbol) continue;
         if (violation.keep.every(p => circularDist(k, p) >= minGap)) candidates.push(k);
       }
       if (candidates.length === 0) return reel; // reel too dense to fully space out; best effort
@@ -477,14 +492,54 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], minSca
     return reel;
   }
 
+  // Caps how many times `symbol` can appear consecutively (circularly) in a row. Finds a
+  // "seam" (a position where the run breaks) to scan linearly from, since the strip wraps -
+  // if the whole reel is one symbol, there's no seam and nothing to do (best effort).
+  function _enforceMaxStack(reel, symbol, maxStack, rng) {
+    const n = reel.length;
+    if (n === 0 || maxStack >= n) return reel;
+
+    for (let pass = 0; pass < n; pass++) {
+      let seam = -1;
+      for (let i = 0; i < n; i++) {
+        if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; }
+      }
+      if (seam === -1) return reel; // entire reel is one symbol - best effort, give up
+
+      let violation = null;
+      let i = 0;
+      while (i < n) {
+        const idx = (seam + i) % n;
+        if (reel[idx] === symbol) {
+          let runLen = 1;
+          while (runLen < n && reel[(seam + i + runLen) % n] === symbol) runLen++;
+          if (runLen > maxStack) { violation = { start: i }; break; }
+          i += runLen;
+        } else {
+          i++;
+        }
+      }
+      if (!violation) return reel;
+
+      const excessIdx = (seam + violation.start + maxStack) % n;
+      const candidates = [];
+      for (let k = 0; k < n; k++) { if (reel[k] !== symbol) candidates.push(k); }
+      if (candidates.length === 0) return reel; // nothing to swap with - best effort
+
+      const swapIdx = candidates[Math.floor(rng() * candidates.length)];
+      [reel[excessIdx], reel[swapIdx]] = [reel[swapIdx], reel[excessIdx]];
+    }
+    return reel;
+  }
+
   // Step 1 & 2: Compute weights and calculate counts in one pass. An explicit
   // frequency: 0 means "never place this symbol on this reel" - excluded from `weights`
   // entirely, same as `exclude` - not defaulted to 1 (which `freq || 1` did, since 0 is
   // falsy) and not floored to a guaranteed single occurrence below.
   const weights = {};
-  for (const symbol in reelWeights) {
+  for (const symbol in symbolsTable) {
     if (exclude.includes(symbol)) continue;
-    const freq = reelWeights[symbol].frequency ?? 1;
+    const freq = symbolsTable[symbol].frequency ?? 1;
     if (freq > 0) weights[symbol] = freq;
   }
 
@@ -501,9 +556,32 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], minSca
   const rng = createSeededRng(seed);
   _shuffle(reel, rng);
 
-  // Step 5: Guarantee scatter symbols (e.g. book) can never double up inside one visible window
-  const scatterSymbols = new Set(
-    Object.keys(paytable).filter(s => !exclude.includes(s) && paytable[s].type === 'scatter')
-  );
-  return _enforceMinScatterGap(reel, scatterSymbols, minScatterGap, rng);
+  // Step 5: Apply each present symbol's own minGap/maxStack - resolved as symbol override ->
+  // reel defaults -> built-in fallback. minGap passes run first (the coarser, whole-strip
+  // constraint), then maxStack cleans up runs in the result, so a minGap swap can't undo a
+  // maxStack fix.
+  function resolveMinGap(symbol) {
+    const override = symbolsTable[symbol].minGap;
+    if (override != null) return override;
+    if (reelDefaults.minGap != null) return reelDefaults.minGap;
+    const triggersFreeSpins = paytable[symbol] && paytable[symbol].triggerFreeSpins === true;
+    return triggersFreeSpins ? defaultTriggerMinGap : 1;
+  }
+  function resolveMaxStack(symbol) {
+    const override = symbolsTable[symbol].maxStack;
+    if (override != null) return override;
+    if (reelDefaults.maxStack != null) return reelDefaults.maxStack;
+    return Infinity;
+  }
+
+  for (const symbol in weights) {
+    const gap = resolveMinGap(symbol);
+    if (gap > 1) _enforceMinGap(reel, symbol, gap, rng);
+  }
+  for (const symbol in weights) {
+    const cap = resolveMaxStack(symbol);
+    if (cap < Infinity) _enforceMaxStack(reel, symbol, cap, rng);
+  }
+
+  return reel;
 }

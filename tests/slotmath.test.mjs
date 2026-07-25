@@ -14,21 +14,19 @@ test('generateReel never places a symbol whose frequency is explicitly 0', () =>
   assert.ok(reel.includes('rare'));
 });
 
-test('generateReel reads scatter type from a separate paytable param, not the weights table', () => {
+test('generateReel spaces a triggerFreeSpins symbol by its default gap, reading paytable separately', () => {
   // Per-reel frequency tables (games/*/game.js's FREQUENCY_REELn) carry only `.frequency` -
-  // no `.type` - so generateReel's scatter min-gap spacing must come from the real paytable
-  // passed as the 6th arg, not from the weights table itself.
+  // spacing for a free-spins-triggering symbol comes from the real paytable's
+  // triggerFreeSpins flag, passed as the 6th arg, not from anything on the weights table.
   const reelWeights = {
     scatter: { frequency: 1 },
     filler:  { frequency: 30 },
   };
   const paytable = {
-    scatter: { type: 'scatter' },
-    filler:  { type: 'regular' },
+    scatter: { triggerFreeSpins: true },
+    filler:  { triggerFreeSpins: false },
   };
   const reel = generateReel(reelWeights, 60, 7, [], 3, paytable);
-  // With no `type` info in reelWeights itself, min-gap spacing only takes effect because
-  // `paytable` supplies it - verify no two scatters land within the 3-wide gap.
   const positions = reel.reduce((acc, s, i) => { if (s === 'scatter') acc.push(i); return acc; }, []);
   for (let a = 0; a < positions.length; a++) {
     for (let b = a + 1; b < positions.length; b++) {
@@ -40,11 +38,11 @@ test('generateReel reads scatter type from a separate paytable param, not the we
 });
 
 test('generateReel defaults its paytable param to the weights table itself (backward compatible)', () => {
-  // A caller passing one combined frequency+type table (the old, pre-per-reel-model style)
-  // must keep working unchanged - paytable defaults to reelWeights when omitted.
+  // A caller passing one combined frequency+triggerFreeSpins table (the old, pre-per-reel
+  // model style) must keep working unchanged - paytable defaults to reelWeights when omitted.
   const combined = {
-    scatter: { frequency: 1, type: 'scatter' },
-    filler:  { frequency: 30, type: 'regular' },
+    scatter: { frequency: 1, triggerFreeSpins: true },
+    filler:  { frequency: 30, triggerFreeSpins: false },
   };
   const reel = generateReel(combined, 60, 7);
   const positions = reel.reduce((acc, s, i) => { if (s === 'scatter') acc.push(i); return acc; }, []);
@@ -55,6 +53,91 @@ test('generateReel defaults its paytable param to the weights table itself (back
       assert.ok(circularDist >= 3, `expected scatter symbols at least 3 apart, got positions ${positions[a]} and ${positions[b]}`);
     }
   }
+});
+
+test('generateReel applies an explicit per-symbol minGap, structured shape', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      rare:   { frequency: 1, minGap: 6 },
+      filler: { frequency: 30 },
+    },
+  };
+  const reel = generateReel(reelWeights, 60, 3);
+  const positions = reel.reduce((acc, s, i) => { if (s === 'rare') acc.push(i); return acc; }, []);
+  assert.ok(positions.length > 0, 'expected "rare" to actually appear on the built reel');
+  for (let a = 0; a < positions.length; a++) {
+    for (let b = a + 1; b < positions.length; b++) {
+      const d = Math.abs(positions[a] - positions[b]);
+      const circularDist = Math.min(d, reel.length - d);
+      assert.ok(circularDist >= 6, `expected rare at least 6 apart, got ${positions[a]} and ${positions[b]}`);
+    }
+  }
+});
+
+test('generateReel applies a reel-level default minGap when a symbol does not override it', () => {
+  const reelWeights = {
+    defaults: { minGap: 5 },
+    symbols: {
+      rare:   { frequency: 1 },
+      filler: { frequency: 30 },
+    },
+  };
+  const reel = generateReel(reelWeights, 60, 3);
+  const positions = reel.reduce((acc, s, i) => { if (s === 'rare') acc.push(i); return acc; }, []);
+  assert.ok(positions.length > 0, 'expected "rare" to actually appear on the built reel');
+  for (let a = 0; a < positions.length; a++) {
+    for (let b = a + 1; b < positions.length; b++) {
+      const d = Math.abs(positions[a] - positions[b]);
+      const circularDist = Math.min(d, reel.length - d);
+      assert.ok(circularDist >= 5, `expected rare at least 5 apart (reel default), got ${positions[a]} and ${positions[b]}`);
+    }
+  }
+});
+
+test('generateReel lets a per-symbol minGap override the reel default', () => {
+  const reelWeights = {
+    defaults: { minGap: 2 },
+    symbols: {
+      rare:   { frequency: 1, minGap: 6 },
+      filler: { frequency: 30 },
+    },
+  };
+  const reel = generateReel(reelWeights, 60, 3);
+  const positions = reel.reduce((acc, s, i) => { if (s === 'rare') acc.push(i); return acc; }, []);
+  assert.ok(positions.length > 0, 'expected "rare" to actually appear on the built reel');
+  for (let a = 0; a < positions.length; a++) {
+    for (let b = a + 1; b < positions.length; b++) {
+      const d = Math.abs(positions[a] - positions[b]);
+      const circularDist = Math.min(d, reel.length - d);
+      assert.ok(circularDist >= 6, `expected rare at least 6 apart (symbol override beats reel default of 2), got ${positions[a]} and ${positions[b]}`);
+    }
+  }
+});
+
+test('generateReel caps consecutive runs of a symbol via maxStack', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      common: { frequency: 1, maxStack: 2 },
+      filler: { frequency: 1 },
+    },
+  };
+  const reel = generateReel(reelWeights, 60, 11);
+  assert.ok(reel.includes('common'), 'expected "common" to actually appear on the built reel');
+  let runLen = 0;
+  for (let i = 0; i < reel.length; i++) {
+    const prevIdx = (i - 1 + reel.length) % reel.length;
+    runLen = (reel[i] === 'common' && reel[prevIdx] === 'common') ? runLen + 1 : (reel[i] === 'common' ? 1 : 0);
+    assert.ok(runLen <= 2, `expected no run of "common" longer than 2, found a run at position ${i}`);
+  }
+});
+
+test('generateReel treats a table with no .symbols key as a flat legacy symbol map', () => {
+  const flat = { a: { frequency: 10 }, b: { frequency: 1 } };
+  const reel = generateReel(flat, 50, 5);
+  assert.ok(reel.includes('a'));
+  assert.ok(reel.includes('b'));
 });
 
 test('checkWins accepts arbitrary grid shapes (3x3)', () => {
