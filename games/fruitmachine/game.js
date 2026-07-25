@@ -182,6 +182,7 @@ async function initGame() {
     btnTune.addEventListener('click', () => {
       openTuneFrequenciesPanel({
         paytable: PAYTABLE,
+        reelFrequencyTables: [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3],
         tuneConfig: {
           reelsCount: REELS_COUNT,
           rowsCount: ROWS_COUNT,
