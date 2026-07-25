@@ -2,6 +2,11 @@
 import { checkWins, checkExpandingWins, createSeededRng, generateTargetGrid } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
+
+// Caps SlotEngine.spinLog's size (see its own doc) - generous for a dev-tooling export, small
+// enough that an unattended autoplay/turbo session doesn't grow memory usage without bound.
+const SPIN_LOG_MAX_ENTRIES = 20000;
 
 export class SlotEngine {
   constructor(canvas, config = {}) {
@@ -87,6 +92,14 @@ export class SlotEngine {
 
     // Sound engine alias
     this.audio = audio;
+
+    // Per-spin log for real (interactive) play - one entry per resolved spin, each with its
+    // own seed (unlike the batch simulateSpins() path, a live spin already generates a fresh
+    // seed every time via spin(), so it's genuinely per-spin here). Bounded so an unattended
+    // long autoplay/turbo session can't grow this unboundedly; trimmed a single entry at a
+    // time once over the cap, so the cost stays O(1) per spin rather than an O(n) shift.
+    this.spinLog = [];
+    this._pendingExpandingLogEntry = null;
 
     this.init();
   }
@@ -409,6 +422,17 @@ export class SlotEngine {
         this.freeSpinsAccumulatedWin += winAmount;
         this.lastWin = winAmount;
 
+        // Top up the spin log entry created back in evaluateSpinResult() with the expanding
+        // win, which only resolves now that its animation has finished playing out.
+        if (this._pendingExpandingLogEntry) {
+          applyExpandingWinToSpinLogEntry(this._pendingExpandingLogEntry, {
+            expandingSymbol: this.expandingSymbol,
+            expandingReels: this.expandingWinData.expandingReels.length,
+            expandingWin: winAmount
+          });
+          this._pendingExpandingLogEntry = null;
+        }
+
         audio.playWin(totalPayout);
         this.spawnWinParticles();
         this.config.onWin({ amount: winAmount, isExpanding: true });
@@ -670,6 +694,12 @@ export class SlotEngine {
       this.freeSpinsAccumulatedWin += payoutAmount;
     }
 
+    // Logged now so every resolved spin gets exactly one entry, even ones that return early
+    // below (a scatter-triggering spin never reaches the expanding check at all). If this spin
+    // does turn out to have a pending expanding win, the entry is retrieved and topped up once
+    // that resolves (see the 'expanding' branch in update()) rather than logged a second time.
+    const spinLogEntry = this._pushSpinLogEntry(results);
+
     // Trigger standard win sounds/particle highlights
     if (payoutAmount > 0) {
       this.spawnWinParticles();
@@ -698,6 +728,7 @@ export class SlotEngine {
 
       if (expandingResults) {
         this.expandingWinData = expandingResults;
+        this._pendingExpandingLogEntry = spinLogEntry;
         this.state = 'expanding';
         this.expansionProgress = 0;
         this.expansionReelsToAnimate = expandingResults.expandingReels;
@@ -729,8 +760,31 @@ export class SlotEngine {
     
     // Always handle auto-play for free spins progression
     this.handleAutoPlay();
-    
+
     this.config.onStateChange(this.state);
+  }
+
+  // Records one entry in this.spinLog for the spin that just resolved in evaluateSpinResult()
+  // (see that method's own comment for why it's called there instead of after every branch).
+  // Its expanding-win fields (if any) are filled in later, once that resolves - see
+  // applyExpandingWinToSpinLogEntry's use in update().
+  _pushSpinLogEntry(results) {
+    const isFreeSpin = this.inFreeSpins;
+    const entry = createSpinLogEntry({
+      spinIndex: this.spinLog.length + 1,
+      phase: isFreeSpin ? 'free' : 'base',
+      betPerLine: this.betPerLine,
+      linesCount: this.linesCount,
+      chargedBet: isFreeSpin ? 0 : this.totalBet,
+      scatterBetBase: this.totalBet,
+      winData: results,
+      scatterSymbol: this.config.scatterSymbol,
+      seed: this.lastSpinSeed,
+      timestamp: Date.now()
+    });
+    this.spinLog.push(entry);
+    if (this.spinLog.length > SPIN_LOG_MAX_ENTRIES) this.spinLog.shift();
+    return entry;
   }
 
   handleAutoPlay() {
@@ -1244,9 +1298,16 @@ export class SlotEngine {
    * @param {number} betPerLine - Defaults to this engine's own live betPerLine, so the
    *   simulation models exactly what the running game would actually pay, not a duplicated constant.
    * @param {number} linesCount - Defaults to this engine's own live linesCount, same reasoning.
+   * @param {Object} [options]
+   * @param {number} [options.seed] - Seeds the run for reproducibility (see createSeededRng);
+   *   omit for the legacy Math.random-driven (non-reproducible) behavior.
+   * @param {boolean} [options.logSpins=false] - Forwarded to simulateSpins' config.logSpins -
+   *   see its own doc.
    * @returns {object} The simulation results.
    */
-  runSimulation(numBaseSpins = 100000, betPerLine = this.betPerLine, linesCount = this.linesCount) {
-    return simulateSpins(this.config, numBaseSpins, betPerLine, linesCount);
+  runSimulation(numBaseSpins = 100000, betPerLine = this.betPerLine, linesCount = this.linesCount, options = {}) {
+    const { seed = null, logSpins = false } = options;
+    const rng = seed != null ? createSeededRng(seed) : Math.random;
+    return simulateSpins({ ...this.config, logSpins }, numBaseSpins, betPerLine, linesCount, rng);
   }
 }

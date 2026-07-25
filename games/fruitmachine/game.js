@@ -2,6 +2,7 @@
 import { SlotEngine } from '../../core/SlotEngine.js';
 import { generateReel, checkWildLineWins } from '../../core/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
+import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
 // frequency tuner - a single source of truth so all three actually model the same reels
@@ -119,7 +120,7 @@ export const REEL_STRIPS = [
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let displayBalance, betValue, betMinus, betPlus, gameTicker;
 let displayTotalBet, linesValue, linesMinus, linesPlus;
-let btnSim, simModal, btnCloseSim, btnTune, simStats;
+let btnSim, simModal, btnCloseSim, btnTune, simStats, btnSpinLog;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable;
 
@@ -166,6 +167,7 @@ async function initGame() {
 
   btnSim = document.getElementById('btn-sim');
   btnTune = document.getElementById('btn-tune');
+  btnSpinLog = document.getElementById('btn-spinlog');
   simModal = document.getElementById('sim-modal');
   btnCloseSim = document.getElementById('btn-close-sim');
   simStats = document.getElementById('sim-stats');
@@ -207,6 +209,11 @@ async function initGame() {
         },
         domRefs: { simModal, simStats },
       });
+    });
+  }
+  if (btnSpinLog) {
+    btnSpinLog.addEventListener('click', () => {
+      openSpinLogPanel({ engine, domRefs: { simModal, simStats } });
     });
   }
   if (btnCloseSim) {
