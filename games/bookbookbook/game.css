@@ -198,7 +198,7 @@ canvas {
 /* Glassmorphic Control Dashboard */
 .dashboard {
   display: grid;
-  grid-template-columns: 2fr 1.2fr 2fr 1fr;
+  grid-template-columns: 1.6fr 1fr 1fr 1.2fr 1.8fr 1.4fr;
   align-items: center;
   padding: 16px 24px;
   background: rgba(15, 14, 21, 0.92);

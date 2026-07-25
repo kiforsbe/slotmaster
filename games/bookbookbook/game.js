@@ -2,6 +2,7 @@
 import { SlotEngine } from '../../core/SlotEngine.js';
 import { generateReel } from '../../core/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
+import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
 // frequency tuner - a single source of truth so all three actually model the same reels
@@ -10,7 +11,9 @@ const REELS_COUNT = 5;
 const ROWS_COUNT = 3;
 const REEL_LENGTH = 500;
 const REEL_SEEDS = [1234, 567, 89, 765, 3321];
-const BET_PER_LINE = 1;
+const BET_PER_LINE = 0.10;
+const BET_PER_LINE_STEP = 0.10;
+const BET_PER_LINE_MAX = 100;
 const LINES_COUNT = 10;
 
 // Payline definitions - previously lived in core/SlotMath.js as a shared default;
@@ -159,8 +162,9 @@ const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable
 
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
-let themeSelect, displayBalance, betValue, betMinus, betPlus, gameTicker;
-let btnSim, simModal, btnCloseSim, btnTune, simStats;
+let themeSelect, displayBalance, betValue, betMinus, betPlus, gameTicker, displayTotalBet;
+let linesValue, linesMinus, linesPlus;
+let btnSim, simModal, btnCloseSim, btnTune, simStats, btnSpinLog;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable, modalFsTrigger, modalFsSummary, btnStartFs, btnCloseFsSummary;
 let fsPanel, fsCounter, fsSymbolName, fsSymbolThumbnail;
@@ -216,10 +220,15 @@ window.addEventListener('load', async () => {
   betValue = document.getElementById('bet-value');
   betMinus = document.getElementById('bet-minus');
   betPlus = document.getElementById('bet-plus');
+  displayTotalBet = document.getElementById('display-total-bet');
+  linesValue = document.getElementById('lines-value');
+  linesMinus = document.getElementById('lines-minus');
+  linesPlus = document.getElementById('lines-plus');
   gameTicker = document.getElementById('game-ticker');
 
   btnSim = document.getElementById('btn-sim');
   btnTune = document.getElementById('btn-tune');
+  btnSpinLog = document.getElementById('btn-spinlog');
   simModal = document.getElementById('sim-modal');
   btnCloseSim = document.getElementById('btn-close-sim');
   simStats = document.getElementById('sim-stats');
@@ -298,6 +307,11 @@ window.addEventListener('load', async () => {
       });
     });
   }
+  if (btnSpinLog) {
+    btnSpinLog.addEventListener('click', () => {
+      openSpinLogPanel({ engine, domRefs: { simModal, simStats } });
+    });
+  }
   if (btnCloseSim) {
     btnCloseSim.addEventListener('click', () => {
       simModal.style.display = 'none';
@@ -321,6 +335,8 @@ window.addEventListener('load', async () => {
     scatterSymbol: 'book',
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
+    betPerLine: BET_PER_LINE,
+    linesCount: LINES_COUNT,
     // Read by engine.runSimulation() (-> simulateSpins) so RUN SIMULATION matches this game's
     // real retrigger schedule instead of assuming no retriggers at all.
     retriggerFreeSpinsAwardTable: RETRIGGER_FREE_SPINS_AWARD,
@@ -343,7 +359,9 @@ window.addEventListener('load', async () => {
 function updateUI() {
   if (!engine) return;
   displayBalance.textContent = `$${engine.balance.toFixed(0)}`;
-  betValue.textContent = engine.betPerLine;
+  betValue.textContent = engine.betPerLine.toFixed(2);
+  linesValue.textContent = `${engine.linesCount} / ${LINES_COUNT}`;
+  displayTotalBet.textContent = `$${engine.totalBet.toFixed(2)}`;
 }
 
 // 6. Handle state changes from the engine
@@ -566,8 +584,9 @@ function setupUIHandlers() {
   // Bet adjustments
   betMinus.addEventListener('click', () => {
     if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
-    if (engine.betPerLine > 1) {
-      engine.betPerLine--;
+    if (engine.betPerLine > BET_PER_LINE_STEP + 1e-9) {
+      // Round to 2dp - repeated 0.10 steps otherwise drift (e.g. 0.6000000000000001).
+      engine.betPerLine = Math.round((engine.betPerLine - BET_PER_LINE_STEP) * 100) / 100;
       engine.updateBet();
       updateUI();
     }
@@ -575,10 +594,31 @@ function setupUIHandlers() {
 
   betPlus.addEventListener('click', () => {
     if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
-    const newBetPerLine = engine.betPerLine + 1;
+    const newBetPerLine = Math.round((engine.betPerLine + BET_PER_LINE_STEP) * 100) / 100;
     const newTotalBet = newBetPerLine * engine.linesCount;
-    if (newBetPerLine <= 100 && engine.balance >= newTotalBet) {
+    if (newBetPerLine <= BET_PER_LINE_MAX + 1e-9 && engine.balance >= newTotalBet) {
       engine.betPerLine = newBetPerLine;
+      engine.updateBet();
+      updateUI();
+    }
+  });
+
+  // Lines adjustments
+  linesMinus.addEventListener('click', () => {
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
+    if (engine.linesCount > 1) {
+      engine.linesCount--;
+      engine.updateBet();
+      updateUI();
+    }
+  });
+
+  linesPlus.addEventListener('click', () => {
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
+    const newLinesCount = engine.linesCount + 1;
+    const newTotalBet = engine.betPerLine * newLinesCount;
+    if (newLinesCount <= LINES_COUNT && engine.balance >= newTotalBet) {
+      engine.linesCount = newLinesCount;
       engine.updateBet();
       updateUI();
     }
