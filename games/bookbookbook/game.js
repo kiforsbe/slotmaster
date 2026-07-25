@@ -143,6 +143,14 @@ const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQ
 // isn't a scatter (scatter symbols trigger free spins, they can't also expand during them).
 const EXPANDING_CANDIDATES = Object.keys(PAYTABLE).filter(s => PAYTABLE[s].type !== 'scatter');
 
+// Extra free spins awarded by a retrigger (2+ scatters landing during an active free-spins
+// round), by scatter count - unlike barfruits, the INITIAL trigger always awards a flat 10
+// regardless of scatter count (see startFreeSpins below); only a retrigger's award scales
+// with how many scatters landed. The `2` entry is presently unreachable in real play (checkWins'
+// default scatterTriggerCount of 3 means book never actually produces a scatterWin at exactly
+// 2), kept here anyway to document the intended schedule rather than silently drop it.
+const RETRIGGER_FREE_SPINS_AWARD = { 2: 5, 3: 10, 4: 15, 5: 20 };
+
 // 2. Reel Strips Generation (Randomized for each reel, from each reel's own frequency table).
 // PAYTABLE is passed as the 6th arg so generateReel's default minGap spacing can read
 // PAYTABLE.book.triggerFreeSpins, since these per-reel tables don't carry that field
@@ -274,6 +282,11 @@ window.addEventListener('load', async () => {
           betPerLine: BET_PER_LINE,
           linesCount: LINES_COUNT,
           reelLength: REEL_LENGTH,
+          // freeSpinsAwardTable is deliberately omitted - the initial trigger always awards a
+          // flat 10 (see startFreeSpins), which is simulateSpins' own default when no table is
+          // given. Retriggers scale by scatter count instead (RETRIGGER_FREE_SPINS_AWARD) -
+          // without this, tuned RTP estimates missed the retrigger mechanic entirely.
+          retriggerFreeSpinsAwardTable: RETRIGGER_FREE_SPINS_AWARD,
         },
         domRefs: { simModal, simStats },
       });
@@ -302,6 +315,9 @@ window.addEventListener('load', async () => {
     scatterSymbol: 'book',
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
+    // Read by engine.runSimulation() (-> simulateSpins) so RUN SIMULATION matches this game's
+    // real retrigger schedule instead of assuming no retriggers at all.
+    retriggerFreeSpinsAwardTable: RETRIGGER_FREE_SPINS_AWARD,
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
@@ -499,9 +515,7 @@ function handleFreeSpinsComplete() {
 }
 
 function handleScatterRetrigger(scatterCount) {
-  // Add extra spins based on scatter count: 2->5, 3->10, 4->15, 5->20
-  const extraSpins = { 2: 5, 3: 10, 4: 15, 5: 20 };
-  const added = extraSpins[scatterCount] || (scatterCount * 5);
+  const added = RETRIGGER_FREE_SPINS_AWARD[scatterCount] || (scatterCount * 5);
   
   engine.freeSpinsTotal += added;
   engine.freeSpinsRemaining += added;

@@ -60,7 +60,7 @@ export const PAYTABLE = {
 // symbol that needs spacing/stacking constraints); a symbol can override either under its
 // own entry in `symbols`. Note that REEL_1 does not contain the star or strawberry symbols.
 export const FREQUENCY_REEL1 = {
-  defaults: {  },
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
     bar:        { frequency: 26.26 },
     clover:     { frequency: 20.85 },
@@ -70,13 +70,13 @@ export const FREQUENCY_REEL1 = {
     plum:       { frequency: 9.099 },
     orange:     { frequency: 3.357 },
     cherries:   { frequency: 3.475 },
-    star:       { frequency: 0, fixed: true },
-    strawberry: { frequency: 0, fixed: true },
+    star:       { frequency: 0, fixed: true, minFrequency: 0, maxFrequency: 0 },
+    strawberry: { frequency: 0, fixed: true, minFrequency: 0, maxFrequency: 0 },
   },
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: {  },
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
     bar:        { frequency: 8.69 },
     clover:     { frequency: 9.966 },
@@ -86,13 +86,13 @@ export const FREQUENCY_REEL2 = {
     plum:       { frequency: 12.74 },
     orange:     { frequency: 14.32 },
     cherries:   { frequency: 16.01 },
-    star:       { frequency: 0, fixed: true },
-    strawberry: { frequency: 0, fixed: true },
+    star:       { frequency: 0, fixed: true, minFrequency: 0, maxFrequency: 0 },
+    strawberry: { frequency: 0, fixed: true, minFrequency: 0, maxFrequency: 0 },
   },
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: {  },
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
     bar:        { frequency: 25.23 },
     clover:     { frequency: 13.33 },
@@ -102,8 +102,8 @@ export const FREQUENCY_REEL3 = {
     plum:       { frequency: 9.079 },
     orange:     { frequency: 4.235 },
     cherries:   { frequency: 3.401 },
-    star:       { frequency: 29.17, minGap: 3, maxStack: 1, minFrequency: 20, maxFrequency: 30 },
-    strawberry: { frequency: 5.813, minGap: 3, maxStack: 1, minFrequency: 2, maxFrequency: 6 },
+    star:       { frequency: 29.17, minGap: 3, maxStack: 1, minFrequency: 1, maxFrequency: 30 },
+    strawberry: { frequency: 5.813, minGap: 3, maxStack: 1, minFrequency: 1, maxFrequency: 6 },
   },
 };
 

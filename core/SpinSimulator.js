@@ -7,6 +7,19 @@ import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, create
 /**
  * Simulates multiple spins and returns statistical analysis.
  * @param {Object} config - Slot machine configuration with reelStrips, paytable, etc.
+ * @param {number} [config.freeSpinsCount=10] - Flat number of free spins awarded per trigger,
+ *   used whenever the triggering scatter count isn't found in `freeSpinsAwardTable` (or that
+ *   table is omitted entirely).
+ * @param {Object} [config.freeSpinsAwardTable] - Optional `{ scatterCount: awardedSpins }` map
+ *   for the free-spins award granted by a BASE-game trigger, mirroring a real game's own award
+ *   schedule (e.g. `{ 3: 10, 4: 15, 5: 20 }`). Falls back to `freeSpinsCount` for any count not
+ *   listed.
+ * @param {Object} [config.retriggerFreeSpinsAwardTable] - Same shape, for a qualifying scatter
+ *   hit landing DURING an active free-spins round (a retrigger). Defaults to
+ *   `freeSpinsAwardTable` when omitted. Its mere presence (directly or via that default) is
+ *   what enables retrigger simulation at all - if neither table is set, free spins run for
+ *   exactly `freeSpinsCount` spins with no retriggers, matching this function's original
+ *   behavior exactly.
  * @param {number} numBaseSpins - Number of base spins to simulate (default 100000)
  * @param {number} betPerLine - Bet per line (default 1)
  * @param {number} linesCount - Number of active paylines (default 10)
@@ -45,14 +58,38 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
 
   // Get configuration values with defaults
   const freeSpinsCount = simConfig.freeSpinsCount || 10;
+  // Optional { scatterCount: awardedSpins } lookups mirroring a real game's own award
+  // schedule (e.g. barfruits' FREQUENCY_REEL-adjacent FREE_SPINS_AWARD = {3:10, 4:15, 5:20}).
+  // Absent -> awardFor() falls back to the flat freeSpinsCount above, unchanged from before
+  // these existed. retriggerFreeSpinsAwardTable additionally defaults to freeSpinsAwardTable
+  // when only one is given, since most games use the same schedule for both; its mere
+  // presence is what turns retrigger simulation on at all (see supportsRetrigger below) - a
+  // config that sets neither table keeps the exact old behavior (flat freeSpinsCount spins,
+  // no retriggers), so this is purely additive for any existing caller.
+  const freeSpinsAwardTable = simConfig.freeSpinsAwardTable || null;
+  const retriggerFreeSpinsAwardTable = simConfig.retriggerFreeSpinsAwardTable || freeSpinsAwardTable;
+  const supportsRetrigger = retriggerFreeSpinsAwardTable != null;
+  const awardFor = (table, count) => (table && table[count] != null) ? table[count] : freeSpinsCount;
+  // Bounds the TOTAL free spins run across the whole call, not just one chain - a per-chain-only
+  // cap still allows worst-case total work of numBaseSpins * cap, which for a candidate/baseline
+  // with an extremely high trigger+retrigger rate (very plausible mid-search, before Phase 1 has
+  // scaled anything down yet, or simply while a game's frequencies are still being hand-tuned)
+  // could take impractically long even though each individual chain is itself bounded. Scaling
+  // with numBaseSpins keeps a larger requested simulation proportionally better sampled while
+  // still keeping worst-case runtime roughly O(numBaseSpins) regardless of how pathological the
+  // configured frequencies are.
+  const FREE_SPINS_GLOBAL_CAP = Math.max(numBaseSpins * 20, 50000);
+  let totalFreeSpinsRun = 0;
   let expandingSymbol = simConfig.expandingSymbol || 'anubis';
 
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
     const result = _runSingleSpin(false);
-    
-    // If free spins were triggered by this base spin, simulate them
-    if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins) {
+
+    // If free spins were triggered by this base spin, simulate them (unless the global free
+    // spins budget is already exhausted - base spins keep running either way, so the base-game
+    // RTP/trigger-rate signal stays representative even once free-spin payouts are truncated).
+    if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins && totalFreeSpinsRun < FREE_SPINS_GLOBAL_CAP) {
       // Randomize the expanding symbol for each new free spin session.
       // Scatter symbols (e.g. book) can never be the expanding symbol - derive
       // eligibility from the paytable's own type rather than hardcoding a symbol name.
@@ -62,8 +99,18 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
         ? eligibleSymbols[Math.floor(rng() * eligibleSymbols.length)]
         : expandingSymbol;
 
-      for (let j = 0; j < freeSpinsCount; j++) {
-        _runSingleSpin(true); // _runSingleSpin accumulates into results internally
+      // A real free-spins round can retrigger itself (another qualifying scatter hit during
+      // the bonus adds more spins on top, same as the live engine's retriggerFreeSpins) - the
+      // remaining-spins count grows as the loop runs rather than being fixed up front.
+      let freeSpinsRemaining = awardFor(freeSpinsAwardTable, result.winData.scatterWin.count);
+      let freeSpinsRun = 0;
+      while (freeSpinsRun < freeSpinsRemaining && totalFreeSpinsRun < FREE_SPINS_GLOBAL_CAP) {
+        const fsResult = _runSingleSpin(true); // _runSingleSpin accumulates into results internally
+        freeSpinsRun++;
+        totalFreeSpinsRun++;
+        if (supportsRetrigger && fsResult.winData.scatterWin && fsResult.winData.scatterWin.triggerFreeSpins) {
+          freeSpinsRemaining += awardFor(retriggerFreeSpinsAwardTable, fsResult.winData.scatterWin.count);
+        }
       }
     }
   }
@@ -519,6 +566,17 @@ export async function nelderMead({
  * @param {number} [options.earlyAcceptErrorPct=0.01] - RTP error threshold (in percentage
  *   points) below which Phase 2 stops immediately if ordering/limit violations are also fully
  *   resolved - no reason to spend more budget refining an already-essentially-exact result.
+ * @param {number} [options.freeSpinsCount] - Passed straight through to simulateSpins as
+ *   `config.freeSpinsCount` - see its own doc. Only matters if `paytable` has a
+ *   `triggerFreeSpins: true` symbol.
+ * @param {Object} [options.freeSpinsAwardTable] - Passed straight through to simulateSpins as
+ *   `config.freeSpinsAwardTable` (the real game's own scatter-count -> awarded-spins schedule)
+ *   so a measured candidate's RTP reflects the same free-spins economics the live game actually
+ *   awards, not a flat guess.
+ * @param {Object} [options.retriggerFreeSpinsAwardTable] - Passed straight through to
+ *   simulateSpins as `config.retriggerFreeSpinsAwardTable` - omitting both this and
+ *   `freeSpinsAwardTable` measures with no retriggers at all, which understates RTP for any
+ *   game whose live engine does support retriggering.
  * @param {(phase: 'scatter'|'shape', iteration: number, multiplier: number|null, result: {rtp: number, triggerRate: number, error: number}, best: Object) => (void|Promise<void>)} [options.onProgress] -
  *   Called (and awaited, if it returns a promise) after each candidate is measured.
  *   `multiplier` is always `null` during phase 'shape' (Phase 2 moves every dimension
@@ -563,6 +621,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     stallWidenFactor = 1.5,
     maxStallRestarts = 4,
     earlyAcceptErrorPct = 0.01,
+    freeSpinsCount,
+    freeSpinsAwardTable,
+    retriggerFreeSpinsAwardTable,
     onProgress = null,
   } = options;
 
@@ -580,8 +641,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   function buildReelStrips(reelTables) {
     // paytable (this function's outer `paytable` param, the real canonical rules table) is
     // passed as the 6th arg so generateReel's scatter min-gap spacing works correctly even
-    // though these per-reel tables carry only `.frequency`, never `.type`.
-    return reelTables.map((rt, i) => generateReel(rt, reelLength, reelSeeds[i % reelSeeds.length] + i * 100000, [], 3, paytable));
+    // though these per-reel tables carry only `.frequency`, never `.type`. Seeded identically
+    // to how every game.js itself builds its production REEL_STRIPS (generateReel(rt,
+    // reelLength, reelSeeds[i], ...), no extra offset) - a mismatched seed here would tune
+    // against a reel arrangement that's never actually the one built and shipped, which
+    // previously made a candidate's measured RTP a (small but real) misprediction of what
+    // pasting the same frequencies back into game.js would actually produce.
+    return reelTables.map((rt, i) => generateReel(rt, reelLength, reelSeeds[i % reelSeeds.length], [], 3, paytable));
   }
 
   // rngSeed is optional - omitted, this falls back to unseeded Math.random per trial (via
@@ -591,7 +657,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // finite difference relies on.
   function measure(reelTables, rngSeed) {
     const reelStrips = buildReelStrips(reelTables);
-    const config = { reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol };
+    const config = {
+      reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
+      freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable,
+    };
     let rtpSum = 0, triggerSum = 0;
     for (let i = 0; i < trialsPerPoint; i++) {
       const rng = rngSeed != null ? createSeededRng(rngSeed + i * 104729) : Math.random;

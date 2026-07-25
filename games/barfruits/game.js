@@ -37,17 +37,17 @@ export const PAYLINES = [
 // payout[i] is the payout for (i+1) matching symbols, left-to-right from reel 1 (index 0/1
 // unused here - nothing pays on 1 or 2 of a kind in this paytable).
 export const PAYTABLE = {
-  bar_triple: { payout: [0, 0, 100, 500, 2000], type: 'premium', friendlyName: 'Triple Bar' },
-  bar_double: { payout: [0, 0,  50, 200,  750], type: 'premium', friendlyName: 'Double Bar' },
-  bar:        { payout: [0, 0,  30, 100,  400], type: 'premium', friendlyName: 'Single Bar' },
-  bell:       { payout: [0, 0,  20,  60,  200], type: 'premium', friendlyName: 'Golden Bell' },
-  clover:     { payout: [0, 0,  15,  50,  150], type: 'premium', friendlyName: 'Lucky Clover' },
-  strawberry: { payout: [0, 0,  10,  30,  100], type: 'regular', friendlyName: 'Strawberry' },
-  plum:       { payout: [0, 0,   8,  25,   80], type: 'regular', friendlyName: 'Plum' },
-  grapes:     { payout: [0, 0,   6,  20,   60], type: 'regular', friendlyName: 'Grapes' },
-  orange:     { payout: [0, 0,   5,  15,   50], type: 'regular', friendlyName: 'Orange' },
-  melon:      { payout: [0, 0,   4,  12,   40], type: 'regular', friendlyName: 'Watermelon' },
-  star:       { payout: [0, 0,   2,  10,   50], type: 'scatter', paymode: 'any', wild: false, triggerFreeSpins: true, friendlyName: 'Star' },
+  bar_triple: { payout: [0, 0, 30, 300, 1200], type: 'premium', friendlyName: 'Triple Bar' },
+  bar_double: { payout: [0, 0, 20, 400,  800], type: 'premium', friendlyName: 'Double Bar' },
+  bar:        { payout: [0, 0, 10, 200,  400], type: 'premium', friendlyName: 'Single Bar' },
+  bell:       { payout: [0, 0, 20,  40,  200], type: 'premium', friendlyName: 'Golden Bell' },
+  clover:     { payout: [0, 0, 15,  50,  150], type: 'premium', friendlyName: 'Lucky Clover' },
+  strawberry: { payout: [0, 0, 10,  30,  100], type: 'regular', friendlyName: 'Strawberry' },
+  plum:       { payout: [0, 0,  8,  25,   80], type: 'regular', friendlyName: 'Plum' },
+  grapes:     { payout: [0, 0,  6,  20,   60], type: 'regular', friendlyName: 'Grapes' },
+  orange:     { payout: [0, 0,  5,  15,   50], type: 'regular', friendlyName: 'Orange' },
+  melon:      { payout: [0, 0,  4,  12,   40], type: 'regular', friendlyName: 'Watermelon' },
+  star:       { payout: [0, 8, 20,  40,  800], type: 'scatter', paymode: 'any', wild: false, triggerFreeSpins: true, friendlyName: 'Star' },
 };
 
 // Frequency tables for each reel. All five reels start out identical (same pattern as
@@ -60,87 +60,87 @@ export const PAYTABLE = {
 // explicitly so it stays correct if ROWS_COUNT ever changes. `maxStack: 1` additionally
 // guarantees it never repeats back-to-back on the strip.
 export const FREQUENCY_REEL1 = {
-  defaults: {},
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
-    bar_triple: { frequency: 0.4 },
-    bar_double: { frequency: 0.7 },
-    bar:        { frequency: 1.3 },
-    bell:       { frequency: 1.8 },
-    clover:     { frequency: 2.5 },
-    strawberry: { frequency: 5 },
-    plum:       { frequency: 6 },
-    grapes:     { frequency: 7 },
-    orange:     { frequency: 8 },
-    melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
+    bar_triple: { frequency: 5.00 },
+    bar_double: { frequency: 5.00 },
+    bar:        { frequency: 5.00 },
+    bell:       { frequency: 5.00 },
+    clover:     { frequency: 5.00 },
+    strawberry: { frequency: 5.00 },
+    plum:       { frequency: 5.00 },
+    grapes:     { frequency: 5.00 },
+    orange:     { frequency: 5.00 },
+    melon:      { frequency: 5.00 },
+    star:       { frequency: 5.00, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: {},
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
-    bar_triple: { frequency: 0.4 },
-    bar_double: { frequency: 0.7 },
-    bar:        { frequency: 1.3 },
-    bell:       { frequency: 1.8 },
-    clover:     { frequency: 2.5 },
-    strawberry: { frequency: 5 },
-    plum:       { frequency: 6 },
-    grapes:     { frequency: 7 },
-    orange:     { frequency: 8 },
-    melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
+    bar_triple: { frequency: 5.00 },
+    bar_double: { frequency: 5.00 },
+    bar:        { frequency: 5.00 },
+    bell:       { frequency: 5.00 },
+    clover:     { frequency: 5.00 },
+    strawberry: { frequency: 5.00 },
+    plum:       { frequency: 5.00 },
+    grapes:     { frequency: 5.00 },
+    orange:     { frequency: 5.00 },
+    melon:      { frequency: 5.00 },
+    star:       { frequency: 5.00, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: {},
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
-    bar_triple: { frequency: 0.4 },
-    bar_double: { frequency: 0.7 },
-    bar:        { frequency: 1.3 },
-    bell:       { frequency: 1.8 },
-    clover:     { frequency: 2.5 },
-    strawberry: { frequency: 5 },
-    plum:       { frequency: 6 },
-    grapes:     { frequency: 7 },
-    orange:     { frequency: 8 },
-    melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
+    bar_triple: { frequency: 5.00 },
+    bar_double: { frequency: 5.00 },
+    bar:        { frequency: 5.00 },
+    bell:       { frequency: 5.00 },
+    clover:     { frequency: 5.00 },
+    strawberry: { frequency: 5.00 },
+    plum:       { frequency: 5.00 },
+    grapes:     { frequency: 5.00 },
+    orange:     { frequency: 5.00 },
+    melon:      { frequency: 5.00 },
+    star:       { frequency: 5.00, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL4 = {
-  defaults: {},
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
-    bar_triple: { frequency: 0.4 },
-    bar_double: { frequency: 0.7 },
-    bar:        { frequency: 1.3 },
-    bell:       { frequency: 1.8 },
-    clover:     { frequency: 2.5 },
-    strawberry: { frequency: 5 },
-    plum:       { frequency: 6 },
-    grapes:     { frequency: 7 },
-    orange:     { frequency: 8 },
-    melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
+    bar_triple: { frequency: 5.00 },
+    bar_double: { frequency: 5.00 },
+    bar:        { frequency: 5.00 },
+    bell:       { frequency: 5.00 },
+    clover:     { frequency: 5.00 },
+    strawberry: { frequency: 5.00 },
+    plum:       { frequency: 5.00 },
+    grapes:     { frequency: 5.00 },
+    orange:     { frequency: 5.00 },
+    melon:      { frequency: 5.00 },
+    star:       { frequency: 5.00, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL5 = {
-  defaults: {},
+  defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
-    bar_triple: { frequency: 0.4 },
-    bar_double: { frequency: 0.7 },
-    bar:        { frequency: 1.3 },
-    bell:       { frequency: 1.8 },
-    clover:     { frequency: 2.5 },
-    strawberry: { frequency: 5 },
-    plum:       { frequency: 6 },
-    grapes:     { frequency: 7 },
-    orange:     { frequency: 8 },
-    melon:      { frequency: 9 },
-    star:       { frequency: 0.6, minGap: 3, maxStack: 1 },
+    bar_triple: { frequency: 5.00 },
+    bar_double: { frequency: 5.00 },
+    bar:        { frequency: 5.00 },
+    bell:       { frequency: 5.00 },
+    clover:     { frequency: 5.00 },
+    strawberry: { frequency: 5.00 },
+    plum:       { frequency: 5.00 },
+    grapes:     { frequency: 5.00 },
+    orange:     { frequency: 5.00 },
+    melon:      { frequency: 5.00 },
+    star:       { frequency: 5.00, minGap: 3, maxStack: 1 },
   },
 };
 
@@ -273,6 +273,13 @@ async function initGame() {
           betPerLine: BET_PER_LINE,
           linesCount: LINES_COUNT,
           reelLength: REEL_LENGTH,
+          // Same award schedule real play uses for both the initial trigger and any
+          // retrigger (see FREE_SPINS_AWARD above) - without this, tuned RTP estimates were
+          // missing the entire retrigger mechanic and always assumed a flat 10-spin award
+          // (undercounting 4/5-scatter triggers), which is why a tune's reported RTP could
+          // land noticeably lower than what running the real award schedule actually pays out.
+          freeSpinsAwardTable: FREE_SPINS_AWARD,
+          retriggerFreeSpinsAwardTable: FREE_SPINS_AWARD,
         },
         domRefs: { simModal, simStats },
       });
@@ -303,6 +310,11 @@ async function initGame() {
     spritesheetUrl: themeAssets.spritesheetUrl,
     betPerLine: BET_PER_LINE,
     linesCount: LINES_COUNT,
+    // Read by engine.runSimulation() (-> simulateSpins) so the RUN SIMULATION dev tool
+    // matches this game's real award schedule (see FREE_SPINS_AWARD above) instead of the
+    // simulator's generic flat-10-no-retrigger default.
+    freeSpinsAwardTable: FREE_SPINS_AWARD,
+    retriggerFreeSpinsAwardTable: FREE_SPINS_AWARD,
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),

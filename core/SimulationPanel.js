@@ -1,10 +1,45 @@
 // Shared RUN SIMULATION / TUNE FREQUENCIES dev-tooling UI, built on top of
 // core/SpinSimulator.js's pure simulateSpins/tuneFrequencies functions.
 // Every game's game.js calls into this instead of maintaining its own copy.
-import { tuneFrequencies } from './SpinSimulator.js';
 import { resolveFrequencyBounds } from './SlotMath.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+/**
+ * Runs tuneFrequencies() in a dedicated Worker (core/tuneFrequenciesWorker.js) instead of on
+ * this thread, so the potentially long Monte Carlo search never blocks page rendering/input -
+ * see that worker file's own comment for why. `paytable`/`reelFrequencyTables`/`options` are
+ * postMessage'd across, so they must be structured-cloneable (no functions - `onProgress` is
+ * kept on this side and invoked locally as messages arrive).
+ * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
+ */
+function runTuneFrequenciesInWorker(paytable, reelFrequencyTables, options, onProgress) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL('./tuneFrequenciesWorker.js', import.meta.url), { type: 'module' });
+    // winEvaluator (a function, e.g. checkWildLineWins) can't cross postMessage - send its
+    // name instead, resolved back to the real function inside the worker (see its own
+    // WIN_EVALUATORS table). Everything else in `options` is already plain data.
+    const { onProgress: _ignored, winEvaluator, ...cloneableOptions } = options;
+    cloneableOptions.winEvaluatorName = winEvaluator ? winEvaluator.name : null;
+    worker.onmessage = (event) => {
+      const msg = event.data;
+      if (msg.type === 'progress') {
+        onProgress(msg.phase, msg.i, msg.mult, msg.result, msg.best);
+      } else if (msg.type === 'done') {
+        worker.terminate();
+        resolve(msg.result);
+      } else if (msg.type === 'error') {
+        worker.terminate();
+        reject(new Error(msg.message));
+      }
+    };
+    worker.onerror = (event) => {
+      worker.terminate();
+      reject(new Error(event.message || 'tuneFrequencies worker failed'));
+    };
+    worker.postMessage({ paytable, reelFrequencyTables, options: cloneableOptions });
+  });
+}
 
 function renderWinTable(counts, hitLabel, accentColor, emptyText) {
   const sortedKeys = Object.keys(counts).sort((a, b) => a - b);
@@ -276,13 +311,18 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       const def = defaultBiasForReel(r, tuneConfig.reelsCount);
       const opt = (value, label) => `<option value="${value}"${def === value ? ' selected' : ''}>${label}</option>`;
       return `
-        <label style="font-size: 0.8em; color: #ccc;">Reel ${r + 1} preference<br>
-          <select id="tune-bias-${r}" style="width: 100%; margin-top: 4px;">
-            ${opt(1, 'High pay more frequent')}
-            ${opt(-1, 'High pay rarer')}
-            ${opt(0, 'No preference')}
-          </select>
-        </label>`;
+        <div style="display: flex; gap: 6px; align-items: flex-end;">
+          <label style="font-size: 0.8em; color: #ccc; flex: 1;">Reel ${r + 1} preference<br>
+            <select id="tune-bias-${r}" style="width: 100%; margin-top: 4px;">
+              ${opt(1, 'High pay more frequent')}
+              ${opt(-1, 'High pay rarer')}
+              ${opt(0, 'No preference')}
+            </select>
+          </label>
+          <label title="How strongly this reel's preference is enforced relative to Ordering Penalty Weight - 1 is normal, 0 mutes it without changing the direction dropdown, above 1 pushes harder." style="font-size: 0.8em; color: #ccc; width: 64px;">Strength<br>
+            <input id="tune-bias-strength-${r}" type="number" value="1" step="0.1" min="0" max="5" style="width: 100%; margin-top: 4px;">
+          </label>
+        </div>`;
     }).join('');
 
     tuneContainer.innerHTML = `
@@ -313,7 +353,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
           <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
         ${biasSelectorsHtml}
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
@@ -325,7 +365,11 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         lower-paying one on that reel (premium symbols show up often, so lines look close);
         "rarer" is the traditional direction; "no preference" disables it for that reel. It's
         always a soft preference, not an absolute rule - the search will accept a small violation rather
-        than push RTP far off target. A symbol can also carry its own soft <code>min</code>/
+        than push RTP far off target. Each reel's own <strong>Strength</strong> multiplies how hard
+        that specific reel's preference is enforced (1 = normal, 0 = same as "no preference" without
+        losing the direction dropdown's selection, above 1 = enforced harder) - useful when one
+        reel's preference is visibly dominating the tune at the shared Ordering Penalty Weight
+        below. A symbol can also carry its own soft <code>min</code>/
         <code>max</code> frequency bounds directly in its FREQUENCY_REELn entry (edit that in
         game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
         strongly those are enforced, same soft-preference semantics. Any violation still
@@ -432,6 +476,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
+  const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
 
   // Resolved once, up front - these bounds don't change during the run, only frequency does.
   const boundsByReel = reelFrequencyTables.map(reelTableWrapper => {
@@ -455,6 +500,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     winEvaluator: tuneConfig.winEvaluator,
     wildSymbol: tuneConfig.wildSymbol,
     scatterSymbol: tuneConfig.scatterSymbol,
+    freeSpinsCount: tuneConfig.freeSpinsCount,
+    freeSpinsAwardTable: tuneConfig.freeSpinsAwardTable,
+    retriggerFreeSpinsAwardTable: tuneConfig.retriggerFreeSpinsAwardTable,
     reelLength: parseInt(inputs.reelLength.value, 10) || tuneConfig.reelLength,
     targetRtp: parseFloat(inputs.targetRtp.value) || 96,
     targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
@@ -463,11 +511,20 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 150,
     orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
-    orderingBiasByReel: biasSelects.map(el => parseInt(el.value, 10)),
+    // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
+    // strength of 0 mutes the preference the same way "No preference" does, without losing
+    // the dropdown's own selection; above 1 enforces it harder than the shared Ordering
+    // Penalty Weight alone would. tuneFrequencies already supports any magnitude here, not
+    // just -1/0/1 (see its own orderingBiasByReel doc) - this just exposes that per reel.
+    orderingBiasByReel: biasSelects.map((el, r) => {
+      const rawStrength = parseFloat(biasStrengthInputs[r].value);
+      return parseInt(el.value, 10) * (Number.isFinite(rawStrength) ? rawStrength : 1);
+    }),
   };
 
   Object.values(inputs).forEach(el => { el.disabled = true; });
   biasSelects.forEach(el => { el.disabled = true; });
+  biasStrengthInputs.forEach(el => { el.disabled = true; });
   startBtn.disabled = true;
   startBtn.textContent = 'TUNING...';
   resultsEl.innerHTML = '';
@@ -484,9 +541,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   };
 
   try {
-    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await tuneFrequencies(paytable, reelFrequencyTables, {
-      ...options,
-      onProgress: (phase, i, mult, r, best) => {
+    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await runTuneFrequenciesInWorker(paytable, reelFrequencyTables, options,
+      (phase, i, mult, r, best) => {
         const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
         appendLog(`[${label}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
@@ -507,7 +563,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, r.trial);
         }
       }
-    });
+    );
 
     const rtpConverged = !!diagnostics.rtpPhase?.converged;
     const scatterConverged = diagnostics.scatterPhase == null || !!diagnostics.scatterPhase.converged;
@@ -638,6 +694,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   } finally {
     Object.values(inputs).forEach(el => { el.disabled = false; });
     biasSelects.forEach(el => { el.disabled = false; });
+    biasStrengthInputs.forEach(el => { el.disabled = false; });
     startBtn.disabled = false;
     startBtn.textContent = 'START TUNING';
   }
