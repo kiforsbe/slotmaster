@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, nelderMead, tuneFrequencies, simulateSpins } from '../core/SpinSimulator.js';
+import { gradientDescent1D, nelderMead, tuneFrequencies, simulateSpins, beatsIncumbent } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -921,4 +921,56 @@ test('tuneFrequencies with options.runTrial produces identical results to its in
   assert.equal(withPool.rtp, withoutPool.rtp, 'expected identical achieved RTP with and without the runTrial pool hook');
   assert.equal(withPool.triggerRatePct, withoutPool.triggerRatePct);
   assert.deepEqual(withPool.reelFrequencyTables, withoutPool.reelFrequencyTables);
+});
+
+// ---- Pluggable search algorithm (options.searchAlgorithm) and noise-aware best tracking ----
+
+test('beatsIncumbent always accepts when there is no incumbent yet', () => {
+  assert.equal(beatsIncumbent({ loss: 5, trialRtpStdError: 0 }, null, 1), true);
+});
+
+test('beatsIncumbent rejects a "better" candidate whose margin is within combined measurement noise', () => {
+  // Candidate's loss is only slightly lower than incumbent's, but both carry std error large
+  // enough that the difference isn't statistically meaningful.
+  const incumbent = { loss: 10, trialRtpStdError: 3 };
+  const candidate = { loss: 9, trialRtpStdError: 3 };
+  assert.equal(beatsIncumbent(candidate, incumbent, 1), false);
+});
+
+test('beatsIncumbent accepts a candidate that beats the incumbent by more than the combined noise margin', () => {
+  const incumbent = { loss: 10, trialRtpStdError: 0.1 };
+  const candidate = { loss: 2, trialRtpStdError: 0.1 };
+  assert.equal(beatsIncumbent(candidate, incumbent, 1), true);
+});
+
+test('beatsIncumbent treats missing trialRtpStdError as zero, matching a raw comparison when noise-free', () => {
+  // Both sides omit trialRtpStdError entirely -> margin collapses to z*sqrt(0+0) = 0, so any
+  // strictly-lower loss is accepted, same as today's raw `<` comparison for deterministic
+  // candidates (trialsPerPoint: 1, or a synthetic non-noisy evaluate like this one).
+  const incumbent = { loss: 10 };
+  const candidate = { loss: 9.999 };
+  assert.equal(beatsIncumbent(candidate, incumbent, 1), true);
+});
+
+test('tuneFrequencies with searchAlgorithm: "nelderMead" (explicit) matches the default (omitted) exactly', async () => {
+  const opts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 10, searchSeed: 42,
+  };
+  const withDefault = await tuneFrequencies(PAYTABLE, REEL_TABLES, opts);
+  const withExplicit = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...opts, searchAlgorithm: 'nelderMead' });
+  assert.deepEqual(withDefault.reelFrequencyTables, withExplicit.reelFrequencyTables);
+  assert.equal(withDefault.rtp, withExplicit.rtp);
+});
+
+test('tuneFrequencies with searchAlgorithm: "cmaes" converges to a sane RTP on a real fixture', async () => {
+  const { rtp, diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
+    searchAlgorithm: 'cmaes', searchSeed: 42,
+  });
+  assert.ok(Math.abs(rtp - 96) < 10, `expected cmaes to get reasonably close to target RTP 96, got ${rtp}`);
+  assert.ok(diagnostics.rtpPhase.iterationsRun > 0, 'expected the cmaes path to actually run iterations');
 });

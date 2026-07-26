@@ -4,6 +4,7 @@
  */
 import { generateReel, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
 import { LineMechanic } from './LineMechanic.js';
+import { cmaes } from './CMAES.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis. Mechanic-agnostic: how one spin
@@ -557,6 +558,26 @@ export async function nelderMead({
 }
 
 /**
+ * Whether `candidate` counts as a genuine improvement over `incumbent`, accounting for each
+ * side's own measurement uncertainty (`trialRtpStdError` - see `measure()`'s own doc in
+ * `tuneFrequencies`) rather than a raw `loss` comparison. A `candidate` only replaces a real
+ * `incumbent` once it beats it by more than their combined standard error, scaled by `z` - so a
+ * "better" result that's really just a luckier Monte Carlo sample can't silently become the new
+ * best. Collapses to today's raw `<` comparison whenever both sides have zero (or missing)
+ * `trialRtpStdError` - i.e. a deterministic evaluate, or `trialsPerPoint: 1`, is unaffected.
+ * @param {{loss: number, trialRtpStdError?: number}} candidate
+ * @param {{loss: number, trialRtpStdError?: number}|null} incumbent - `null` means "no incumbent
+ *   yet", always accepted
+ * @param {number} z - margin multiplier (tuneFrequencies' `bestAcceptanceZ` option)
+ * @returns {boolean}
+ */
+export function beatsIncumbent(candidate, incumbent, z) {
+  if (!incumbent) return true;
+  const margin = z * Math.sqrt((candidate.trialRtpStdError ?? 0) ** 2 + (incumbent.trialRtpStdError ?? 0) ** 2);
+  return (incumbent.loss - candidate.loss) > margin;
+}
+
+/**
  * Automatically tunes each reel's own `frequency` values (one table per reel - see
  * `reelFrequencyTables`) to hit a target RTP and a target free-spin trigger rate, without
  * touching any payout values or the paytable itself. Runs the real simulator against
@@ -738,6 +759,21 @@ export async function nelderMead({
  *   from a dedicated RNG seeded off `searchSeed`, so the whole run - including which random
  *   starting point gets used - stays a pure function of `searchSeed` (same determinism
  *   guarantee as every other seeded part of this search).
+ * @param {'nelderMead'|'cmaes'} [options.searchAlgorithm='nelderMead'] - Which algorithm Phase
+ *   2 uses to search the joint per-symbol weight space. `'nelderMead'` (default, unchanged) is
+ *   a simplex search - cheap and effective for a small number of tunable symbols. `'cmaes'`
+ *   (`core/CMAES.js`) is a population-based search that scales better to many tunable symbols
+ *   at once (e.g. Candy Frenzy's ~84) and is more tolerant of noisy per-candidate RTP
+ *   measurements, at the cost of evaluating a whole population every generation instead of one
+ *   or two points. Both return the same shape, so switching this option doesn't change anything
+ *   else about how Phase 2's round loop (restarts, stall detection, `reason` classification)
+ *   behaves.
+ * @param {number} [options.bestAcceptanceZ=1.0] - Margin (in combined standard errors) a new
+ *   candidate must beat the current cross-round incumbent by, via `trialRtpStdError`, before it
+ *   replaces it as `best` (see `beatsIncumbent`) - independent of `searchAlgorithm`. Collapses
+ *   to a raw loss comparison whenever both candidates have zero/missing `trialRtpStdError`
+ *   (e.g. `trialsPerPoint: 1`), so this only changes behavior on a game whose RTP measurement is
+ *   actually noisy.
  * @param {(phase: 'initial'|'scatter'|'shape'|'restart', iteration: number, multiplier: number|null, result: Object, best: Object) => (void|Promise<void>)} [options.onProgress] -
  *   Called (and awaited, if it returns a promise) at several points during the search:
  *   - `'initial'`: fired exactly once, before Phase 1 runs, with `result.trial` set to Phase
@@ -832,6 +868,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     uniformityPenaltyWeight = 0,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
+    searchAlgorithm = 'nelderMead',
+    bestAcceptanceZ = 1.0,
     searchSeed = 12345,
     stallWindowIterations = 15,
     stallWidenFactor = 1.5,
@@ -1344,11 +1382,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       const roundIterations = Math.min(stallWindowIterations, maxIterations - iterationsUsed);
       const nmSeed = baseNmSeed + restarts * 1300021;
       const roundStartIterations = iterationsUsed;
-      const nm = await nelderMead({
+      // Which function actually runs this round - both return the same
+      // { point, loss, result, iterations, converged } shape (see `searchAlgorithm`'s own doc
+      // above), so nothing below this call needs to know or care which one it got.
+      const runSearch = searchAlgorithm === 'cmaes' ? cmaes : nelderMead;
+      const nm = await runSearch({
         initialPoint: point,
         initialStepSize: stepSize,
         evaluate: makeEvaluate(nmSeed),
         maxIterations: roundIterations,
+        seed: nmSeed, // ignored by nelderMead (no such param); seeds cmaes's own sampling
         // `attempted` (nelderMead's own doc) is folded into `result` rather than added as a 6th
         // positional argument here, so tuneFrequencies' own onProgress signature stays the
         // fixed `(phase, iteration, multiplier, result, best)` shape documented above for every
@@ -1369,7 +1412,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       const prevBestLimit = bestLimitPenalty;
       const prevBestUniformity = bestUniformityPenalty;
 
-      if (!best || nm.result.loss < best.loss) best = nm.result;
+      if (beatsIncumbent(nm.result, best, bestAcceptanceZ)) best = nm.result;
       if (nm.result.orderingPenalty < bestOrderingPenalty) bestOrderingPenalty = nm.result.orderingPenalty;
       if (nm.result.limitPenalty < bestLimitPenalty) bestLimitPenalty = nm.result.limitPenalty;
       if (nm.result.uniformityPenalty < bestUniformityPenalty) bestUniformityPenalty = nm.result.uniformityPenalty;
