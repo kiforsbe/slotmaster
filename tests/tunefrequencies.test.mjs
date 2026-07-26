@@ -884,6 +884,32 @@ test('tuneFrequencies options.stdErrorPenaltyWeight defaults to 0 (off), matchin
   assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
 });
 
+test('every onProgress phase emitting a null `best` is a known informational phase', async () => {
+  // Contract between tuneFrequencies and any live view of it. Phases that carry a measured
+  // candidate hand over a non-null `best`; purely informational ones ('headroom', 'feasibility',
+  // 'initial', 'restart', 'busy', 'scatter-complete') deliberately pass null, and a consumer must
+  // handle them before touching candidate fields.
+  //
+  // This exists because adding 'headroom' broke the tuning panel at runtime: it fell through to
+  // generic candidate-rendering code that read `best.result`, and the TypeError aborted the whole
+  // tune. A new phase emitting null `best` must be added here consciously - which is the prompt to
+  // give core/SimulationPanel.js's progress handler a matching early return.
+  const KNOWN_NULL_BEST_PHASES = new Set([
+    'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete',
+  ]);
+  const offenders = new Set();
+  await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 2000, trialsPerPoint: 1, maxIterations: 6, searchSeed: 11,
+    onProgress: (phase, i, mult, r, best) => {
+      if (best == null && !KNOWN_NULL_BEST_PHASES.has(phase)) offenders.add(phase);
+    },
+  });
+  assert.deepEqual([...offenders], [],
+    'these phases emitted a null `best` without being declared informational - add them here AND give SimulationPanel.js\'s progress handler an early return for them');
+});
+
 // ---- Phase 2: seed rotation and anchor gating ----
 
 test('rotateSeedPerGeneration resamples the measurement seed each CMA-ES generation, but not within one', async () => {

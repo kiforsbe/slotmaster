@@ -955,6 +955,33 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // generateReel fails at it SILENTLY (best-effort, then gives up). Logged loudly and
         // first, before any tuning output, because no amount of tuning or penalty weighting can
         // fix it - the arithmetic simply doesn't allow it.
+        // Phase 0b: what an EVEN symbol distribution actually pays. This is the number that says
+        // whether the search is about to be forced into producing over-abundant symbols: if even
+        // frequencies fall far short of target, concentrating symbols is the only route the
+        // frequency search has, and the lopsided reels that come out are the optimizer doing its
+        // job rather than misbehaving. The fix in that case is a structural one (on a cluster
+        // game, usually how readily symbols stack), not a tuning weight.
+        if (phase === 'headroom') {
+          const noisy = options.trialSpins < 50000 || options.trialsPerPoint < 2;
+          const caveat = noisy
+            ? ` (single measurement at ${options.trialSpins.toLocaleString()} spins × ${options.trialsPerPoint} trial${options.trialsPerPoint === 1 ? '' : 's'} - treat as a rough read; raise Trial Spins for a number worth acting on)`
+            : '';
+          if (r.reachableWithEvenFrequencies) {
+            appendLog(`✓ Structural headroom: an even symbol distribution already pays ${r.uniformRtp.toFixed(2)}% against a ${r.targetRtp}% target - no skew needed to reach it${caveat}.`);
+          } else if (r.uniformRtp < r.targetRtp) {
+            // The problematic direction: frequencies are all the main search can move, so the only
+            // way it can make up the shortfall is by concentrating symbols.
+            appendLog(`⚠ Structural headroom: an even symbol distribution pays only ${r.uniformRtp.toFixed(2)}% against a ${r.targetRtp}% target - ${r.shortfallFactor.toFixed(2)}× short${caveat}.`);
+            appendLog(`   … frequencies are the only thing the main search can move, so it will have to CONCENTRATE symbols by roughly that factor to make up the difference. Expect over-abundant symbols and broken reel spacing - that is the search compensating, not malfunctioning.`);
+            appendLog(`   … to fix it properly, change how wins FORM rather than how often symbols appear: on a cluster game raise stackChance / minStack (measured on Candy Frenzy: stackChance 0.10 pays 9.7% at even frequencies, 0.50 pays 94.5%), or scale the paytable's payout multipliers - RTP is exactly proportional to them.`);
+          } else {
+            // Overshooting is the comfortable direction - there is no pressure to concentrate
+            // anything, so it must not be reported with the shortfall warning's advice.
+            appendLog(`ℹ Structural headroom: an even symbol distribution pays ${r.uniformRtp.toFixed(2)}%, ABOVE the ${r.targetRtp}% target${caveat}.`);
+            appendLog(`   … that is the comfortable direction - the search has room to come down and no reason to concentrate symbols to reach RTP. If it still produces over-abundant symbols, look at the ordering/uniformity weights rather than at RTP pressure.`);
+          }
+          return;
+        }
         if (phase === 'feasibility') {
           appendLog(`⚠ REEL CONSTRAINTS CANNOT BE SATISFIED - ${r.infeasible.length} symbol/reel pair${r.infeasible.length === 1 ? '' : 's'} need more room than a ${r.reelLength}-position strip has:`);
           r.infeasible.slice(0, 8).forEach(v => {
@@ -1063,6 +1090,13 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // Showing both `current` (what just happened) and `best` (the running best-ever) side
         // by side is what makes a "no improvement" streak read as active search instead of a
         // silent freeze.
+        // Everything below describes a measured candidate against the running best. A phase that
+        // carries neither - an informational event like 'headroom' or 'feasibility', or any phase
+        // added to the engine later before a handler exists here - has nothing to render, and
+        // must not take the whole tune down trying. (It did exactly that: 'headroom' was emitted
+        // with best=null and fell through to `best.result`, aborting the run with a TypeError.)
+        if (!best) return;
+
         const current = phase === 'scatter' ? r : r.attempted;
         const currentLossBreakdown = current ? lossBreakdownFor(current) : null;
         const currentLabel = current
