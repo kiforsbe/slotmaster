@@ -181,5 +181,12 @@ compact, regex-friendly format — `TYPE:symbol:count:amount[:flags]` per win, j
 (e.g. `S:book:3:20|L4:ace:3:5:W`) — see `summarizeSpinWins`'s own doc in `core/SpinLog.js` for
 the exact grammar.
 
+## License
+
+Copyright © 2026 Kim Forsberg. All rights reserved. This is a personal/educational project,
+provided with no warranty of any kind and not suitable for commercial or real-money use.
+Commercial use requires the copyright holder's prior express written consent. See
+[LICENSE.md](LICENSE.md) for the full terms.
+
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `59d9969`._
+_Docs last synced with the codebase: 2026-07-26, commit `da9895b`._
