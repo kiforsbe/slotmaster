@@ -491,7 +491,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       <div id="tune-live-stats" style="display: none; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px;">
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <span style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Current</span>
+            <span title="Accept/reject is decided on Loss (lower always wins), not RTP alone: Loss = RTP error + (ordering penalty × its weight) + (limit penalty × its weight) + (uniformity penalty × its weight). The bar below shows what's actually contributing to it." style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px; cursor: help; border-bottom: 1px dotted #666;">Current</span>
             <span id="tune-live-stats-current-step" style="font-size: 0.7em; color: #999;"></span>
           </div>
           <div id="tune-live-stats-current" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
@@ -500,7 +500,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
           </div>
         </div>
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
-          <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Best</div>
+          <span title="Accept/reject is decided on Loss (lower always wins), not RTP alone: Loss = RTP error + (ordering penalty × its weight) + (limit penalty × its weight) + (uniformity penalty × its weight). The bar below shows what's actually contributing to it." style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px; cursor: help; border-bottom: 1px dotted #666;">Best</span>
           <div id="tune-live-stats-best" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
           <div id="tune-live-stats-best-improved" style="font-size: 0.72em; margin-top: 8px; min-height: 1.3em;"></div>
         </div>
@@ -864,6 +864,47 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           return `loss ${candidate.loss.toFixed(4)} (${parts.join(', ')})`;
         };
 
+        // Structured version of the same breakdown, for the tune-live-stats boxes' visual
+        // proportional bar below (which term is actually dragging loss up, at a glance, rather
+        // than only readable by parsing the text breakdown's numbers). `null` for a Phase 1
+        // candidate, same as lossBreakdownFor.
+        const lossComponentsFor = (candidate) => {
+          if (candidate.orderingPenalty == null) return null;
+          const components = [
+            { label: 'RTP error', raw: candidate.error, weight: 1, color: '#7fbfff' },
+          ];
+          if (options.orderingPenaltyWeight > 0) components.push({ label: 'ordering', raw: candidate.orderingPenalty, weight: options.orderingPenaltyWeight, color: '#e6b800' });
+          if (options.limitPenaltyWeight > 0) components.push({ label: 'limit', raw: candidate.limitPenalty, weight: options.limitPenaltyWeight, color: '#ff8080' });
+          if (options.uniformityPenaltyWeight > 0) components.push({ label: 'uniformity', raw: candidate.uniformityPenalty, weight: options.uniformityPenaltyWeight, color: '#c58fff' });
+          components.forEach(c => { c.contribution = c.raw * c.weight; });
+          return components;
+        };
+
+        // What actually decides accept/reject - shown as its own clearly labeled, normal-weight
+        // line (never a muted footnote the way it used to be) plus a proportional stacked bar of
+        // what's contributing to it, so "why is loss what it is" is answerable by looking, not by
+        // parsing a dense inline formula. Segment widths are proportional to each term's actual
+        // CONTRIBUTION (raw × weight), not its raw magnitude - matching what `loss` itself sums.
+        const lossVisualFor = (candidate) => {
+          const components = lossComponentsFor(candidate);
+          if (!components) return '';
+          const total = candidate.loss;
+          const bar = components.map(c => {
+            const pct = total > 1e-9 ? (c.contribution / total) * 100 : (c.label === 'RTP error' ? 100 : 0);
+            const title = `${c.label}: ${c.raw.toFixed(4)}${c.weight !== 1 ? ` × ${c.weight} weight` : ''} = ${c.contribution.toFixed(4)}`;
+            return pct > 0 ? `<div title="${title}" style="width: ${pct}%; background: ${c.color}; height: 100%;"></div>` : '';
+          }).join('');
+          const nonZero = components.filter(c => c.contribution > 1e-9);
+          const summary = nonZero.length > 0
+            ? nonZero.map(c => `${c.label} ${c.contribution.toFixed(3)}`).join(' + ')
+            : 'no penalties';
+          return `<div style="margin-top: 6px;">
+                     <span style="font-size: 0.68em; color: #ddd; font-weight: 600;">Loss ${total.toFixed(4)}</span>
+                     <span style="font-size: 0.58em; color: #888;"> = ${summary}</span>
+                     <div style="display: flex; height: 5px; border-radius: 2px; overflow: hidden; margin-top: 3px; background: rgba(255,255,255,0.08);">${bar}</div>
+                   </div>`;
+        };
+
         // Fired once, before Phase 1 even runs, with Phase 2's actual starting point (reflecting
         // Initial Frequency Strategy) - without this the live table stayed frozen on the raw
         // baseline all through Phase 1's scatter rounds, making the strategy look like it
@@ -888,7 +929,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           }
           return;
         }
-        // Explains an otherwise-silent// Explains an otherwise-silent, unusually long gap between two ordinary progress lines
+        // Explains an otherwise-silent, unusually long gap between two ordinary progress lines
         // (a Nelder-Mead simplex shrink re-evaluating every vertex, a CMA-ES generation
         // evaluating its whole population, or a gradient-descent plateau-widening retry). Only
         // fires again while that same operation is still running, throttled server-side to at
@@ -975,16 +1016,16 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // The std dev/range figure is the whole point of this box (see maxRtpStdError's own
         // doc for why a "converged"-looking average can still be untrustworthy) - sized and
         // colored to match the headline RTP itself, not tucked away as a muted footnote, so a
-        // high-variance reading is as hard to miss as the number it's qualifying. The loss
-        // breakdown line (RTP err/ordering/limit/uniformity) is what makes an accept/reject
-        // decision auditable at a glance instead of only inferable from the RTP number alone.
+        // high-variance reading is as hard to miss as the number it's qualifying. Loss - not
+        // RTP - is what actually decides accept/reject (see beatsIncumbent/makeEvaluate's own
+        // docs), so it gets its own clearly labeled line plus a proportional bar (lossVisualFor)
+        // rather than being buried as a small aside to the RTP figure.
         const statHtml = (candidate, extraLine) => {
           const color = statColor(candidate);
           const varianceText = varianceLabelFor(candidate).trim();
-          const lossText = lossBreakdownFor(candidate);
           let html = `<span style="color: ${color};">${candidate.rtp.toFixed(2)}%</span>`;
           if (varianceText) html += `<span style="display: block; font-size: 0.62em; font-weight: 600; color: ${color}; margin-top: 4px; opacity: 0.9;">${varianceText}</span>`;
-          if (lossText) html += `<span style="display: block; font-size: 0.6em; color: #999; margin-top: 3px;">${lossText}</span>`;
+          html += lossVisualFor(candidate);
           if (extraLine) html += extraLine;
           return html;
         };
