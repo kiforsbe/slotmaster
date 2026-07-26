@@ -34,10 +34,12 @@ test('applyCascade on an empty grid performs the initial fill, reading each colu
   assert.equal(cursorStateByColumn[0].index, 3);
   assert.equal(cursorStateByColumn[1].index, (2 + 3) % 4);
 
-  // A full-column spawn: row 0 (top) has the largest offset, row 2 (bottom, closest to
-  // its resting slot) has the smallest - the "stacked above the grid" pour effect.
-  assert.deepEqual(fallOffsets[0], [3, 2, 1]);
-  assert.deepEqual(fallOffsets[1], [3, 2, 1]);
+  // A full-column spawn: every row shares the same offset (3, the spawned count), so the
+  // whole column is one contiguous block starting immediately above the grid - row 2
+  // (bottom, closest to landing) starts exactly 1 row above the grid's top edge, never
+  // already inside it.
+  assert.deepEqual(fallOffsets[0], [3, 3, 3]);
+  assert.deepEqual(fallOffsets[1], [3, 3, 3]);
 });
 
 test('applyCascade compacts survivors down and only refills the vacated top cells', () => {

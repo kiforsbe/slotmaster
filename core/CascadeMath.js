@@ -34,9 +34,11 @@ export function nextStripSymbol(strip, cursorState) {
  * @param {[number, number][]} clearedPositions - [col, row] pairs to remove.
  * @returns {{ grid: string[][], fallOffsets: number[][] }} the new grid, plus each cell's
  *   fall distance in rows (for animating the transition into this grid): a survivor's offset
- *   is how far it shifted down to close a gap; a freshly-spawned cell's offset places it
- *   stacked above the grid, closest-to-landing-first, so a whole cleared/refilled column
- *   animates as one continuous "pour."
+ *   is how far it shifted down to close a gap; every freshly-spawned cell in a column shares
+ *   the same offset (= how many cells were spawned in that column), so the whole spawned group
+ *   forms one contiguous block sitting immediately above the grid - its bottom-most (closest
+ *   to landing) cell starts exactly one row above the grid's top edge, never already inside
+ *   it, however many rows are being refilled at once.
  */
 export function applyCascade(grid, cursorStateByColumn, strips, clearedPositions) {
   const reelsCount = grid.length;
@@ -65,7 +67,7 @@ export function applyCascade(grid, cursorStateByColumn, strips, clearedPositions
     }
     for (let newRow = 0; newRow < spawnedCount; newRow++) {
       newColumn[newRow] = nextStripSymbol(strips[col], cursorStateByColumn[col]);
-      colOffsets[newRow] = spawnedCount - newRow;
+      colOffsets[newRow] = spawnedCount;
     }
 
     newGrid.push(newColumn);
