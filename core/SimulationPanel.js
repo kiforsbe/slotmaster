@@ -485,6 +485,16 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       </div>
+      <div id="tune-live-stats" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 12px;">
+        <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
+          <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Current</div>
+          <div id="tune-live-stats-current" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
+        </div>
+        <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
+          <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Best</div>
+          <div id="tune-live-stats-best" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
+        </div>
+      </div>
       <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 1.05em; line-height: 1.5; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
@@ -637,6 +647,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     return bounds;
   });
   const liveTableEl = tuneContainer.querySelector('#tune-live-table');
+  const liveStatsEl = tuneContainer.querySelector('#tune-live-stats');
+  const liveStatsCurrentEl = tuneContainer.querySelector('#tune-live-stats-current');
+  const liveStatsBestEl = tuneContainer.querySelector('#tune-live-stats-best');
   // reelIdx -> symbol -> { min, max } actually assigned during the search so far this run -
   // grows as Phase 2 explores, reset fresh on every START TUNING click.
   const testedRangeByReel = reelFrequencyTables.map(() => ({}));
@@ -700,6 +713,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   resultsEl.innerHTML = '';
   logEl.style.display = 'block';
   logEl.innerHTML = '';
+  liveStatsEl.style.display = 'grid';
+  liveStatsCurrentEl.textContent = '—';
+  liveStatsBestEl.textContent = '—';
   liveTableEl.style.display = 'block';
   liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, null, paytable);
 
@@ -842,6 +858,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         const bestLabel = `best: RTP=${bestCandidate.rtp.toFixed(2)}%${varianceLabelFor(bestCandidate)}  trigger=${bestCandidate.triggerRate.toFixed(3)}%  err=${best.error.toFixed(4)}`;
 
         appendLog(`[${label}]${multLabel}  ${currentLabel}  |  ${bestLabel}`);
+
+        // Prominent current/best RTP readout above the live per-symbol table - the log/table
+        // below both require reading down a scrolling list or a wide grid to find "where is
+        // this run actually at right now", which is the single number a user checking in on a
+        // long, slow run (many spins, many symbols) wants first. Same reliability coloring as
+        // the final "Achieved RTP" headline (SimulationPanel.js's own results rendering further
+        // down): gray when trialsPerPoint is 1 (no variance information exists), red when the
+        // candidate's own standard error exceeds Max RTP Std Error (a "converged"-looking number
+        // that isn't actually trustworthy), green otherwise.
+        const statColor = (candidate) => {
+          if (options.trialsPerPoint <= 1) return '#888';
+          return (candidate.trialRtpStdError ?? 0) > options.maxRtpStdError ? '#ff8080' : '#7fd97f';
+        };
+        const statHtml = (candidate) => `<span style="color: ${statColor(candidate)};">${candidate.rtp.toFixed(2)}%</span>` +
+          `<span style="display: block; font-size: 0.5em; font-weight: normal; color: #999; margin-top: 2px;">${varianceLabelFor(candidate).trim() || ' '}</span>`;
+        liveStatsCurrentEl.innerHTML = current ? statHtml(current) : '—';
+        liveStatsBestEl.innerHTML = statHtml(bestCandidate);
         // Only Phase 2 ('shape') carries a full live candidate reel table (r.trial) - Phase 1
         // ('scatter') only ever scales trigger symbols, which are excluded from Phase 2's
         // search entirely, so every value symbol's frequency is still exactly its baseline
