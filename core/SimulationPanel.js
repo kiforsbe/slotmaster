@@ -442,10 +442,10 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
             <option value="normal">Random (normal) within min/max</option>
           </select>
         </label>
-        <label title="Which algorithm searches the per-symbol reel weights (Phase 2). Nelder-Mead (default) is a simplex search - simple and fast for a small number of tunable symbols. CMA-ES is a population-based search that scales better to many tunable symbols at once and is more tolerant of noisy RTP measurements (e.g. Candy Frenzy's cascade multiplier bonus) - at the cost of evaluating a whole population of candidates every generation instead of one or two." style="font-size: 0.8em; color: #ccc;">Search Algorithm<br>
+        <label title="Which algorithm searches the per-symbol reel weights (Phase 2). CMA-ES (default in this panel) is a population-based search that scales better to many tunable symbols at once and is more tolerant of noisy RTP measurements (e.g. Candy Frenzy's cascade multiplier bonus), at the cost of evaluating a whole population of candidates every generation instead of one or two. Nelder-Mead is a simpler simplex search - cheaper for a small number of tunable symbols, and still tuneFrequencies' own library-level default when this option is omitted entirely." style="font-size: 0.8em; color: #ccc;">Search Algorithm<br>
           <select id="tune-search-algorithm" style="width: 100%; margin-top: 4px;">
-            <option value="nelderMead" selected>Nelder-Mead (default)</option>
-            <option value="cmaes">CMA-ES</option>
+            <option value="cmaes" selected>CMA-ES (default)</option>
+            <option value="nelderMead">Nelder-Mead</option>
           </select>
         </label>
       </div>
