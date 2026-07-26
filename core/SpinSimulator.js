@@ -1381,6 +1381,26 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     let stalledOut = false;
     let stillImproving = { rtp: true, ordering: true, limits: true, uniformity: true };
 
+    // CMA-ES-only: seed `best` with an actual measurement of the starting point itself, before
+    // any search runs. Nelder-Mead's own initial simplex always includes `initialPoint` as one
+    // of its real, competing vertices (vertex 0) - if nothing in the search ever beats it, that
+    // exact starting candidate naturally IS the round's own result, so `best` ends up correctly
+    // anchored at (never worse than) whatever was passed in, even continuing from a previous
+    // run's result. CMA-ES has no equivalent: it only ever samples random perturbations AROUND
+    // its mean (never the literal mean itself, i.e. never `initialPoint` unperturbed) and, unlike
+    // Nelder-Mead, gets its FULL iteration budget in one uninterrupted call (see the comment
+    // below), so there is otherwise nothing stopping a long, noisy search from wandering to a
+    // final result that's actually WORSE than the point it started from - which is exactly what
+    // "continue tuning from this result" must never do. Measured under `baseNmSeed` - the same
+    // seed the first round's own candidates use - so it's directly comparable to them.
+    if (searchAlgorithm === 'cmaes') {
+      const baseline = { point: initialPoint, ...(await makeEvaluate(baseNmSeed)(initialPoint)) };
+      best = baseline;
+      bestOrderingPenalty = baseline.orderingPenalty;
+      bestLimitPenalty = baseline.limitPenalty;
+      bestUniformityPenalty = baseline.uniformityPenalty;
+    }
+
     do {
       // CMA-ES doesn't chop into short `stallWindowIterations` rounds the way Nelder-Mead
       // does: it continuously adapts its own step size and covariance matrix generation to
@@ -1540,6 +1560,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       inputParameters,
       scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
       rtpPhase: rtpPhaseResult ? {
+        // The actual scalar every accept/reject decision (beatsIncumbent, Nelder-Mead/CMA-ES's
+        // own vertex comparisons) is made on - error + weighted ordering/limit/uniformity
+        // penalties (see makeEvaluate's own doc) - exposed directly rather than leaving a caller
+        // to re-derive it from error/orderingPenaltyRemaining/limitPenaltyRemaining/
+        // uniformityPenaltyRemaining and inputParameters' own weights by hand. A candidate with
+        // worse RTP `error` than another can still have LOWER `loss` (and correctly win) if it
+        // resolved a violation the other one didn't - `loss`, not `error` alone, is what decided
+        // this result.
+        loss: rtpPhaseResult.loss,
         error: rtpPhaseResult.error,
         converged: rtpPhaseResult.error <= rtpTolerancePct && (rtpPhaseResult.trialRtpStdError ?? 0) <= maxRtpStdError,
         reason: rtpPhaseResult.reason,

@@ -1006,3 +1006,51 @@ test('tuneFrequencies diagnostics.inputParameters reflects both explicit options
   const roundTripped = JSON.parse(JSON.stringify(diagnostics)).inputParameters;
   assert.equal(roundTripped.targetRtp, 97);
 });
+
+test('tuneFrequencies with searchAlgorithm: "cmaes" never returns a result with worse loss than the point it started from', async () => {
+  // Nelder-Mead's own initial simplex always includes the exact starting point as a real,
+  // competing vertex (vertex 0) - CMA-ES has no equivalent (it only samples random
+  // perturbations around its mean, never the literal mean itself), so without an explicit fix
+  // it has no guarantee of ever being at least as good as wherever it started - exactly the
+  // property "CONTINUE TUNING FROM THIS RESULT" depends on. `initialStepSize: 0` collapses
+  // nelderMead's initial simplex to a single point (every "perturbed" vertex becomes identical
+  // to the start), isolating a clean, unperturbed measurement of the starting reel tables'
+  // own loss under the same seed cmaes's own first round uses - not "the best of a fanned-out
+  // simplex", which a nonzero initialStepSize would conflate this baseline with.
+  //
+  // Compared on `loss`, not `error` - `loss` (error + weighted ordering/limit/uniformity
+  // penalties) is what beatsIncumbent and every vertex comparison actually decide on. A
+  // candidate can legitimately have WORSE raw RTP error than another yet still have LOWER loss
+  // (and correctly win) if it resolved a violation the other one didn't - asserting on `error`
+  // would flag that correct outcome as a regression.
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, searchSeed: 55,
+  };
+  const baseline = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, maxIterations: 0, initialStepSize: 0 });
+  const cmaesResult = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, maxIterations: 10, searchAlgorithm: 'cmaes' });
+  assert.ok(
+    cmaesResult.diagnostics.rtpPhase.loss <= baseline.diagnostics.rtpPhase.loss + 1e-9,
+    `expected cmaes's result (loss=${cmaesResult.diagnostics.rtpPhase.loss}) to be no worse than the untouched starting point (loss=${baseline.diagnostics.rtpPhase.loss})`
+  );
+});
+
+test('tuneFrequencies with searchAlgorithm: "cmaes" never regresses (by loss) when continuing from a previous result', async () => {
+  // Simulates the panel's CONTINUE TUNING FROM THIS RESULT button: feed one run's own output
+  // back in as the next run's starting reelFrequencyTables. The second run's loss must never
+  // be worse than the first run's own final loss - continuing should only ever hold steady or
+  // improve, never silently regress. Compared on `loss`, not `error` - see the previous test's
+  // own comment for why.
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, searchAlgorithm: 'cmaes', searchSeed: 55,
+  };
+  const first = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, maxIterations: 10 });
+  const continued = await tuneFrequencies(PAYTABLE, first.reelFrequencyTables, { ...sharedOpts, maxIterations: 10 });
+  assert.ok(
+    continued.diagnostics.rtpPhase.loss <= first.diagnostics.rtpPhase.loss + 1e-9,
+    `expected continuing (loss=${continued.diagnostics.rtpPhase.loss}) to be no worse than the first run's own result (loss=${first.diagnostics.rtpPhase.loss})`
+  );
+});
