@@ -14,8 +14,17 @@ this game's own cluster win evaluator (`core/ClusterMath.js`).
   re-evaluated — this can repeat several times within what is still one spin (same seed).
   The spin only ends, and payout is made, once a cascade step produces no new cluster.
 - **Bonus / free spins.** 3+ `bonus` symbols anywhere on the final settled grid trigger
-  10 free spins at 2× payout (no bet deducted). Landing 3+ again during free spins adds
-  another 10 spins. `bonus` has no direct cash payout of its own.
+  10 free spins (no bet deducted). Landing 3+ again during free spins adds another 10 spins,
+  without resetting the ones already remaining. `bonus` has no direct cash payout of its own.
+- **Multiplier tiles (free spins only).** Every tile a winning cluster occupies gets (or
+  doubles) a persistent per-tile multiplier: untouched tiles start at 1x (shown as nothing),
+  a tile's first win sets it to 2x, and each subsequent win there doubles it again (2x → 4x →
+  8x → ...). A later cluster that overlaps one or more of these tiles has their multiplier
+  values summed and applied to its own payout. The multiplier grid is reset at the start of
+  each free-spins bonus and cleared again the moment it ends — it never carries into the base
+  game. This is `CascadeEngine`'s `useMultiplierTiles` mode (`core/CascadeEngine.js`); the
+  flat "every free-spin win pays double" rule still exists as the default for any future
+  cascade game that doesn't opt in.
 - **Symbols** — Premium: Cotton Candy, Bubble Gum, Sugar Crystal, Candy Rocket, Candy Crown,
   Cake Slice. Regular: Mint, Gummy Bear, Jelly Bean, Chocolate, Chewy Candy, Cherry Candy.
   No wild in this version.

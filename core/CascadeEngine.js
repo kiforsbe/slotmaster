@@ -33,6 +33,11 @@ export class CascadeEngine {
       reelStrips: [],
       winEvaluator: () => ({ clusterWins: [], totalPayoutMultiplier: 0, scatterWin: null }),
       scatterSymbol: null,
+      // Free-spins payout mode: false (default) keeps the flat 2x-every-win rule (see
+      // _freeSpinsFlatMultiplier). true switches to persistent per-tile multipliers instead -
+      // a tile a winning cluster touches starts/doubles a multiplier that a later cluster
+      // overlapping that same position then benefits from (see multiplierGrid below).
+      useMultiplierTiles: false,
       onStateChange: () => {},
       onScatterTrigger: (scatterCount, isInFreeSpins) => {},
       onWin: () => {},
@@ -104,6 +109,11 @@ export class CascadeEngine {
     // still be readable, even overlapping across rapid-fire cascade steps.
     this.activePopups = [];
 
+    // Per-cell persistent win multiplier (config.useMultiplierTiles mode only) - 1 everywhere
+    // means "no tile", never rendered. Only ever holds anything other than 1 during free spins;
+    // reset on enterFreeSpins, cleared again on exitFreeSpins (see those methods).
+    this.multiplierGrid = this._createMultiplierGrid();
+
     this.particleSystem = new ParticleSystem();
     this.audio = audio;
 
@@ -117,6 +127,17 @@ export class CascadeEngine {
     this.setupResize();
     this.loadAssets();
     this.animate();
+  }
+
+  _createMultiplierGrid() {
+    return Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(1));
+  }
+
+  // The flat "every win pays double" free-spins rule - only active when useMultiplierTiles is
+  // off. In tile mode, each cluster's bonus is already baked into its own payout individually
+  // (see _buildWinEvaluatorForSpin), so applying this on top too would double-dip.
+  _freeSpinsFlatMultiplier() {
+    return this.inFreeSpins && !this.config.useMultiplierTiles ? 2 : 1;
   }
 
   // Populates the grid with a decorative, non-winning-evaluated fill before any real spin has
@@ -328,11 +349,23 @@ export class CascadeEngine {
     this._spawnClearParticles(this.currentClearPositions);
     this._spawnClusterWinPopups([cluster]);
     audio.playClusterWin(cluster.payout);
+
+    // The tiles this cluster just won on start (1x -> 2x) or double (2x -> 4x -> ...) their
+    // persistent multiplier now, in step with THIS cluster's own clear animation - not all at
+    // once back when the whole spin was precomputed. _buildWinEvaluatorForSpin already used a
+    // scratch copy of this same progression to get this cluster's payout right; this replays
+    // the identical update rule against the real, rendered grid.
+    if (this.config.useMultiplierTiles && this.inFreeSpins) {
+      this.currentClearPositions.forEach(([col, row]) => {
+        this.multiplierGrid[col][row] = this.multiplierGrid[col][row] <= 1 ? 2 : this.multiplierGrid[col][row] * 2;
+      });
+    }
+
     this.config.onStateChange(this.state);
   }
 
   _spawnClusterWinPopups(clusterWins) {
-    const freeSpinsMultiplier = this.inFreeSpins ? 2 : 1;
+    const freeSpinsMultiplier = this._freeSpinsFlatMultiplier();
     const now = Date.now();
     const duration = this.turboMode ? 500 : 1100;
     clusterWins.forEach(w => {
@@ -376,7 +409,7 @@ export class CascadeEngine {
   }
 
   _finishSpin() {
-    const freeSpinsMultiplier = this.inFreeSpins ? 2 : 1;
+    const freeSpinsMultiplier = this._freeSpinsFlatMultiplier();
     const payoutAmount = this.cascadeSequence.totalPayoutMultiplier * this.betAmount * freeSpinsMultiplier;
     this.lastWin = payoutAmount;
     this.balance += payoutAmount;
@@ -457,6 +490,49 @@ export class CascadeEngine {
     }
   }
 
+  // In useMultiplierTiles mode, wraps config.winEvaluator so each cascade step's cluster
+  // payouts already include this spin's tile-multiplier bonuses - resolveCascadeSequence calls
+  // the returned closure once per cascade step, synchronously, in chronological order, so a
+  // scratch copy of multiplierGrid mutated step-by-step here sees exactly the same progression
+  // _beginClusterClear will later replay against the real grid, just all at once instead of
+  // animated. Kept as its own scratch copy (not multiplierGrid itself) so the tile numbers
+  // rendered on screen only advance in step with each cluster's own clear animation, not the
+  // instant the whole spin gets resolved.
+  _buildWinEvaluatorForSpin() {
+    const baseEvaluator = this.config.winEvaluator;
+    if (!this.config.useMultiplierTiles || !this.inFreeSpins) return baseEvaluator;
+
+    const scratch = this.multiplierGrid.map(col => col.slice());
+
+    return (grid) => {
+      const results = baseEvaluator(grid);
+      if (results.totalPayoutMultiplier <= 0) return results;
+
+      let totalPayoutMultiplier = 0;
+      const clusterWins = results.clusterWins.map(w => {
+        // Sum only the tiles this cluster actually overlaps that already carry a multiplier
+        // (>1x) - an untouched tile (1x, the "no marker" baseline) contributes nothing, so a
+        // cluster over entirely plain tiles pays its normal amount, not an inflated one.
+        let tileMultiplier = 0;
+        w.winningPositions.forEach(([c, r]) => {
+          if (scratch[c][r] > 1) tileMultiplier += scratch[c][r];
+        });
+        if (tileMultiplier === 0) tileMultiplier = 1;
+
+        const payout = w.payout * tileMultiplier;
+        totalPayoutMultiplier += payout;
+
+        w.winningPositions.forEach(([c, r]) => {
+          scratch[c][r] = scratch[c][r] <= 1 ? 2 : scratch[c][r] * 2;
+        });
+
+        return { ...w, payout };
+      });
+
+      return { ...results, clusterWins, totalPayoutMultiplier };
+    };
+  }
+
   spin(seed) {
     if (this.state !== 'idle' && this.state !== 'showing_wins') return;
     audio.stopBGM();
@@ -474,7 +550,7 @@ export class CascadeEngine {
     const spinSeed = seed !== undefined ? seed : ((Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0);
     this.lastSpinSeed = spinSeed;
     this.cascadeSequence = resolveCascadeSequence(
-      this.config.reelStrips, this.config.rowsCount, spinSeed, this.config.winEvaluator
+      this.config.reelStrips, this.config.rowsCount, spinSeed, this._buildWinEvaluatorForSpin()
     );
 
     if (this._forceScatterNextSpin) {
@@ -558,6 +634,9 @@ export class CascadeEngine {
     this.freeSpinsTotal = spinsCount;
     this.freeSpinsRemaining = spinsCount;
     this.freeSpinsAccumulatedWin = 0;
+    // Multiplier tiles (if this game uses that mode) always start fresh at the top of a
+    // free-spins bonus, never carried over from a previous one.
+    this.multiplierGrid = this._createMultiplierGrid();
 
     audio.startBGM();
 
@@ -584,6 +663,9 @@ export class CascadeEngine {
 
   exitFreeSpins() {
     this.inFreeSpins = false;
+    // Multiplier tiles (if used) are a free-spins-only bonus - removed the moment the bonus
+    // round ends, not carried into the base game.
+    this.multiplierGrid = this._createMultiplierGrid();
     audio.stopBGM();
 
     this.state = 'game_over';
@@ -606,6 +688,12 @@ export class CascadeEngine {
     this.ctx.rect(this.reelsX, this.reelsY, this.reelsWidth, this.reelsHeight);
     this.ctx.clip();
 
+    // Drawn as its own full-board pass, before anything else in the clip - a tile's
+    // multiplier belongs to the fixed board position, not to whatever symbol currently
+    // occupies it, so it must stay visible underneath every phase of the animation
+    // (leftover grid still exiting, new grid still entering, mid-cascade, all of it), never
+    // just while that one column happens to be showing its settled live grid.
+    this._renderTileMultiplierGrid();
     this._renderOutgoingGridSymbols();
     this._renderGridSymbols();
 
@@ -698,6 +786,46 @@ export class CascadeEngine {
     this.ctx.translate(centerX, bottomY);
     this.ctx.scale(squashX, squashY);
     this.ctx.translate(-centerX, -bottomY);
+  }
+
+  // Every board position's multiplier badge, at its fixed on-screen cell - independent of
+  // cellOffsets/columnOutgoingDone/clearing entirely, so it reads as a permanent overlay on
+  // the board itself rather than something attached to any particular falling/exiting symbol.
+  _renderTileMultiplierGrid() {
+    for (let col = 0; col < this.config.reelsCount; col++) {
+      for (let row = 0; row < this.config.rowsCount; row++) {
+        const value = this.multiplierGrid[col][row];
+        if (value <= 1) continue;
+        const cx = this.reelsX + col * this.symbolWidth;
+        const cy = this.reelsY + row * this.symbolHeight;
+        this._renderTileMultiplier(cx, cy, value);
+      }
+    }
+  }
+
+  // A tile's persistent win multiplier (useMultiplierTiles mode), drawn as a big faint number
+  // filling the cell so it still peeks out from behind the symbol's own art (a sprite tile
+  // isn't a full opaque square - candy art has transparent padding around the shape). 1x (no
+  // multiplier yet) is the overwhelmingly common case and intentionally never drawn.
+  _renderTileMultiplier(cx, cy, value) {
+    if (value <= 1) return;
+    const centerX = cx + this.symbolWidth / 2;
+    const centerY = cy + this.symbolHeight / 2;
+
+    this.ctx.save();
+    this.ctx.globalAlpha = 0.9;
+    this.ctx.fillStyle = 'rgba(255, 110, 199, 0.18)';
+    this.ctx.fillRect(cx + 2, cy + 2, this.symbolWidth - 4, this.symbolHeight - 4);
+
+    this.ctx.font = `bold ${Math.floor(this.symbolHeight * 0.5)}px Outfit, Inter, sans-serif`;
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.lineWidth = 3;
+    this.ctx.strokeStyle = 'rgba(45, 16, 48, 0.7)';
+    this.ctx.strokeText(`${value}x`, centerX, centerY);
+    this.ctx.fillStyle = 'rgba(255, 233, 74, 0.85)';
+    this.ctx.fillText(`${value}x`, centerX, centerY);
+    this.ctx.restore();
   }
 
   // A glowing outline around a cell that's part of the cluster currently being cleared, so

@@ -165,6 +165,7 @@ async function initGame() {
     reelStrips: REEL_STRIPS,
     winEvaluator,
     scatterSymbol: 'bonus',
+    useMultiplierTiles: true,
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betAmount: BET_AMOUNT,
@@ -349,7 +350,7 @@ function buildPaytableContent() {
         content += `<strong>${label}:</strong> ${tier.multiplier}x<br>`;
       });
     } else {
-      content += `<em style="color:#ff6ec7; font-size:10px;">Pays anywhere. 3+ triggers ${FREE_SPINS_AWARD} Free Spins (2x payout)</em>`;
+      content += `<em style="color:#ff6ec7; font-size:10px;">Pays anywhere. 3+ triggers ${FREE_SPINS_AWARD} Free Spins - winning tiles leave a growing multiplier</em>`;
     }
 
     payLines.innerHTML = content;
