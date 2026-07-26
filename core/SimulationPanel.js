@@ -848,12 +848,19 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // limit penalty, which is invisible if only RTP/std-dev are shown. `null` for a Phase 1
         // ('scatter') candidate - gradientDescent1D's result shape has no penalty fields at all
         // (see its own doc), it's judged on trigger-rate error alone.
+        // Always shows RAW penalty × weight = contribution explicitly (never just the weighted
+        // number alone) - the "Violations (best)" panel further below reports the same
+        // orderingPenalty/limitPenalty/uniformityPenalty fields RAW (unweighted, matching the
+        // final results' own "N violations remain (totaling X)" convention), so without spelling
+        // out the multiplication here too, the same underlying value showing up as two different
+        // numbers in two panels reads as a bug (or as the weight silently acting like some kind
+        // of cap) rather than the same figure viewed two different ways.
         const lossBreakdownFor = (candidate) => {
           if (candidate.orderingPenalty == null) return null;
           const parts = [`RTP err ${candidate.error.toFixed(4)}`];
-          if (options.orderingPenaltyWeight > 0) parts.push(`ordering ${(candidate.orderingPenalty * options.orderingPenaltyWeight).toFixed(4)}`);
-          if (options.limitPenaltyWeight > 0) parts.push(`limit ${(candidate.limitPenalty * options.limitPenaltyWeight).toFixed(4)}`);
-          if (options.uniformityPenaltyWeight > 0) parts.push(`uniformity ${(candidate.uniformityPenalty * options.uniformityPenaltyWeight).toFixed(4)}`);
+          if (options.orderingPenaltyWeight > 0) parts.push(`ordering ${candidate.orderingPenalty.toFixed(4)}×${options.orderingPenaltyWeight}=${(candidate.orderingPenalty * options.orderingPenaltyWeight).toFixed(4)}`);
+          if (options.limitPenaltyWeight > 0) parts.push(`limit ${candidate.limitPenalty.toFixed(4)}×${options.limitPenaltyWeight}=${(candidate.limitPenalty * options.limitPenaltyWeight).toFixed(4)}`);
+          if (options.uniformityPenaltyWeight > 0) parts.push(`uniformity ${candidate.uniformityPenalty.toFixed(4)}×${options.uniformityPenaltyWeight}=${(candidate.uniformityPenalty * options.uniformityPenaltyWeight).toFixed(4)}`);
           return `loss ${candidate.loss.toFixed(4)} (${parts.join(', ')})`;
         };
 
@@ -1059,12 +1066,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         if (bestCandidate.orderingViolations != null) {
           const orderingCount = bestCandidate.orderingViolations.length;
           const limitCount = bestCandidate.limitViolations.length;
+          // Raw totals (matching the final results' own "N violations remain (totaling X)"
+          // convention) PLUS the weight actually applied and the resulting contribution to
+          // `loss` spelled out explicitly - a raw penalty total staying the same size regardless
+          // of what Ordering/Limit/Uniformity Penalty Weight is set to is correct (the weight
+          // never changes the violation itself, only how much the search cares about it), but
+          // showing only the raw number next to a "Weight" input reads as the weight not doing
+          // anything - or worse, as if it were some kind of cap on the raw total instead of a
+          // multiplier on its contribution to loss.
+          const withContribution = (rawTotal, weight) => weight > 0
+            ? ` (total ${rawTotal.toFixed(3)} × ${weight} weight = ${(rawTotal * weight).toFixed(3)} loss contribution)`
+            : ` (total ${rawTotal.toFixed(3)}, weight is 0 - not counted in loss at all)`;
           const lines = [
-            `<span style="color: ${orderingCount > 0 ? '#ff8080' : '#7fd97f'};">${orderingCount} ordering violation${orderingCount === 1 ? '' : 's'}</span>${orderingCount > 0 ? ` (total ${bestCandidate.orderingPenalty.toFixed(3)})` : ''}`,
-            `<span style="color: ${limitCount > 0 ? '#ff8080' : '#7fd97f'};">${limitCount} limit violation${limitCount === 1 ? '' : 's'}</span>${limitCount > 0 ? ` (total ${bestCandidate.limitPenalty.toFixed(3)})` : ''}`,
+            `<span style="color: ${orderingCount > 0 ? '#ff8080' : '#7fd97f'};">${orderingCount} ordering violation${orderingCount === 1 ? '' : 's'}</span>${orderingCount > 0 ? withContribution(bestCandidate.orderingPenalty, options.orderingPenaltyWeight) : ''}`,
+            `<span style="color: ${limitCount > 0 ? '#ff8080' : '#7fd97f'};">${limitCount} limit violation${limitCount === 1 ? '' : 's'}</span>${limitCount > 0 ? withContribution(bestCandidate.limitPenalty, options.limitPenaltyWeight) : ''}`,
           ];
           if (options.uniformityPenaltyWeight > 0) {
-            lines.push(`<span style="color: #999;">uniformity penalty ${bestCandidate.uniformityPenalty.toFixed(3)}</span>`);
+            lines.push(`<span style="color: #999;">uniformity penalty${withContribution(bestCandidate.uniformityPenalty, options.uniformityPenaltyWeight)}</span>`);
           }
           liveStatsViolationsEl.innerHTML = lines.join('<br>');
         }
