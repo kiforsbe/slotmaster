@@ -6,29 +6,53 @@ reel-frequency-table data model specifically.
 
 ## Layering
 
-```
-games/<name>/game.js        <- per-game glue: data (paytable, paylines, reels) + DOM wiring
-        |  constructs and configures
-        v
-core/SlotEngine.js          <- rendering, animation, state machine, live gameplay
-        |  calls into (pure functions, no DOM/state)
-        v
-core/SlotMath.js            <- win evaluation, reel building, seeded RNG
+```mermaid
+flowchart TB
+    Game["games/&lt;name&gt;/game.js<br/>per-game glue: data + DOM wiring"]
 
-core/SpinSimulator.js       <- headless simulation + auto-tuning, built on SlotMath.js
-core/SimulationPanel.js     <- browser UI for SpinSimulator.js, used by game.js's debug buttons
-core/SlotAudio.js           <- synthesized sound effects, used by SlotEngine.js
+    SlotEngine["core/SlotEngine.js<br/>line-pays live game"]
+    SlotMath["core/SlotMath.js<br/>win eval, reel building, seeded RNG"]
 
-core/SpinLog.js             <- pure per-spin log entry building + CSV serialization
-core/SpinLogPanel.js        <- browser UI for SpinLog.js, reads SlotEngine.spinLog
-core/FileIO.js              <- generic browser file-download helper, used by SpinLog.js
+    CascadeEngine["core/CascadeEngine.js<br/>cascade-cluster live game (Candy Frenzy)"]
+    CascadeMath["core/CascadeMath.js<br/>gravity/refill mechanics"]
+    ClusterMath["core/ClusterMath.js<br/>cluster win evaluator"]
+    FreeSpinsModes["core/FreeSpinsModes.js<br/>pluggable free-spins payout modes"]
+
+    SpinSimulator["core/SpinSimulator.js<br/>headless sim + auto-tune (line-pays only)"]
+    SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION / TUNE FREQUENCIES UI"]
+    SlotAudio["core/SlotAudio.js<br/>synthesized sound effects"]
+
+    SpinLog["core/SpinLog.js<br/>per-spin log entries + CSV"]
+    SpinLogPanel["core/SpinLogPanel.js<br/>SPIN LOG UI"]
+    FileIO["core/FileIO.js<br/>file-download helper"]
+
+    Game --> SlotEngine
+    Game --> CascadeEngine
+
+    SlotEngine --> SlotMath
+    SlotEngine --> SlotAudio
+    SlotEngine --> SpinLog
+    SlotEngine --> SpinSimulator
+
+    CascadeEngine --> CascadeMath
+    CascadeEngine -. "config.winEvaluator" .-> ClusterMath
+    CascadeEngine -. "config.freeSpinsMode, free spins only" .-> FreeSpinsModes
+    CascadeEngine --> SlotAudio
+    CascadeEngine --> SpinLog
+
+    SimulationPanel --> SpinSimulator
+    SpinLogPanel --> SpinLog
+    SpinLog --> FileIO
 ```
 
 Nothing in `core/` imports from `games/`. A game only ever flows data *into* `core/` (its own
 paytable, paylines, reel strips, DOM element references) — `core/` never hardcodes a symbol
 name, payout shape, or grid size. This is what lets `SlotMath.js` and `SpinSimulator.js` run
 identically inside the live browser game, inside the in-browser debug tools, and inside
-`node --test` with no DOM at all.
+`node --test` with no DOM at all. `CascadeEngine.js`'s own math (`CascadeMath.js`/
+`ClusterMath.js`) follows the same rule, though `SpinSimulator.js`/`SimulationPanel.js`
+themselves are built around `SlotEngine.js`'s line-pays shape specifically and aren't used by
+cascade games (see their own sections below).
 
 ## `core/SlotMath.js` — pure math, no side effects
 
@@ -68,6 +92,46 @@ usable from all three contexts above (game engine, simulator, tests) without ada
   rng to get `this.targetGrid`, which every reel's landing animation then just visually
   catches up to.
 
+## `core/CascadeMath.js` / `core/ClusterMath.js` — cascade pure math
+
+Same "pure function, no side effects" rule as `SlotMath.js` above - this is Candy Frenzy's
+(and any future cascade-cluster game's) equivalent of that module, split in two: generic
+cascade mechanics (`CascadeMath.js`, knows nothing about clusters or paylines) and this game's
+own win evaluator (`ClusterMath.js`).
+
+- **`nextStripSymbol(strip, cursorState)`** (`CascadeMath.js`) — reads the symbol at
+  `cursorState.index`, advances the cursor by 1 (wrapping circularly), and never re-rolls -
+  the one rule every cell dropping into the grid follows, whether that's the very first fill
+  or a later cascade refill.
+- **`applyCascade(grid, cursorStateByColumn, strips, clearedPositions)`** (`CascadeMath.js`) —
+  removes the given positions, compacts each column's survivors downward (gravity), and
+  refills the vacated top cells by reading forward from that column's own cursor. Returns
+  `{ grid, fallOffsets }`, where `fallOffsets[col][row]` is that cell's fall distance in rows
+  for animating the transition (a whole freshly-spawned group in one column shares the same
+  offset, so it forms one contiguous block sitting just above the grid, never partway inside
+  it). Also used for a spin's very first fill: call it with an all-null grid and every
+  position listed as cleared.
+- **`checkScatterCount(grid, scatterSymbol, triggerCount)`** (`CascadeMath.js`) — counts a
+  symbol anywhere on the grid, independent of win type; a scatter check runs the same way
+  whether the game underneath is cluster-pays or a future payline-cascade game.
+- **`resolveCascadeSequence(strips, rowsCount, seed, winEvaluator, maxCascadeSteps=1000)`**
+  (`CascadeMath.js`) — the "what happens" half of one entire spin: resolves the initial fill,
+  then every cascade step, synchronously and deterministically, until a step produces no win.
+  Returns `{ cascadeSteps, totalPayoutMultiplier, finalGrid, scatterWin }`, where each
+  `cascadeSteps[i]` carries that step's `grid`/`fallOffsets`/`clusterWins`/`payout`. This
+  mirrors `SlotEngine`'s own precompute-then-animate pattern (`generateTargetGrid` then a
+  reel's landing tween) - `CascadeEngine`'s job is only to animate playback of an
+  already-fully-resolved sequence, never to decide it live frame-by-frame.
+- **`checkClusterWins(grid, paytable, minClusterSize, scatterSymbol, scatterTriggerCount)`**
+  (`ClusterMath.js`) — Candy Frenzy's win evaluator: orthogonal flood-fill clustering (up/down/
+  left/right, not diagonal) plus a cluster-size payout lookup off each symbol's
+  `paytable[symbol].clusterPayout` (an array of `{ min, multiplier }` breakpoints - a cluster
+  can run all the way up to the full grid, not a small fixed line-length like a payline game's
+  `payout[i]` array). Returns `{ clusterWins, totalPayoutMultiplier, scatterWin }`, the exact
+  shape `resolveCascadeSequence`'s `winEvaluator` parameter expects - a future cascade game
+  with a different win rule (e.g. payline-based) would supply its own evaluator with this same
+  shape instead, unchanged elsewhere.
+
 ## `core/SlotEngine.js` — the live game: state machine + canvas renderer
 
 A class, one instance per running game (`new SlotEngine(canvas, config)`). Owns balance,
@@ -98,6 +162,23 @@ bet, reel physics/animation, and win presentation; delegates all win logic to wh
 to finish at a precomputed timestamp (`landStartTime`), so "did it land" is never a question
 answered by polling physics.
 
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> spinning: requestSpin() / spin()
+    spinning --> stopping
+    stopping --> evaluating
+    evaluating --> free_spins_intro: scatter triggers free spins (first time)
+    evaluating --> expanding: inFreeSpins && expandingSymbol
+    evaluating --> showing_wins: payout > 0
+    evaluating --> idle: no win
+    expanding --> showing_wins
+    free_spins_intro --> spinning: enterFreeSpins()
+    showing_wins --> spinning: next spin
+    idle --> game_over: free spins exhausted
+    game_over --> idle: exitFreeSpins() / returnToIdle()
+```
+
 **Public methods a game calls:**
 - `requestSpin()` — the one entry point for a UI's spin/stop button; safe to call in any
   state (queues itself if the engine is mid-animation, e.g. during an expansion).
@@ -126,6 +207,161 @@ neither needs a method call.
 Rendering (`render()` and everything below it) is internal — a game never calls into it
 directly, only supplies the sprite atlas and reacts to `onStateChange`/`onWin` to update its
 own DOM (balance display, spin button label, etc.).
+
+## `core/CascadeEngine.js` — the cascade-cluster live game
+
+`SlotEngine.js`'s sibling for cascade-cluster games (currently just Candy Frenzy, but nothing
+about this class is Candy-Frenzy-specific) - same "one class instance, owns balance/bet/
+animation, delegates win logic to config" shape, built around `resolveCascadeSequence`
+(`CascadeMath.js`) instead of `generateTargetGrid`. `config.winEvaluator` here is a
+single-argument closure the game supplies (e.g. `(grid) => checkClusterWins(grid, PAYTABLE, 5,
+'bonus', 3)`) - `CascadeEngine` itself knows nothing about clusters or paylines, only about
+grids, cascades, and free spins.
+
+**Construction config** (all optional except `reelStrips`, `paytable`, `winEvaluator`):
+
+| Field | Default | Purpose |
+|---|---|---|
+| `reelsCount`, `rowsCount` | `7`, `7` | Grid shape |
+| `paytable`, `reelStrips` | `{}`, `[]` | Passed straight through to `winEvaluator` / `resolveCascadeSequence` |
+| `winEvaluator` | no-op (no wins) | `(grid) => { clusterWins, totalPayoutMultiplier, scatterWin }` |
+| `scatterSymbol` | `null` | Which symbol name triggers free spins |
+| `freeSpinsMode` | `createFlatMultiplierMode()` | Pluggable free-spins payout mode - see `core/FreeSpinsModes.js` below |
+| `betAmount` | `1` | This game's single flat bet (no bet-per-line/lines concept) |
+| `symbolsConfig`, `spritesheetUrl` | — | Sprite atlas, same shape as `SlotEngine`'s |
+| `onStateChange(state)` | no-op | Fired on every state transition |
+| `onScatterTrigger(scatterCount, isInFreeSpins)` | no-op | Fired instead of auto-advancing when the resolved spin's `scatterWin.triggerFreeSpins` is set |
+| `onWin({amount})` | no-op | Fired whenever a spin pays out |
+
+**State machine** (`engine.state`): `idle` → `dropping_in` → (`clearing` → `falling`)* →
+`showing_wins` → `idle`, plus `free_spins_intro`/`game_over` (free-spins lifecycle, same
+naming convention as `SlotEngine.state`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> dropping_in: spin()
+    dropping_in --> clearing: this step's grid has a cluster win
+    dropping_in --> showing_wins: no win this step, payout > 0
+    dropping_in --> idle: no win this step, no payout
+    clearing --> clearing: more clusters remain in this step
+    clearing --> falling: this step's last cluster finished clearing
+    falling --> clearing: next cascade step's grid has a win
+    falling --> showing_wins: settled (no more wins), payout > 0
+    falling --> idle: settled (no more wins), no payout
+    showing_wins --> dropping_in: spin()
+    idle --> dropping_in: spin()
+    idle --> free_spins_intro: scatter triggers free spins (base game, first time)
+    free_spins_intro --> dropping_in: enterFreeSpins()
+    idle --> game_over: exitFreeSpins() once free spins are exhausted
+    game_over --> idle: returnToIdle()
+```
+
+Each reel/column animates independently rather than behind one global barrier: a column's own
+leftover grid exits, then that same column's new symbols enter immediately
+(`columnOutgoingDone`/`columnEnterStartTime`), staggered left-to-right on an ease-out curve
+(`_columnStartDelay`) so it reads as a wave rather than a
+uniform drop. Within one spin, multiple cascade steps' clusters animate one at a time
+(`currentClusterWins`/`currentClusterIndex`/`_beginClusterClear`), each with its own glow,
+per-symbol vanish variant, particles, floating win popup, and ding - not all bursting at once.
+
+**Public methods a game calls:**
+- `requestSpin()` / `spin(seed?)` — same shape as `SlotEngine`'s; `spin()` also handles the
+  every-spin "leftover grid falls out, new grid falls in" animation and (on the very first
+  call) the decorative non-winning initial fill (`_fillInitialGrid`, called once from `init()`
+  so the grid is never blank on load).
+- `forceScatterResult()` — debug/cheat helper; forces the next spin's final grid to contain 3
+  of `config.scatterSymbol`, for testing the free-spins trigger without waiting for a natural
+  hit.
+- `enterFreeSpinsIntro()` / `enterFreeSpins(spinsCount)` / `retriggerFreeSpins(spinsCount)` /
+  `returnToIdle()` / `exitFreeSpins()` — free-spins lifecycle, entirely game-driven, same
+  division of responsibility as `SlotEngine`'s (see "Optional: free spins" below - the cascade
+  version follows the same pattern). `enterFreeSpins`/`exitFreeSpins` also rebuild the active
+  `freeSpinsMode`'s state fresh (see `core/FreeSpinsModes.js`), so a mode's own per-tile
+  tracking never leaks between bonus rounds or into the base game.
+- `handleAutoPlay()` — schedules the next spin (base-game autoplay or the free-spins loop)
+  after the current one settles.
+
+Also exposes `engine.spinLog`/`engine.lastSpinSeed` as plain properties, same as `SlotEngine`.
+No `runSimulation()`/RUN SIMULATION/TUNE FREQUENCIES support - `SpinSimulator.js` is built
+around `SlotEngine`'s line-pays shape specifically; a cascade-aware equivalent would be a
+separate future project (see Candy Frenzy's own README).
+
+One spin, end to end - resolving the whole outcome synchronously, then animating playback of
+it (`freeSpinsMode` only enters the picture while `inFreeSpins`):
+
+```mermaid
+sequenceDiagram
+    participant Game as game.js
+    participant CE as CascadeEngine
+    participant FSM as FreeSpinsMode
+    participant CM as CascadeMath
+    participant WE as winEvaluator (ClusterMath)
+
+    Game->>CE: requestSpin()
+    CE->>CE: spin(seed)
+    CE->>FSM: wrapWinEvaluator(baseEvaluator, state, engine)
+    FSM-->>CE: wrapped evaluator
+    CE->>CM: resolveCascadeSequence(strips, rows, seed, evaluator)
+    loop each cascade step
+        CM->>WE: winEvaluator(currentGrid)
+        WE-->>CM: clusterWins, totalPayoutMultiplier, scatterWin
+        CM->>CM: applyCascade(...) if this step has a win
+    end
+    CM-->>CE: cascadeSteps, totalPayoutMultiplier, finalGrid, scatterWin
+    CE->>CE: animate() loop drives update()/render() every frame
+    loop per cascade step, per cluster
+        CE->>CE: _beginClusterClear()
+        CE->>FSM: onClusterCleared(cluster, state, engine)
+        CE->>CE: render(): FSM.renderOverlay(state, engine)
+    end
+    CE->>CE: _finishSpin()
+    CE-->>Game: onStateChange(state) / onWin({amount})
+```
+
+## `core/FreeSpinsModes.js` — pluggable free-spins payout modes
+
+How `CascadeEngine` varies what a free-spins win pays, without hardcoding any one rule into
+the engine itself: `config.freeSpinsMode` is a plain object of lifecycle hooks the engine
+calls without knowing which concrete mode is active, only ever consulted while
+`engine.inFreeSpins` (the base game always uses `winEvaluator` completely unwrapped). A future
+mode - for Candy Frenzy or a future cascade game - just needs to implement this same shape, no
+`CascadeEngine` changes required.
+
+- **`createState(engine) -> any`** — builds the mode's own working state. Called once when
+  free spins begin (`enterFreeSpins`) and again the instant they end (`exitFreeSpins`), so
+  persistent per-tile state (like multiplier tiles) always starts fresh at the top of a bonus
+  round and is fully cleared the moment it's over.
+- **`wrapWinEvaluator(baseEvaluator, state, engine) -> (grid) => results`** — wraps the game's
+  win evaluator so every cluster's payout (and the step's `totalPayoutMultiplier`) already
+  reflects this mode's bonus by the time `resolveCascadeSequence` finishes resolving the whole
+  spin, synchronously, one call per cascade step, in chronological order. `CascadeEngine`'s own
+  money code (`_finishSpin`/`_spawnClusterWinPopups`/spin log) trusts these numbers as-is and
+  never applies anything else on top.
+- **`onClusterCleared(cluster, state, engine)`** — called once per cluster, only while
+  `inFreeSpins`, at the exact moment `_beginClusterClear` starts playing that cluster's own
+  clear animation - a mode with visible per-tile state updates it here, in step with the
+  animation, not all at once back when the whole spin was precomputed.
+- **`renderOverlay(state, engine)`** — called once per frame from `render()`, every frame
+  regardless of `inFreeSpins` (a mode's state is reset to "nothing to show" the instant free
+  spins end, so this is naturally a no-op outside a bonus round). Whether it draws before or
+  after the grid's own symbols that frame is controlled by the mode object's own
+  **`renderOverlayOrder`** property (`'behind'` or `'front'`, default `'front'` if omitted) -
+  candy sprite art is essentially opaque, so a `'behind'` overlay is only ever visible on a
+  cell with no symbol drawn over it yet; `'front'` stays legible on a landed tile too. Each
+  mode picks whichever fits its own visual.
+
+Two modes ship today:
+- **`createFlatMultiplierMode(multiplier = 2)`** — `CascadeEngine`'s own default: every
+  free-spins win simply pays `multiplier`x. No per-tile state, no visual overlay.
+- **`createMultiplierTilesMode({ badgeStyle = 'background', renderOrder = 'front' })`** —
+  Candy Frenzy's main free-spins mode: every tile a winning cluster occupies gets (or doubles)
+  a persistent multiplier (untouched = 1x, never drawn; first win = 2x; each subsequent win
+  there doubles it again). A later cluster overlapping one or more marked tiles has their
+  values summed and applied to its own payout. `badgeStyle` picks `'background'` (a big
+  translucent tint + number filling the cell) or `'corner'` (a small solid chip) for how a
+  marked tile's multiplier is drawn; see Candy Frenzy's own README for which it currently uses
+  and why.
 
 ## `core/SpinSimulator.js` — headless simulation and auto-tuning
 
@@ -216,6 +452,11 @@ free-spins-intro flow. Every sound is a small Web Audio oscillator patch built a
 
 A game is a folder `games/<name>/` with three files, wired together by convention rather than
 a plugin registry — there's no central list of games to update.
+
+This section covers a line-pays game (`SlotEngine`) specifically. A cascade-cluster game
+follows the same three-file convention but plugs into `CascadeEngine`/`CascadeMath.js`/
+`ClusterMath.js`/`FreeSpinsModes.js` instead (see their sections above) - Candy Frenzy's own
+README is the worked example, not duplicated here.
 
 ### 1. `game.js` — data + engine instantiation
 
@@ -328,4 +569,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-25, commit `a674e00`._
+_Docs last synced with the codebase: 2026-07-26, commit `59d9969`._

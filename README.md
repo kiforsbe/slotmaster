@@ -182,4 +182,4 @@ compact, regex-friendly format — `TYPE:symbol:count:amount[:flags]` per win, j
 the exact grammar.
 
 ---
-_Docs last synced with the codebase: 2026-07-25, commit `a674e00`._
+_Docs last synced with the codebase: 2026-07-26, commit `59d9969`._

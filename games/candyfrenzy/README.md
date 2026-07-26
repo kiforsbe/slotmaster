@@ -52,3 +52,6 @@ project. The paytable multipliers here are a starting point, not a tuned RTP.
 The **Bonus Trigger** button (visible when `DEBUG_MODE = true` in `game.js`) forces the
 next spin's final grid to contain 3 `bonus` symbols, for testing the free-spins trigger and
 retrigger without waiting for a natural hit.
+
+---
+_Docs last synced with the codebase: 2026-07-26, commit `59d9969`._
