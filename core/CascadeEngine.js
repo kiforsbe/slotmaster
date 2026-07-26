@@ -7,7 +7,7 @@
 import { computeGridLayout } from './GridLayout.js';
 import { drawSpriteSymbol } from './SpriteDrawer.js';
 import { ParticleSystem } from './ParticleSystem.js';
-import { resolveCascadeSequence } from './CascadeMath.js';
+import { resolveCascadeSequence, applyCascade } from './CascadeMath.js';
 import { createCascadeSpinLogEntry } from './SpinLog.js';
 import { audio } from './SlotAudio.js';
 
@@ -77,12 +77,19 @@ export class CascadeEngine {
     this.currentClearVariants = new Map();
     this._forceScatterNextSpin = false;
 
-    // Previous spin's leftover grid (dropping_out state): falls out the bottom before the new
-    // spin's grid starts falling in, with a brief empty-reel gap between the two (empty_gap
-    // state). Null whenever there's nothing exiting.
+    // Previous spin's leftover grid: falls out the bottom, one reel at a time. The moment a
+    // given reel finishes exiting, that same reel's new symbols start dropping in immediately
+    // (columnOutgoingDone/columnEnterStartTime below track this per column, independently -
+    // there's no global "wait for every reel" barrier). outgoingGrid is null whenever nothing
+    // is currently exiting.
     this.outgoingGrid = null;
     this.outgoingOffsets = null;
-    this._gapUntil = 0;
+    this.columnOutgoingDone = new Array(this.config.reelsCount).fill(true);
+    this.columnEnterStartTime = new Array(this.config.reelsCount).fill(null);
+
+    // Per-cell timestamp of when it last landed (offset hit 0), purely for the brief visual
+    // "impact" squash-bounce in _applyLandingBounce - not used for any gameplay timing.
+    this.cellBounceStartTime = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(-Infinity));
 
     // Floating per-cluster win-amount popups. Kept on their own timeline (not tied to
     // clearDuration/the state machine) so they can outlive a fast "clearing" phase and
@@ -98,9 +105,28 @@ export class CascadeEngine {
   }
 
   init() {
+    this._fillInitialGrid();
     this.setupResize();
     this.loadAssets();
     this.animate();
+  }
+
+  // Populates the grid with a decorative, non-winning-evaluated fill before any real spin has
+  // happened, so the game never shows a blank reel on load. Uses the same reel-strip/cursor
+  // mechanics as a real spin (applyCascade), just without running the win evaluator or costing
+  // a bet - the very first real spin() still treats this as an "existing grid" and animates it
+  // falling out first, same as any other spin's leftover grid.
+  _fillInitialGrid() {
+    if (!this.config.reelStrips.length) return;
+    const cursorStateByColumn = this.config.reelStrips.map(strip => ({ index: Math.floor(Math.random() * strip.length) }));
+    const emptyGrid = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(null));
+    const allCleared = [];
+    for (let col = 0; col < this.config.reelsCount; col++) {
+      for (let row = 0; row < this.config.rowsCount; row++) allCleared.push([col, row]);
+    }
+    const { grid } = applyCascade(emptyGrid, cursorStateByColumn, this.config.reelStrips, allCleared);
+    this.grid = grid;
+    this.cellOffsets = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(0));
   }
 
   loadAssets(spritesheetUrl = this.spritesheetUrl, symbolsConfig = this.symbolsConfig) {
@@ -160,53 +186,66 @@ export class CascadeEngine {
     this.particleSystem.update();
     this.activePopups = this.activePopups.filter(p => now - p.startTime < p.duration);
 
-    if (this.state === 'dropping_out') {
-      // The previous spin's leftover grid falls out the bottom, same speed/wave stagger as a
-      // normal drop-in but in reverse (offset grows from 0 up to rowsCount instead of
-      // shrinking to 0), so it reads as the same motion applied to symbols leaving instead of
-      // arriving.
-      const speed = this.turboMode ? 0.6 : 0.055;
-      const columnStagger = this.turboMode ? 20 : 70;
-      let allExited = true;
+    if (this.state === 'dropping_in' || this.state === 'falling') {
+      const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
+      const columnStagger = this.turboMode ? 20 : 70; // ms between each successive reel starting to exit
+      const rampDuration = this.turboMode ? 80 : 220; // ms to ease from a standstill up to full speed
+      let allDone = true;
+
       for (let col = 0; col < this.config.reelsCount; col++) {
-        const columnStarted = now - this.stepStartTime >= col * columnStagger;
-        for (let row = 0; row < this.config.rowsCount; row++) {
-          if (this.outgoingOffsets[col][row] < this.config.rowsCount) {
-            allExited = false;
-            if (columnStarted) {
-              this.outgoingOffsets[col][row] = Math.min(this.config.rowsCount, this.outgoingOffsets[col][row] + speed);
+        if (!this.columnOutgoingDone[col]) {
+          // This reel's leftover symbols are still exiting - advance that first. The moment
+          // it finishes, its own entry starts immediately (no added gap) via
+          // columnEnterStartTime below; reels further right, which started exiting later,
+          // naturally follow a little after, preserving the left-to-right wave without ever
+          // waiting on a "have all reels finished exiting" global barrier.
+          allDone = false;
+          const exitStartAt = this.stepStartTime + col * columnStagger;
+          const effectiveSpeed = this._rampSpeed(speed, now - exitStartAt, rampDuration);
+          let colFinishedExiting = true;
+          for (let row = 0; row < this.config.rowsCount; row++) {
+            if (this.outgoingOffsets[col][row] < this.config.rowsCount) {
+              colFinishedExiting = false;
+              if (effectiveSpeed > 0) {
+                this.outgoingOffsets[col][row] = Math.min(this.config.rowsCount, this.outgoingOffsets[col][row] + effectiveSpeed);
+              }
             }
           }
+          if (colFinishedExiting) {
+            this.columnOutgoingDone[col] = true;
+            this.columnEnterStartTime[col] = now;
+          }
+          continue;
         }
-      }
-      if (allExited) {
-        this.outgoingGrid = null;
-        this.outgoingOffsets = null;
-        this._gapUntil = now + (this.turboMode ? 80 : 220);
-        this.state = 'empty_gap';
-        this.config.onStateChange(this.state);
-      }
-    } else if (this.state === 'empty_gap') {
-      // A brief pause with a visibly empty reel before the new grid starts dropping in.
-      if (now >= this._gapUntil) this._beginDropIn();
-    } else if (this.state === 'dropping_in' || this.state === 'falling') {
-      const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
-      // Reels start falling one after another, left to right, instead of all at once - a
-      // "wave" cascading across the grid rather than a flat drop.
-      const columnStagger = this.turboMode ? 20 : 70; // ms between each successive reel starting
-      let allLanded = true;
-      for (let col = 0; col < this.config.reelsCount; col++) {
-        const columnStarted = now - this.stepStartTime >= col * columnStagger;
+
+        const enterStartAt = this.columnEnterStartTime[col];
+        const effectiveSpeed = enterStartAt == null ? 0 : this._rampSpeed(speed, now - enterStartAt, rampDuration);
+        let columnJustLanded = false;
         for (let row = 0; row < this.config.rowsCount; row++) {
           if (this.cellOffsets[col][row] > 0) {
-            allLanded = false;
-            if (columnStarted) {
-              this.cellOffsets[col][row] = Math.max(0, this.cellOffsets[col][row] - speed);
+            allDone = false;
+            if (effectiveSpeed > 0) {
+              const after = Math.max(0, this.cellOffsets[col][row] - effectiveSpeed);
+              this.cellOffsets[col][row] = after;
+              if (after === 0) {
+                this.cellBounceStartTime[col][row] = now;
+                columnJustLanded = true;
+              }
             }
           }
         }
+        // One thud per reel per landing moment, not per cell - a whole spawned/surviving
+        // group in a column typically lands in the same frame, so this fires once for that
+        // group rather than stuttering out several near-simultaneous copies of the same sound.
+        if (columnJustLanded) audio.playReelStop(col);
       }
-      if (allLanded) this._onStepLanded();
+
+      if (this.outgoingGrid && this.columnOutgoingDone.every(Boolean)) {
+        this.outgoingGrid = null;
+        this.outgoingOffsets = null;
+      }
+
+      if (allDone) this._onStepLanded();
     } else if (this.state === 'clearing') {
       const clearDuration = this.turboMode ? 150 : 380;
       if (now - this.clearStartTime >= clearDuration) this._advanceToNextStep();
@@ -216,6 +255,16 @@ export class CascadeEngine {
       this.pendingSpinRequest = false;
       this.startNextSpin();
     }
+  }
+
+  // A column's effective fall speed at this instant: 0 before its own local start time, then
+  // easing up to `baseSpeed` via a sine ramp instead of snapping straight to full speed - this
+  // (plus each column's staggered/chained start time) is what makes the motion read as a wave
+  // rippling across the grid rather than a mechanical, uniform drop.
+  _rampSpeed(baseSpeed, localElapsedMs, rampDurationMs) {
+    if (localElapsedMs <= 0) return 0;
+    const t = Math.min(localElapsedMs / rampDurationMs, 1);
+    return baseSpeed * Math.sin(t * (Math.PI / 2));
   }
 
   _onStepLanded() {
@@ -267,7 +316,14 @@ export class CascadeEngine {
     this.grid = step.grid;
     this.cellOffsets = step.fallOffsets.map(col => col.slice());
     this.currentClearPositions = [];
+
+    // A mid-spin cascade refill has no "leftover grid to exit" concept - every column is
+    // immediately free to enter, staggered left-to-right same as always.
     this.stepStartTime = Date.now();
+    const columnStagger = this.turboMode ? 20 : 70;
+    this.columnOutgoingDone = new Array(this.config.reelsCount).fill(true);
+    this.columnEnterStartTime = this.columnEnterStartTime.map((_, col) => this.stepStartTime + col * columnStagger);
+
     this.state = 'falling';
     this.config.onStateChange(this.state);
   }
@@ -377,29 +433,31 @@ export class CascadeEngine {
 
     audio.playSpin();
 
-    // If a previous spin left symbols on the grid, they fall out the bottom first (with a
-    // brief empty-reel gap after) before this spin's grid starts dropping in - see
-    // _beginDropIn(). The very first spin ever (grid still all-null) skips straight to it.
+    // If a previous spin (or the decorative initial fill) left symbols on the grid, each reel's
+    // leftover symbols fall out the bottom before that SAME reel's new symbols drop in (see
+    // update()'s columnOutgoingDone/columnEnterStartTime handling) - no reel waits on its
+    // neighbors to finish exiting first.
     const hasExistingGrid = this.grid.some(col => col.some(cell => cell !== null));
+    this.stepStartTime = Date.now();
+    const columnStagger = this.turboMode ? 20 : 70;
     if (hasExistingGrid) {
       this.outgoingGrid = this.grid;
       this.outgoingOffsets = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(0));
-      this.stepStartTime = Date.now();
-      this.state = 'dropping_out';
-      this.config.onStateChange(this.state);
+      this.columnOutgoingDone = new Array(this.config.reelsCount).fill(false);
+      this.columnEnterStartTime = new Array(this.config.reelsCount).fill(null);
     } else {
-      this._beginDropIn();
+      this.outgoingGrid = null;
+      this.outgoingOffsets = null;
+      this.columnOutgoingDone = new Array(this.config.reelsCount).fill(true);
+      this.columnEnterStartTime = Array.from({ length: this.config.reelsCount }, (_, col) => this.stepStartTime + col * columnStagger);
     }
-  }
 
-  _beginDropIn() {
     this.stepIndex = 0;
     const firstStep = this.cascadeSequence.cascadeSteps[0];
     this.grid = firstStep.grid;
     this.cellOffsets = firstStep.fallOffsets.map(col => col.slice());
     this.currentClearPositions = [];
 
-    this.stepStartTime = Date.now();
     this.state = 'dropping_in';
     this.config.onStateChange(this.state);
   }
@@ -494,12 +552,7 @@ export class CascadeEngine {
     this.ctx.clip();
 
     this._renderOutgoingGridSymbols();
-    // During dropping_out/empty_gap, this.grid still holds the previous spin's settled
-    // contents (not yet overwritten - see _beginDropIn) - it's outgoingGrid's job to draw
-    // those symbols as they exit, so skip the normal draw entirely here to avoid a duplicate.
-    if (this.state !== 'dropping_out' && this.state !== 'empty_gap') {
-      this._renderGridSymbols();
-    }
+    this._renderGridSymbols();
 
     this.ctx.restore();
 
@@ -535,11 +588,17 @@ export class CascadeEngine {
   }
 
   _renderGridSymbols() {
+    const now = Date.now();
     const isClearing = this.state === 'clearing';
     const clearDuration = this.turboMode ? 150 : 380;
-    const clearProgress = isClearing ? Math.min((Date.now() - this.clearStartTime) / clearDuration, 1) : null;
+    const clearProgress = isClearing ? Math.min((now - this.clearStartTime) / clearDuration, 1) : null;
+    const bounceDuration = this.turboMode ? 140 : 260;
 
     for (let col = 0; col < this.config.reelsCount; col++) {
+      // While this reel's leftover symbols are still exiting, _renderOutgoingGridSymbols draws
+      // them - skip the new grid's content here to avoid showing both at once.
+      if (!this.columnOutgoingDone[col]) continue;
+
       for (let row = 0; row < this.config.rowsCount; row++) {
         const symbol = this.grid[col][row];
         if (!symbol) continue;
@@ -550,15 +609,35 @@ export class CascadeEngine {
         const tile = this.symbolsConfig[symbol];
 
         const clearInfo = isClearing ? this.currentClearVariants.get(`${col},${row}`) : null;
+        const bounceElapsed = now - this.cellBounceStartTime[col][row];
+        const isBouncing = !clearInfo && offsetRows === 0 && bounceElapsed >= 0 && bounceElapsed < bounceDuration;
 
         this.ctx.save();
         if (clearInfo) {
           this._applyClearTransform(clearInfo, clearProgress, cx, cy);
+        } else if (isBouncing) {
+          this._applyLandingBounce(bounceElapsed / bounceDuration, cx, cy);
         }
         drawSpriteSymbol(this.ctx, this.spritesheet, tile, cx, cy, this.symbolWidth, this.symbolHeight, 0);
         this.ctx.restore();
       }
     }
+  }
+
+  // A brief, decaying squash-and-stretch when a symbol lands (offset hits 0) - it reads as
+  // compressing on impact against the grid's bottom (or the stack of symbols already resting
+  // below it) and springing back, rather than abruptly stopping. Pivots on the cell's bottom
+  // edge, not its center, so the squash reads as pressing down rather than floating in place.
+  _applyLandingBounce(progress, cx, cy) {
+    const decay = Math.exp(-progress * 6);
+    const wobble = Math.sin(progress * Math.PI * 3) * decay;
+    const squashX = 1 + wobble * 0.15;
+    const squashY = 1 - wobble * 0.25;
+    const centerX = cx + this.symbolWidth / 2;
+    const bottomY = cy + this.symbolHeight;
+    this.ctx.translate(centerX, bottomY);
+    this.ctx.scale(squashX, squashY);
+    this.ctx.translate(-centerX, -bottomY);
   }
 
   // Applies one of a few random per-symbol "vanish" animations to a cleared cell (see
@@ -600,9 +679,11 @@ export class CascadeEngine {
     this.ctx.translate(-centerX, -centerY);
   }
 
-  // The previous spin's leftover grid, falling out the bottom during dropping_out (see
-  // spin()/update()). Positive outgoingOffsets move a symbol DOWN from its original row
-  // (opposite sign convention from cellOffsets, which move a symbol up into place).
+  // The previous spin's leftover grid, falling out the bottom one reel at a time (see
+  // spin()/update()'s columnOutgoingDone handling). Positive outgoingOffsets move a symbol
+  // DOWN from its original row (opposite sign convention from cellOffsets, which move a
+  // symbol up into place). A column whose offsets have all reached rowsCount is fully exited
+  // and simply has nothing left to draw here - no separate per-column flag needed.
   _renderOutgoingGridSymbols() {
     if (!this.outgoingGrid) return;
     for (let col = 0; col < this.config.reelsCount; col++) {

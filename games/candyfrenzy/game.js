@@ -185,13 +185,10 @@ function updateUI() {
 function handleStateChange(state) {
   updateUI();
 
-  if (state === 'dropping_out' || state === 'empty_gap' || state === 'dropping_in' || state === 'falling') {
+  if (state === 'dropping_in' || state === 'falling') {
     btnSpin.textContent = 'STOP';
     btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = state === 'dropping_out' ? 'CLEARING REELS...'
-      : state === 'empty_gap' ? ''
-      : state === 'dropping_in' ? 'DROPPING IN...'
-      : 'CASCADING...';
+    gameTicker.textContent = state === 'dropping_in' ? 'DROPPING IN...' : 'CASCADING...';
   } else if (state === 'clearing') {
     gameTicker.textContent = 'SWEET WIN!';
   } else {
