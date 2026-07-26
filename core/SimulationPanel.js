@@ -442,6 +442,12 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
             <option value="normal">Random (normal) within min/max</option>
           </select>
         </label>
+        <label title="Which algorithm searches the per-symbol reel weights (Phase 2). Nelder-Mead (default) is a simplex search - simple and fast for a small number of tunable symbols. CMA-ES is a population-based search that scales better to many tunable symbols at once and is more tolerant of noisy RTP measurements (e.g. Candy Frenzy's cascade multiplier bonus) - at the cost of evaluating a whole population of candidates every generation instead of one or two." style="font-size: 0.8em; color: #ccc;">Search Algorithm<br>
+          <select id="tune-search-algorithm" style="width: 100%; margin-top: 4px;">
+            <option value="nelderMead" selected>Nelder-Mead (default)</option>
+            <option value="cmaes">CMA-ES</option>
+          </select>
+        </label>
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
         ${biasSelectorsHtml}
@@ -618,6 +624,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
     uniformityPenaltyWeight: tuneContainer.querySelector('#tune-uniformity-weight'),
     initialWeightStrategy: tuneContainer.querySelector('#tune-initial-weight-strategy'),
+    searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
   const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
@@ -673,6 +680,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
     uniformityPenaltyWeight: parseFloat(inputs.uniformityPenaltyWeight.value) || 0,
     initialWeightStrategy: inputs.initialWeightStrategy.value,
+    searchAlgorithm: inputs.searchAlgorithm.value,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
     // strength of 0 mutes the preference the same way "No preference" does, without losing
     // the dropdown's own selection; above 1 enforces it harder than the shared Ordering
