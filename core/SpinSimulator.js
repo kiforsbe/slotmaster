@@ -1379,7 +1379,19 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     let stillImproving = { rtp: true, ordering: true, limits: true, uniformity: true };
 
     do {
-      const roundIterations = Math.min(stallWindowIterations, maxIterations - iterationsUsed);
+      // CMA-ES doesn't chop into short `stallWindowIterations` rounds the way Nelder-Mead
+      // does: it continuously adapts its own step size and covariance matrix generation to
+      // generation, so judging it "stalled" after only a handful of generations - especially
+      // on an expensive, many-dimensional, many-spin search - cuts it off before it's had a
+      // real chance to make progress, then throws away its learned covariance/step-size state
+      // for no good reason. It gets the FULL remaining budget in one call instead, and only
+      // loops back around here at all if it stops on its own before using all of it (its own
+      // sigma-collapse convergence check, `nm.converged` below) - at which point a widened
+      // restart (same mechanism as Nelder-Mead's) is a legitimate "try a wider net after
+      // genuine convergence" step, not a premature interruption.
+      const roundIterations = searchAlgorithm === 'cmaes'
+        ? maxIterations - iterationsUsed
+        : Math.min(stallWindowIterations, maxIterations - iterationsUsed);
       const nmSeed = baseNmSeed + restarts * 1300021;
       const roundStartIterations = iterationsUsed;
       // Which function actually runs this round - both return the same

@@ -780,17 +780,22 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           return;
         }
         // Explains an otherwise-silent, unusually long gap between two ordinary progress lines
-        // (a Nelder-Mead simplex shrink re-evaluating every vertex, or a gradient-descent
-        // plateau-widening retry). Only fires again while that same operation is still running,
-        // throttled server-side to at most once every busyReportIntervalMs - updating the same
-        // row in place (rather than appending a new one per update) keeps a slow step from
-        // turning into a wall of near-duplicate lines.
+        // (a Nelder-Mead simplex shrink re-evaluating every vertex, a CMA-ES generation
+        // evaluating its whole population, or a gradient-descent plateau-widening retry). Only
+        // fires again while that same operation is still running, throttled server-side to at
+        // most once every busyReportIntervalMs - updating the same row in place (rather than
+        // appending a new one per update) keeps a slow step from turning into a wall of
+        // near-duplicate lines.
         if (phase === 'busy') {
           const label = r.sourcePhase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
           const message = r.operation === 'shrink'
             ? (r.verticesEvaluated != null
               ? `still working - simplex shrinking (${r.verticesEvaluated}/${r.verticesToEvaluate} candidates evaluated)...`
               : `still working - simplex shrinking, re-evaluating ${r.verticesToEvaluate} candidates...`)
+            : r.operation === 'generation'
+            ? (r.verticesEvaluated != null
+              ? `still working - evaluating this generation's population (${r.verticesEvaluated}/${r.verticesToEvaluate} candidates evaluated)...`
+              : `still working - evaluating this generation's population (${r.verticesToEvaluate} candidates)...`)
             : (r.probeAttempt != null
               ? `still working - widening probe to find a measurable slope (attempt ${r.probeAttempt}/8)...`
               : `still working - widening probe to find a measurable slope...`);

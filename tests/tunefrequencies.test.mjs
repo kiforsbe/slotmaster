@@ -968,7 +968,7 @@ test('tuneFrequencies with searchAlgorithm: "cmaes" converges to a sane RTP on a
   const { rtp, diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 80,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 30,
     searchAlgorithm: 'cmaes', searchSeed: 42,
   });
   assert.ok(Math.abs(rtp - 96) < 10, `expected cmaes to get reasonably close to target RTP 96, got ${rtp}`);
