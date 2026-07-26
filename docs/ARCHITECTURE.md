@@ -445,7 +445,8 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   own `config.mechanic`). Given a paytable and one frequency table per reel, searches for reel
   frequencies that hit a target RTP and free-spins trigger rate, returning a tuned clone (never
   mutates its input). See its own extensive JSDoc in the file for the full two-phase strategy
-  (trigger-rate scaling, then a joint Nelder-Mead search over per-symbol weights) and every
+  (trigger-rate scaling, then a joint per-symbol weight search — Nelder-Mead by default, or
+  CMA-ES via `options.searchAlgorithm: 'cmaes'`, see "Pluggable search algorithm" below) and every
   tuning knob (`orderingBiasByReel`, `limitPenaltyWeight`, `uniformityPenaltyWeight`,
   `initialWeightStrategy`, `minFrequency`/`maxFrequency`, `fixed`, ...) — that doc is
   deliberately the canonical reference, not duplicated here. `diagnostics.rtpPhase` also
@@ -455,8 +456,10 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   may just be a lucky sample rather than a trustworthy measurement — a real risk for a
   high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly, as Candy
   Frenzy's does) where `trialSpins`/`trialsPerPoint` weren't large enough to average out rare
-  huge wins. `core/SimulationPanel.js`'s tuning panel surfaces this as a warning banner when the
-  spread exceeds twice `rtpTolerancePct`.
+  huge wins. `core/SimulationPanel.js`'s tuning panel always surfaces this spread alongside the
+  RTP figure, and shows a dedicated warning banner whenever the candidate's standard error
+  exceeds `options.maxRtpStdError` (which also gates whether `tuneFrequencies` itself considers
+  that result `'converged'` at all — see `maxRtpStdError`'s own doc).
 - **`gradientDescent1D`**, **`nelderMead`**, **`computeValueRanks`**, **`renormalizeWeights`**
   — the generic numerical-search machinery `tuneFrequencies` is built from (log-space 1D
   search, an N-dimensional simplex search, symbol-value ranking given a `payoutOf`, and
@@ -490,6 +493,31 @@ UI), each running `core/simulationTrialWorker.js` — a small script that resolv
 resolves them back to the real objects/functions), the same convention every other
 postMessage-crossing config in this codebase uses. Omitting `runTrial` (the default) runs
 exactly the original in-process sequential loop — every existing caller/test is unaffected.
+
+### Pluggable search algorithm (`options.searchAlgorithm`)
+
+Phase 2's joint per-symbol weight search can run on either of two interchangeable algorithms,
+selected via `options.searchAlgorithm` (`'nelderMead'` — the default, unchanged — or `'cmaes'`):
+both `nelderMead()` (this file) and `cmaes()` (`core/CMAES.js`) return the exact same
+`{ point, loss, result, iterations, converged }` shape, so `tuneFrequencies`' round loop
+(restarts, stall detection, seed-shifting, `reason` classification) calls either one without
+knowing which it got.
+
+CMA-ES (Covariance Matrix Adaptation Evolution Strategy) samples a whole population of
+candidates each generation from a covariance-shaped Gaussian distribution around its current
+best guess, ranks them, and adapts its mean/step-size/covariance from that ranking — see
+`core/CMAES.js`'s own doc for the full algorithm. Two properties make it a better fit than
+Nelder-Mead for a search like Candy Frenzy's (~84 tunable dimensions, ~70% measured RTP standard
+error at default trial settings): every generation's population evaluates concurrently across
+the Worker pool (a bigger, more consistent win than Nelder-Mead's occasional shrink-step
+parallelism), and its rank-based, population-wide comparisons are inherently more tolerant of
+noisy per-candidate measurements than Nelder-Mead's pairwise `<` comparisons.
+
+Independent of which algorithm is chosen, `tuneFrequencies`' own cross-round `best`-tracking
+(`beatsIncumbent`, this file) only replaces the incumbent once a new candidate beats it by more
+than their combined `trialRtpStdError`-based margin (scaled by `options.bestAcceptanceZ`,
+default `1.0`) — so a "better" result that's really just a luckier Monte Carlo sample can't
+silently become the new best, regardless of which algorithm produced it.
 
 ## `core/SimulationPanel.js` — browser UI for the simulator
 
@@ -683,4 +711,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `96d27bc`._
+_Docs last synced with the codebase: 2026-07-26, commit `a6d717b`._
