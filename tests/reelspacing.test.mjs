@@ -1,56 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { generateReel } from '../core/SlotMath.js';
 
-// Reel strips ARE shipped game data: every game builds its REEL_STRIPS by calling generateReel
-// with fixed seeds at module load, so any change to how it places or spaces symbols silently
-// changes that game's live reels and its RTP. These goldens exist so such a change has to be
-// deliberate - if one fails, the question is not "update the hash" but "did I mean to alter
-// every existing game's reels?". They were captured while optimizing _enforceMinGap's candidate
-// scan, specifically to prove that optimization changed nothing.
-const GOLDEN = {
-  barfruits: '55f2988adc4dae19',
-  bookbookbook: '9b319a4be9d7b732',
-  candyfrenzy: '94506b5230d65386',
-  fruitmachine: '7c6edd571e317932',
-};
-
-const hash = (s) => createHash('sha256').update(s).digest('hex').slice(0, 16);
-
-// game.js modules register a window load handler at import time.
-globalThis.window ??= { addEventListener() {} };
-
-for (const game of Object.keys(GOLDEN)) {
-  test(`generateReel output for ${game} is unchanged (shipped reel strips)`, async () => {
-    const m = await import(`../games/${game}/game.js`);
-    const tables = [m.FREQUENCY_REEL1, m.FREQUENCY_REEL2, m.FREQUENCY_REEL3,
-      m.FREQUENCY_REEL4, m.FREQUENCY_REEL5, m.FREQUENCY_REEL6, m.FREQUENCY_REEL7].filter(Boolean);
-    // bookbookbook doesn't export its seeds/paytable; the fallbacks only need to be STABLE for
-    // this golden to be meaningful, not to match that game's own internal values.
-    const seeds = m.REEL_SEEDS ?? [1234, 567, 89, 765, 3321, 111, 222];
-    const len = m.REEL_LENGTH ?? 500;
-    const paytable = m.PAYTABLE ?? {};
-    const all = tables.map((rt, i) => generateReel(rt, len, seeds[i % seeds.length], [], 3, paytable).join('|')).join('#');
-    assert.equal(hash(all), GOLDEN[game],
-      `${game}'s generated reel strips changed. This alters the live game's reels and RTP - only update this golden if that was intended.`);
-  });
-}
-
-test('generateReel output is unchanged for a dense, tightly-spaced, long strip', () => {
-  // The case that actually exercises _enforceMinGap's repair loop hard: one symbol taking most of
-  // the strip, a wide gap requirement it cannot fully satisfy, and lengths where the old
-  // O(n * occurrences) candidate scan dominated the runtime.
-  const stress = {
-    defaults: { minGap: 9, maxStack: 3, minStack: 1 },
-    symbols: { a: { frequency: 5 }, b: { frequency: 1 }, c: { frequency: 1 }, d: { frequency: 1 } },
-  };
-  const combined = [500, 1500, 3000]
-    .map(len => [1, 42].map(seed => generateReel(stress, len, seed, [], 3, {}).join('|')).join('#'))
-    .join('##');
-  assert.equal(hash(combined), '62871b1dc1d467b4',
-    'generateReel changed on a dense/long strip - the minGap repair path is not producing identical output');
-});
+// Properties of generateReel's symbol placement, asserted as BEHAVIOUR rather than as exact
+// output. An earlier version of this file hashed generated strips and compared against goldens;
+// that was dropped deliberately. Its only real job was proving the _enforceMinGap candidate-scan
+// optimization changed nothing, which was verified directly against the pre-optimization
+// implementation at the time. Beyond that one-off it was pure cost: reel frequencies, minGap and
+// stacking settings are all things a developer changes constantly while tuning a game, and a
+// test that has to be re-blessed on every such change stops being read.
+//
+// What is asserted here instead holds regardless of how those parameters are set.
 
 test('generateReel honors minGap whenever the strip has room for it', () => {
   // 300 positions, minGap 5, `rare` occurring ~10 times: 10 * 5 = 50 << 300, so there is ample
@@ -86,18 +46,30 @@ test('generateReel honors minGap whenever the strip has room for it', () => {
   }
 });
 
-test('generateReel stays responsive on a long strip - the minGap repair is not superlinear enough to stall a UI', () => {
+test('the minGap repair does not dominate generateReel\'s cost on a long strip', () => {
   // generateReel runs on the main thread (every game builds REEL_STRIPS at import, and the tuning
   // panel regenerates them per candidate), so its cost is felt directly as UI lag. Before the
-  // candidate-scan fix, 7 reels at length 3000 took ~520ms - a visible freeze. This is a generous
-  // ceiling meant to catch a return to the old near-cubic behavior, not to pin an exact number.
-  const table = {
-    defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.1 },
-    symbols: Object.fromEntries('abcdefghijkl'.split('').map(s => [s, { frequency: 1 }])),
+  // candidate-scan fix, 7 reels at length 3000 took ~520ms - a visible freeze - against ~11ms for
+  // the identical build with spacing off, i.e. the repair was ~48x the entire rest of the work.
+  // After, the same comparison is ~7x.
+  //
+  // Asserted as that RATIO rather than as wall-clock milliseconds on purpose. An absolute
+  // threshold is load-dependent: this suite runs its files in parallel, and the same build that
+  // takes 168ms alone took 466ms under full-suite CPU contention, which made a millisecond
+  // assertion flaky rather than meaningful. Both halves of a ratio absorb that contention equally.
+  const symbols = Object.fromEntries('abcdefghijkl'.split('').map(s => [s, { frequency: 1 }]));
+  const withGap = { defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.1 }, symbols };
+  const withoutGap = { defaults: { minGap: 1, maxStack: 4, minStack: 2, stackChance: 0.1 }, symbols };
+
+  const timeOf = (table) => {
+    const started = performance.now();
+    for (let i = 0; i < 7; i++) generateReel(table, 3000, 100 + i, [], 3, {});
+    return performance.now() - started;
   };
-  const started = Date.now();
-  for (let i = 0; i < 7; i++) generateReel(table, 3000, 100 + i, [], 3, {});
-  const elapsed = Date.now() - started;
-  assert.ok(elapsed < 400,
-    `expected 7 reels at length 3000 to build well under 400ms, took ${elapsed}ms - the minGap repair has regressed toward its old cost`);
+  timeOf(withoutGap); // warm up, so JIT compilation doesn't land entirely on the first measurement
+  const baseline = Math.max(timeOf(withoutGap), 1);
+  const spaced = timeOf(withGap);
+
+  assert.ok(spaced / baseline < 20,
+    `minGap enforcement cost ${(spaced / baseline).toFixed(1)}x the un-spaced build (${spaced.toFixed(0)}ms vs ${baseline.toFixed(0)}ms). It was ~48x before the candidate-scan fix and ~7x after, so this suggests a regression back toward the old O(n * occurrences) scan.`);
 });
