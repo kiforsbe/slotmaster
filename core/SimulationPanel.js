@@ -441,6 +441,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label title="Penalizes how far a candidate's trigger rate sits OUTSIDE the target band (zero anywhere inside it), in percentage points - the same scale as RTP error, so a weight of 1 trades 1pp of trigger-rate drift against 1pp of RTP error. Phase 2 never tunes trigger symbols directly, so for a line-pay game the trigger rate cannot move and this can stay 0. For a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies (bonus frequency held identical) swings the trigger rate from 0.75% to 2.04%. With this at 0 the search cannot see that happening, which is how a cascade tune ends up with a good RTP and a trigger rate nowhere near target." style="font-size: 0.8em; color: #ccc;">Trigger Rate Penalty Weight<br>
           <input id="tune-trigger-rate-weight" type="number" value="${tuneConfig.triggerRatePenaltyWeight ?? 0}" step="0.5" min="0" style="width: 100%; margin-top: 4px;">
         </label>
+        <label title="Penalizes reel-SPACING constraints the generated strip actually fails to honor: runs of the same symbol closer together than its minGap, and runs longer than its maxStack. generateReel enforces both BEST-EFFORT - on a strip too dense to space a symbol out it silently gives up - so without this the search sees no cost at all in pushing a symbol's frequency past what the strip can represent, while the shipped reels clump far more than the config asks. On a cluster-pays game that clumping is exactly what inflates cluster wins and RTP. Counted as one unit per too-close run pair plus one per position a run exceeds maxStack. Note this cannot always reach zero: a symbol needing minGap G can have at most reelLength/G runs, and a game already over that ceiling at baseline starts non-zero - the point is to stop the search making it much worse." style="font-size: 0.8em; color: #ccc;">Reel Spacing Penalty Weight<br>
+          <input id="tune-spacing-weight" type="number" value="${tuneConfig.spacingPenaltyWeight ?? 0}" step="0.05" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
         <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
           <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
             <option value="provided" selected>Use configured baseline (default)</option>
@@ -678,6 +681,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     uniformityPenaltyWeight: tuneContainer.querySelector('#tune-uniformity-weight'),
     stdErrorPenaltyWeight: tuneContainer.querySelector('#tune-std-error-weight'),
     triggerRatePenaltyWeight: tuneContainer.querySelector('#tune-trigger-rate-weight'),
+    spacingPenaltyWeight: tuneContainer.querySelector('#tune-spacing-weight'),
     initialWeightStrategy: tuneContainer.querySelector('#tune-initial-weight-strategy'),
     searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
   };
@@ -744,6 +748,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     uniformityPenaltyWeight: parseFloat(inputs.uniformityPenaltyWeight.value) || 0,
     stdErrorPenaltyWeight: parseFloat(inputs.stdErrorPenaltyWeight.value) || 0,
     triggerRatePenaltyWeight: parseFloat(inputs.triggerRatePenaltyWeight.value) || 0,
+    spacingPenaltyWeight: parseFloat(inputs.spacingPenaltyWeight.value) || 0,
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
@@ -889,6 +894,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.uniformityPenaltyWeight > 0) parts.push(`uniformity ${candidate.uniformityPenalty.toFixed(4)}×${options.uniformityPenaltyWeight}=${(candidate.uniformityPenalty * options.uniformityPenaltyWeight).toFixed(4)}`);
           if (options.stdErrorPenaltyWeight > 0) parts.push(`std error ${(candidate.trialRtpStdError ?? 0).toFixed(4)}×${options.stdErrorPenaltyWeight}=${((candidate.trialRtpStdError ?? 0) * options.stdErrorPenaltyWeight).toFixed(4)}`);
           if (options.triggerRatePenaltyWeight > 0) parts.push(`trigger rate ${(candidate.triggerRatePenalty ?? 0).toFixed(4)}×${options.triggerRatePenaltyWeight}=${((candidate.triggerRatePenalty ?? 0) * options.triggerRatePenaltyWeight).toFixed(4)}`);
+          if (options.spacingPenaltyWeight > 0) parts.push(`spacing ${(candidate.spacingPenalty ?? 0).toFixed(0)}×${options.spacingPenaltyWeight}=${((candidate.spacingPenalty ?? 0) * options.spacingPenaltyWeight).toFixed(4)}`);
           return `loss ${candidate.loss.toFixed(4)} (${parts.join(', ')})`;
         };
 
@@ -906,6 +912,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.uniformityPenaltyWeight > 0) components.push({ label: 'uniformity', raw: candidate.uniformityPenalty, weight: options.uniformityPenaltyWeight, color: '#c58fff' });
           if (options.stdErrorPenaltyWeight > 0) components.push({ label: 'std error', raw: candidate.trialRtpStdError ?? 0, weight: options.stdErrorPenaltyWeight, color: '#5fd4c4' });
           if (options.triggerRatePenaltyWeight > 0) components.push({ label: 'trigger rate', raw: candidate.triggerRatePenalty ?? 0, weight: options.triggerRatePenaltyWeight, color: '#ff9f5f' });
+          if (options.spacingPenaltyWeight > 0) components.push({ label: 'spacing', raw: candidate.spacingPenalty ?? 0, weight: options.spacingPenaltyWeight, color: '#9fd45f' });
           components.forEach(c => { c.contribution = c.raw * c.weight; });
           return components;
         };
@@ -942,6 +949,20 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         if (phase === 'initial') {
           appendLog(`Starting point selected (${initialWeightStrategyLabels[options.initialWeightStrategy] || options.initialWeightStrategy})`);
           if (r.trial) updateLiveTable(r.trial, null);
+          return;
+        }
+        // Phase 0: this game's own minGap spacing cannot be honored at this reel length, and
+        // generateReel fails at it SILENTLY (best-effort, then gives up). Logged loudly and
+        // first, before any tuning output, because no amount of tuning or penalty weighting can
+        // fix it - the arithmetic simply doesn't allow it.
+        if (phase === 'feasibility') {
+          appendLog(`⚠ REEL CONSTRAINTS CANNOT BE SATISFIED - ${r.infeasible.length} symbol/reel pair${r.infeasible.length === 1 ? '' : 's'} need more room than a ${r.reelLength}-position strip has:`);
+          r.infeasible.slice(0, 8).forEach(v => {
+            appendLog(`   • reel ${v.reel + 1} "${v.symbol}" needs ${v.runs} separate runs but minGap ${v.minGap} allows at most ${v.ceiling} (frequency ${v.frequency.toFixed(4)})`);
+          });
+          if (r.infeasible.length > 8) appendLog(`   • …and ${r.infeasible.length - 8} more`);
+          appendLog(`   … generateReel spaces symbols BEST-EFFORT and silently gives up when it runs out of room, so these reels will clump more than the config asks - on a cluster-pays game that directly inflates cluster wins and RTP.`);
+          appendLog(`   … tuning cannot fix this. Either lower minGap, raise Reel Length, or bring that symbol's frequency down (a symbol needing N runs requires reelLength >= N x minGap).`);
           return;
         }
         // Phase 1b: the shared multiplier couldn't land inside the target band (all reels step
@@ -1075,6 +1096,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             { label: 'uniformity penalty', delta: (current.uniformityPenalty - bestCandidate.uniformityPenalty) * options.uniformityPenaltyWeight },
             { label: 'std error penalty', delta: ((current.trialRtpStdError ?? 0) - (bestCandidate.trialRtpStdError ?? 0)) * options.stdErrorPenaltyWeight },
             { label: 'trigger rate penalty', delta: ((current.triggerRatePenalty ?? 0) - (bestCandidate.triggerRatePenalty ?? 0)) * options.triggerRatePenaltyWeight },
+            { label: 'spacing penalty', delta: ((current.spacingPenalty ?? 0) - (bestCandidate.spacingPenalty ?? 0)) * options.spacingPenaltyWeight },
           ];
           notPromotedReason = terms.reduce((a, b) => (b.delta > a.delta ? b : a));
           appendLog(`   … not promoted to best - ${notPromotedReason.label} is worse by ${notPromotedReason.delta.toFixed(4)} (loss ${current.loss.toFixed(4)} vs best's ${bestCandidate.loss.toFixed(4)})`);
@@ -1273,6 +1295,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // Spelling out the closest achievable rates either side turns an otherwise baffling
     // "did not converge" into an actionable choice: widen the tolerance, move the target onto a
     // value that exists, or lengthen the reel strip to make the lattice finer.
+    // Repeated here as well as in the live log because it is the one finding that invalidates
+    // everything below it: if the reels physically cannot honor their own spacing config, the
+    // measured RTP describes strips that clump more than the game intends, and no weight or
+    // iteration count changes that. A dev reading only the summary must still see it.
+    const infeasible = diagnostics.reelFeasibility ?? [];
+    if (infeasible.length > 0) {
+      const rows = infeasible.slice(0, 6).map(v =>
+        `<li>reel ${v.reel + 1} <strong>${v.symbol}</strong> — needs ${v.runs} runs, minGap ${v.minGap} allows ${v.ceiling} (freq ${v.frequency.toFixed(4)})</li>`).join('');
+      html += `<p style="font-size: 0.8em; color: #ff8080; margin: 8px 0; padding: 8px; background: #2a2a2a; border-left: 3px solid #ff8080;">`
+        + `<strong>Reel spacing constraints cannot be satisfied</strong> — ${infeasible.length} symbol/reel pair${infeasible.length === 1 ? '' : 's'} need more room than this strip has. `
+        + `generateReel spaces best-effort and <em>silently gives up</em> when it runs out, so these reels clump more than configured — which on a cluster-pays game inflates cluster wins and RTP.`
+        + `<ul style="margin: 6px 0 6px 16px; padding: 0;">${rows}</ul>`
+        + (infeasible.length > 6 ? `<span style="color:#999;">…and ${infeasible.length - 6} more. </span>` : '')
+        + `A symbol needing N runs requires reelLength ≥ N × minGap. Lower minGap, raise Reel Length, or bring that symbol's frequency down — tuning cannot fix it.`
+        + `</p>`;
+    }
+
     // Phase 2 can move the trigger rate even though it never tunes a trigger symbol - on a
     // cascade mechanic the other symbols' weights drive cascade depth, and every cascade refills
     // the grid with fresh chances to draw the scatter. If Trigger Rate Penalty Weight is 0 the

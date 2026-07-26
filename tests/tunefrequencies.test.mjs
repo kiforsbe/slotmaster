@@ -884,6 +884,45 @@ test('tuneFrequencies options.stdErrorPenaltyWeight defaults to 0 (off), matchin
   assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
 });
 
+// ---- Phase 0: reel-constraint feasibility ----
+
+test('diagnostics.reelFeasibility flags a symbol whose minGap cannot be honored at this reel length', async () => {
+  // 40 positions with minGap 8 allows at most 5 runs of a symbol. `hog` takes half the strip at
+  // maxStack 1, so its ~20 occurrences are 20 SEPARATE runs - four times what the gap permits,
+  // and generateReel can only handle that by silently abandoning the spacing. maxStack 1 matters:
+  // without it those occurrences merge into one long run, which is a stacking problem rather than
+  // a spacing one and correctly does not trip this check.
+  const paytable = { hog: { payout: [0, 0, 5] }, a: { payout: [0, 0, 5] }, b: { payout: [0, 0, 5] } };
+  const reelTables = [{
+    defaults: { minGap: 8 },
+    symbols: { hog: { frequency: 2, maxStack: 1 }, a: { frequency: 1 }, b: { frequency: 1 } },
+  }];
+  const { diagnostics } = await tuneFrequencies(paytable, reelTables, {
+    reelsCount: 1, rowsCount: 3, paylines: [[0, 0, 0]], winEvaluator: checkWildLineWins,
+    reelSeeds: [1], betPerLine: 1, linesCount: 1, reelLength: 40,
+    targetRtp: 96, trialSpins: 500, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0,
+  });
+  const hog = diagnostics.reelFeasibility.find(v => v.symbol === 'hog');
+  assert.ok(hog, `expected 'hog' to be reported infeasible, got ${JSON.stringify(diagnostics.reelFeasibility)}`);
+  assert.equal(hog.ceiling, 5, 'ceiling must be floor(reelLength / minGap) = floor(40/8)');
+  assert.ok(hog.runs > hog.ceiling, `expected runs (${hog.runs}) to exceed the ceiling (${hog.ceiling})`);
+});
+
+test('diagnostics.reelFeasibility is empty when every symbol\'s spacing genuinely fits', async () => {
+  // Same shape, but a long strip and a small gap, so there is ample room for every symbol.
+  const paytable = { a: { payout: [0, 0, 5] }, b: { payout: [0, 0, 5] }, c: { payout: [0, 0, 5] } };
+  const reelTables = [{
+    defaults: { minGap: 2 },
+    symbols: { a: { frequency: 1 }, b: { frequency: 1 }, c: { frequency: 1 } },
+  }];
+  const { diagnostics } = await tuneFrequencies(paytable, reelTables, {
+    reelsCount: 1, rowsCount: 3, paylines: [[0, 0, 0]], winEvaluator: checkWildLineWins,
+    reelSeeds: [1], betPerLine: 1, linesCount: 1, reelLength: 300,
+    targetRtp: 96, trialSpins: 500, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0,
+  });
+  assert.deepEqual(diagnostics.reelFeasibility, []);
+});
+
 // ---- Phase 1b: per-reel trigger-count refinement ----
 
 // A synthetic game whose trigger rate is deliberately coarse under a shared multiplier: the

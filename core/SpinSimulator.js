@@ -1115,6 +1115,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     stdErrorPenaltyWeight = 0,
     triggerRatePenaltyWeight = 0,
     maxTriggerRefineSteps = 12,
+    spacingPenaltyWeight = 0,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchAlgorithm = 'nelderMead',
@@ -1148,6 +1149,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
   const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
+
+  // Mirrors generateReel's own resolution order (symbol override -> reel defaults -> built-in
+  // fallback, see core/SlotMath.js) so a constraint is read here exactly as the strip builder
+  // reads it. Shared by the Phase 0 feasibility check and Phase 2's spacing penalty.
+  const resolveMinGapFor = (reelTable, s) => reelTable.symbols[s].minGap
+    ?? reelTable.defaults?.minGap
+    ?? (paytable[s]?.triggerFreeSpins === true ? 3 : 1);
+  const resolveMaxStackFor = (reelTable, s) => reelTable.symbols[s].maxStack
+    ?? reelTable.defaults?.maxStack
+    ?? Infinity;
 
   // `lengthOverride` exists for Phase 1's reel-length reachability probe (see
   // findReachableReelLength below), which needs to ask "what would this same frequency table
@@ -1318,6 +1329,50 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // A consequence worth surfacing to callers: the target can land in a GAP between two
   // achievable values, in which case `scatterPhase.reason` is 'lattice-gap' and no amount of
   // searching will help - the reel strip needs to be longer, or the tolerance wider.
+  // ---- Phase 0: reel-constraint feasibility check ----
+  // Run before any tuning, purely as a report. Answers a question the tuner otherwise leaves a
+  // developer to discover the hard way: are this game's own spacing constraints actually
+  // satisfiable at this reel length and these frequencies?
+  //
+  // They frequently are not, and the failure is SILENT. generateReel enforces minGap/maxStack
+  // best-effort - on a strip too dense to space a symbol out it hits a `candidates.length === 0`
+  // bailout, returns the strip as-is, and reports nothing (core/SlotMath.js). So a game can ship
+  // reels that clump far more than its config asks for, with nothing anywhere saying so.
+  //
+  // The hard ceiling is simple arithmetic: a symbol whose runs must sit `minGap` apart can have
+  // at most floor(reelLength / minGap) of them. Exceeding it is not a tuning problem and no
+  // penalty weight can fix it - the reel is too short, the gap too wide, or that symbol's
+  // frequency too high, and one of those three has to give. Candy Frenzy at minGap 8 had 6 of its
+  // 84 symbol-reel pairs over the ceiling before tuning even started; at minGap 4, one remains
+  // (`chocolate` on reel 2 needs 174 runs against a ceiling of 125, because its frequency is
+  // 0.4433 while its reel-mates sit at 0.014-0.072 - an over-abundance problem wearing a spacing
+  // problem's clothes).
+  function checkReelFeasibility(reelTables) {
+    const infeasible = [];
+    const strips = buildReelStrips(reelTables);
+    reelTables.forEach((reelTable, r) => {
+      const strip = strips[r];
+      const n = strip.length;
+      Object.keys(reelTable.symbols).forEach(s => {
+        if (!(reelTable.symbols[s].frequency > 0)) return;
+        const minGap = resolveMinGapFor(reelTable, s);
+        if (minGap <= 1) return;
+        let runs = 0;
+        for (let i = 0; i < n; i++) if (strip[i] === s && strip[(i - 1 + n) % n] !== s) runs++;
+        const ceiling = Math.floor(n / minGap);
+        if (runs > ceiling) {
+          infeasible.push({ reel: r, symbol: s, runs, ceiling, minGap, frequency: reelTable.symbols[s].frequency });
+        }
+      });
+    });
+    return infeasible;
+  }
+
+  const reelFeasibility = checkReelFeasibility(baseReelTables);
+  if (onProgress && reelFeasibility.length > 0) {
+    await onProgress('feasibility', 0, null, { infeasible: reelFeasibility, reelLength }, null);
+  }
+
   let currentReelTables = baseReelTables;
   let scatterPhase = null;
   // Builds the Phase 1 trial for a given multiplier - shared by the search itself and by the
@@ -1692,6 +1747,71 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return total;
     }
 
+    // Soft penalty on reel-SPACING constraints the generated strip fails to honor - measured on
+    // the real strip generateReel actually produces, not on the frequency numbers.
+    //
+    // This is the one constraint class the search was previously blind to, and the blindness is
+    // consequential because generateReel enforces minGap/maxStack on a BEST-EFFORT basis: when a
+    // strip is too dense to space a symbol out, `_enforceMinGap`/`_enforceMaxStack` hit their
+    // `candidates.length === 0` bailout, return the strip as-is, and report nothing (see
+    // core/SlotMath.js). So pushing a symbol's frequency up past what the strip can represent
+    // looks completely free to the optimizer, while in the game it produces exactly the clumping
+    // the constraints existed to prevent - and on a cluster-pays mechanic, clumping is precisely
+    // what inflates cluster wins and RTP.
+    //
+    // There is a hard ceiling worth understanding: a symbol needing `minGap` between its runs can
+    // have at most floor(reelLength / minGap) of them. Candy Frenzy sits over it at BASELINE -
+    // minGap 8 on a 500-position strip allows 62 runs, and `gummy` already has 70 (46 violations)
+    // and `cake` 61 (42 violations), with 426 total runs across 12 candies leaving 1.17 positions
+    // of average spacing. So this penalty starts non-zero there and cannot be driven to zero by
+    // tuning alone; its job is to stop the search making it dramatically WORSE, which it otherwise
+    // does freely (at frequency 0.5 - the configured maxFrequency - `cake` reaches 170
+    // violations; above it, runs of 36+ against a maxStack of 4).
+    //
+    // Counted as: one unit per adjacent same-symbol run pair closer than minGap, plus one per
+    // position by which a run exceeds maxStack. Both are raw counts, so `spacingPenaltyWeight`
+    // alone sets their scale against the RTP error term.
+
+    function spacingPenaltyOf(reelTables) {
+      let total = 0;
+      const violations = [];
+      const strips = buildReelStrips(reelTables);
+      strips.forEach((strip, r) => {
+        const n = strip.length;
+        const reelTable = reelTables[r];
+        Object.keys(reelTable.symbols).forEach(s => {
+          if (!(reelTable.symbols[s].frequency > 0)) return;
+          const minGap = resolveMinGapFor(reelTable, s);
+          const maxStack = resolveMaxStackFor(reelTable, s);
+          if (minGap <= 1 && maxStack === Infinity) return;
+          // Walk the strip once collecting this symbol's runs (circular).
+          const runs = [];
+          for (let i = 0; i < n; i++) {
+            if (strip[i] !== s || strip[(i - 1 + n) % n] === s) continue;
+            let len = 0;
+            while (len < n && strip[(i + len) % n] === s) len++;
+            runs.push({ start: i, len });
+          }
+          if (runs.length === 0) return;
+          let gapViolations = 0;
+          if (runs.length > 1 && minGap > 1) {
+            for (let x = 0; x < runs.length; x++) {
+              const a = runs[x], b = runs[(x + 1) % runs.length];
+              const gap = (((b.start - (a.start + a.len)) % n) + n) % n;
+              if (gap < minGap) gapViolations++;
+            }
+          }
+          const stackExcess = maxStack === Infinity ? 0
+            : runs.reduce((sum, run) => sum + Math.max(0, run.len - maxStack), 0);
+          if (gapViolations > 0 || stackExcess > 0) {
+            total += gapViolations + stackExcess;
+            violations.push({ reel: r, symbol: s, gapViolations, stackExcess, runs: runs.length, minGap, maxStack });
+          }
+        });
+      });
+      return { total, violations };
+    }
+
     // Base seed for Phase 2's common-random-numbers comparability - every point evaluated
     // within one round needs to stay directly comparable. A stalled restart shifts this by a
     // large offset per restart (see the round loop below) so it explores under genuinely
@@ -1709,6 +1829,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
         const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
         const uniformityPenalty = uniformityPenaltyOf(reelTables);
+        // Skipped entirely at weight 0 - this regenerates every reel strip, which is cheap
+        // beside a Monte Carlo run but pointless when it cannot affect `loss`.
+        const { total: spacingPenalty, violations: spacingViolations } = spacingPenaltyWeight > 0
+          ? spacingPenaltyOf(reelTables)
+          : { total: 0, violations: [] };
         const error = Math.abs(measured.rtp - targetRtp);
         if (measured.rtp < rtpMin) rtpMin = measured.rtp;
         if (measured.rtp > rtpMax) rtpMax = measured.rtp;
@@ -1719,8 +1844,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         return {
           loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty
             + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0)
-            + triggerRatePenaltyWeight * triggerPenalty,
+            + triggerRatePenaltyWeight * triggerPenalty
+            + spacingPenaltyWeight * spacingPenalty,
           triggerRatePenalty: triggerPenalty,
+          spacingPenalty,
+          spacingViolations,
           rtp: measured.rtp,
           triggerRate: measured.triggerRate,
           trialRtpMin: measured.trialRtpMin,
@@ -1955,7 +2083,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     targetTriggerRatePct, triggerRateTolerancePct,
     trialSpins, trialsPerPoint, maxIterations,
     orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
-    triggerRatePenaltyWeight, maxTriggerRefineSteps, orderingBiasByReel,
+    triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild,
@@ -1967,6 +2095,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
       inputParameters,
+      // Symbols whose own spacing constraints CANNOT be satisfied at this reel length, checked
+      // against the untuned baseline before any search runs. Empty is the healthy case. A
+      // non-empty entry means generateReel silently gave up spacing that symbol out (it enforces
+      // minGap best-effort), so the shipped reels clump more than the config asks - which on a
+      // cluster-pays mechanic directly inflates cluster wins and RTP. Not fixable by tuning: the
+      // reel is too short, the gap too wide, or that symbol's frequency too high.
+      reelFeasibility,
       scatterPhase: scatterPhase ? {
         multiplier: scatterPhase.mult,
         error: scatterPhase.error,
@@ -2053,6 +2188,14 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         limitViolations: rtpPhaseResult.limitViolations,
         limitPenaltyRemaining: rtpPhaseResult.limitPenaltyRemaining,
         uniformityPenaltyRemaining: rtpPhaseResult.uniformityPenaltyRemaining,
+        // Reel-SPACING constraints the winning candidate's generated strip still fails to honor
+        // (minGap between runs of a symbol, maxStack run length) - measured on the real strip,
+        // since generateReel enforces both best-effort and silently gives up on a strip too dense
+        // to satisfy them. Non-zero here means the shipped reels will clump more than the game's
+        // own config asks for, which on a cluster-pays mechanic directly inflates cluster wins.
+        // Always 0 when spacingPenaltyWeight is 0 (the penalty isn't computed at all then).
+        spacingPenaltyRemaining: rtpPhaseResult.spacingPenalty ?? 0,
+        spacingViolations: rtpPhaseResult.spacingViolations ?? [],
         stillImproving: rtpPhaseResult.stillImproving,
         fixedSymbols: rtpPhaseResult.fixedSymbols,
       } : null,
