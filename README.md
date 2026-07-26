@@ -1,4 +1,4 @@
-# slotmaster
+# Slot Master
 
 Browser-based slot machine games. Plain ES modules, no build step, no bundler —
 open `index.html` (via a local server, see below) and play.
@@ -188,5 +188,8 @@ provided with no warranty of any kind and not suitable for commercial or real-mo
 Commercial use requires the copyright holder's prior express written consent. See
 [LICENSE.md](LICENSE.md) for the full terms.
 
+Portions of this project (code, docs, and image assets) were developed with the assistance
+of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
+
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `da9895b`._
+_Docs last synced with the codebase: 2026-07-26, commit `ee4542b`._
