@@ -142,7 +142,7 @@ export class CascadeEngine {
     this.particleSystem.update();
 
     if (this.state === 'dropping_in' || this.state === 'falling') {
-      const speed = this.turboMode ? 0.6 : 0.28; // rows per frame
+      const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
       let allLanded = true;
       for (let col = 0; col < this.config.reelsCount; col++) {
         for (let row = 0; row < this.config.rowsCount; row++) {
