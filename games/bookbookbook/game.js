@@ -653,7 +653,17 @@ function setupUIHandlers() {
 
   const closePaytable = () => modalPaytable.classList.remove('active');
   btnPaytableOk.addEventListener('click', closePaytable);
-  document.querySelector('#modal-paytable .btn-modal-close').addEventListener('click', closePaytable);
+  // Every modal's "x" close button - works for .modal-overlay-style modals (paytable, free
+  // spins trigger/summary) and the shared #sim-modal (RUN SIMULATION/TUNE FREQUENCIES/SPIN
+  // LOG), which toggles via inline display instead of the .active class.
+  document.querySelectorAll('.btn-modal-close').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const overlay = btn.closest('.modal-overlay');
+      if (overlay) { overlay.classList.remove('active'); return; }
+      const simModalEl = btn.closest('.sim-modal');
+      if (simModalEl) simModalEl.style.display = 'none';
+    });
+  });
 
   // Theme Switcher
   themeSelect.addEventListener('change', async (e) => {
