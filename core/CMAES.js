@@ -72,3 +72,148 @@ export function eigenSymmetric(matrix, maxSweeps = 100, tolerance = 1e-10) {
   const eigenvectors = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => V[i][j]));
   return { eigenvalues, eigenvectors };
 }
+
+function sampleGaussian(rng) {
+  const u1 = Math.max(rng(), Number.EPSILON);
+  const u2 = rng();
+  return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+}
+
+/**
+ * @param {number[]} initialPoint
+ * @param {number} initialStepSize - initial global step size (sigma)
+ * @param {(point: number[]) => (Object|Promise<Object>)} evaluate - must resolve to an object
+ *   with a numeric `.loss` (lower is better); any extra fields are carried through onto the
+ *   returned `result`, same contract as nelderMead's `evaluate`.
+ * @param {number} maxIterations - generation budget
+ * @param {number} seed - seeds this function's own candidate sampling (distinct from whatever
+ *   randomness `evaluate` itself uses for Monte Carlo measurement noise)
+ * @param {number} [convergenceTolerance=1e-4] - stops once `sigma * max(D)` (the search
+ *   distribution's largest standard deviation) drops below this - analogous to nelderMead's
+ *   simplex-collapse check, adapted to CMA-ES's own notion of "spread".
+ * @param {Function} [onProgress] - `(iteration, point, result, best, attempted) =>
+ *   (void|Promise<void>)`, called once per generation - same positional shape as nelderMead's.
+ * @param {Function} [onBusy] - `(info: { iteration, operation: 'generation',
+ *   verticesToEvaluate, verticesEvaluated? }) => (void|Promise<void>)`, called while a
+ *   generation's population is still resolving - same shape/cadence as nelderMead's shrink
+ *   reporting.
+ * @param {number} [busyReportIntervalMs=300]
+ * @param {() => Promise<void>} yieldToEventLoop
+ * @returns {Promise<{ point: number[], loss: number, result: Object, iterations: number, converged: boolean }>}
+ */
+export async function cmaes({
+  initialPoint, initialStepSize, evaluate, maxIterations, seed,
+  convergenceTolerance = 1e-4,
+  onProgress = null, onBusy = null, busyReportIntervalMs = 300,
+  yieldToEventLoop,
+}) {
+  const n = initialPoint.length;
+  const lambda = 4 + Math.floor(3 * Math.log(n));
+  const mu = Math.floor(lambda / 2);
+
+  const rawWeights = Array.from({ length: mu }, (_, i) => Math.log(mu + 0.5) - Math.log(i + 1));
+  const weightSum = rawWeights.reduce((a, b) => a + b, 0);
+  const weights = rawWeights.map(w => w / weightSum);
+  const mueff = 1 / weights.reduce((sum, w) => sum + w * w, 0);
+
+  const cc = (4 + mueff / n) / (n + 4 + 2 * mueff / n);
+  const cs = (mueff + 2) / (n + mueff + 5);
+  const c1 = 2 / ((n + 1.3) ** 2 + mueff);
+  const cmu = Math.min(1 - c1, 2 * (mueff - 2 + 1 / mueff) / ((n + 2) ** 2 + mueff));
+  const damps = 1 + 2 * Math.max(0, Math.sqrt((mueff - 1) / (n + 1)) - 1) + cs;
+  const chiN = Math.sqrt(n) * (1 - 1 / (4 * n) + 1 / (21 * n * n));
+  const eigenEveryGens = Math.max(1, Math.floor(lambda / ((c1 + cmu) * n * 10)));
+
+  const rng = createSeededRng(seed ?? 1);
+
+  let mean = initialPoint.slice();
+  let sigma = initialStepSize;
+  let C = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  let pc = new Array(n).fill(0);
+  let ps = new Array(n).fill(0);
+  let B = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  let D = new Array(n).fill(1);
+  let lastEigenGen = 0;
+
+  const evalPoint = async (point) => ({ point, ...(await evaluate(point)) });
+
+  let best = null;
+  let iterations = 0;
+  let converged = false;
+
+  for (let gen = 0; gen < maxIterations; gen++) {
+    iterations = gen + 1;
+
+    const zs = Array.from({ length: lambda }, () => Array.from({ length: n }, () => sampleGaussian(rng)));
+    const ys = zs.map(z => B.map(row => row.reduce((sum, Bij, j) => sum + Bij * (D[j] * z[j]), 0)));
+    const points = ys.map(y => mean.map((m, d) => m + sigma * y[d]));
+
+    let completed = 0;
+    let lastBusyReportTime = Date.now();
+    if (onBusy) await onBusy({ iteration: gen, operation: 'generation', verticesToEvaluate: lambda });
+    const candidates = await Promise.all(points.map((point) => evalPoint(point).then(async (result) => {
+      completed++;
+      const isLast = completed === points.length;
+      const now = Date.now();
+      if (onBusy && !isLast && now - lastBusyReportTime >= busyReportIntervalMs) {
+        lastBusyReportTime = now;
+        await onBusy({ iteration: gen, operation: 'generation', verticesToEvaluate: lambda, verticesEvaluated: completed });
+      }
+      return result;
+    })));
+
+    const ranked = candidates.map((candidate, i) => ({ candidate, y: ys[i] })).sort((a, b) => a.candidate.loss - b.candidate.loss);
+    const bestOfGen = ranked[0].candidate;
+    if (!best || bestOfGen.loss < best.loss) best = bestOfGen;
+
+    const yw = new Array(n).fill(0);
+    for (let i = 0; i < mu; i++) {
+      ranked[i].y.forEach((yi, d) => { yw[d] += weights[i] * yi; });
+    }
+    const newMean = mean.map((m, d) => m + sigma * yw[d]);
+
+    const Btyw = B[0].map((_, j) => B.reduce((sum, row, i) => sum + row[j] * yw[i], 0));
+    const invDBtyw = Btyw.map((v, i) => v / D[i]);
+    const cInvHalfYw = B.map((row) => row.reduce((sum, Bij, j) => sum + Bij * invDBtyw[j], 0));
+    const psNew = ps.map((psi, d) => (1 - cs) * psi + Math.sqrt(cs * (2 - cs) * mueff) * cInvHalfYw[d]);
+
+    const psNorm = Math.sqrt(psNew.reduce((sum, v) => sum + v * v, 0));
+    const newSigma = sigma * Math.exp((cs / damps) * (psNorm / chiN - 1));
+
+    const hsig = (psNorm / Math.sqrt(1 - (1 - cs) ** (2 * (gen + 1)))) / chiN < 1.4 + 2 / (n + 1) ? 1 : 0;
+    const pcNew = pc.map((pci, d) => (1 - cc) * pci + hsig * Math.sqrt(cc * (2 - cc) * mueff) * yw[d]);
+
+    const newC = Array.from({ length: n }, () => new Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        let rankMu = 0;
+        for (let k = 0; k < mu; k++) rankMu += weights[k] * ranked[k].y[i] * ranked[k].y[j];
+        const rankOne = pcNew[i] * pcNew[j];
+        newC[i][j] = (1 - c1 - cmu) * C[i][j] + c1 * (rankOne + (1 - hsig) * cc * (2 - cc) * C[i][j]) + cmu * rankMu;
+      }
+    }
+
+    mean = newMean;
+    sigma = newSigma;
+    pc = pcNew;
+    ps = psNew;
+    C = newC;
+
+    if (gen - lastEigenGen >= eigenEveryGens || gen === maxIterations - 1) {
+      lastEigenGen = gen;
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) C[j][i] = C[i][j]; // enforce symmetry against float drift
+      }
+      const decomposed = eigenSymmetric(C);
+      D = decomposed.eigenvalues.map(v => Math.sqrt(Math.max(v, 1e-300)));
+      B = decomposed.eigenvectors;
+    }
+
+    if (onProgress) await onProgress(gen, bestOfGen.point, bestOfGen, best, bestOfGen);
+    await yieldToEventLoop();
+
+    if (sigma * Math.max(...D) < convergenceTolerance) { converged = true; break; }
+  }
+
+  return { point: best.point, loss: best.loss, result: best, iterations, converged };
+}
