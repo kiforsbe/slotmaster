@@ -14,7 +14,8 @@ open `index.html` (via a local server, see below) and play.
 
 The first three share the same `core/` engine and debug tooling; Candy Frenzy shares the
 same `core/` foundation (GridLayout/SpriteDrawer/ParticleSystem/SpinLog) plus its own
-cascade engine (`core/CascadeEngine.js` + `core/CascadeMath.js` + `core/ClusterMath.js`).
+cascade engine (`core/CascadeEngine.js` + `core/CascadeMath.js` + `core/ClusterMath.js` +
+`core/FreeSpinsModes.js` for its pluggable free-spins payout modes).
 Each README covers only what's specific to that game.
 
 ## Running it

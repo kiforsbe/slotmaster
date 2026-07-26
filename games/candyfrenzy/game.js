@@ -3,6 +3,7 @@ import { CascadeEngine } from '../../core/CascadeEngine.js';
 import { generateReel } from '../../core/SlotMath.js';
 import { checkClusterWins } from '../../core/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
+import { createMultiplierTilesMode } from '../../core/FreeSpinsModes.js';
 
 export const REELS_COUNT = 7;
 export const ROWS_COUNT = 7;
@@ -165,7 +166,7 @@ async function initGame() {
     reelStrips: REEL_STRIPS,
     winEvaluator,
     scatterSymbol: 'bonus',
-    useMultiplierTiles: true,
+    freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betAmount: BET_AMOUNT,

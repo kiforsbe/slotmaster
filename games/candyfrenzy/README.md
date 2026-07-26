@@ -2,7 +2,8 @@
 
 7×7 cluster-pays cascading slot, inspired by Sugar Rush-style games. Uses the shared
 `core/` engine's cascade mechanic (`core/CascadeEngine.js` + `core/CascadeMath.js`) with
-this game's own cluster win evaluator (`core/ClusterMath.js`).
+this game's own cluster win evaluator (`core/ClusterMath.js`) and free-spins payout mode
+(`core/FreeSpinsModes.js`).
 
 ## Rules
 
@@ -22,9 +23,18 @@ this game's own cluster win evaluator (`core/ClusterMath.js`).
   8x → ...). A later cluster that overlaps one or more of these tiles has their multiplier
   values summed and applied to its own payout. The multiplier grid is reset at the start of
   each free-spins bonus and cleared again the moment it ends — it never carries into the base
-  game. This is `CascadeEngine`'s `useMultiplierTiles` mode (`core/CascadeEngine.js`); the
-  flat "every free-spin win pays double" rule still exists as the default for any future
-  cascade game that doesn't opt in.
+  game.
+
+  This is `createMultiplierTilesMode()` (`core/FreeSpinsModes.js`), passed as Candy Frenzy's
+  `freeSpinsMode` config when constructing its `CascadeEngine` (`game.js`). Free-spins payout
+  modes are pluggable there — `core/FreeSpinsModes.js` also exports `createFlatMultiplierMode()`
+  (the flat "every free-spin win pays double" rule, `CascadeEngine`'s own default for any
+  cascade game that doesn't opt into something else) — and `createMultiplierTilesMode` itself
+  takes a `badgeStyle` (`'background'` or `'corner'`) and `renderOrder` (`'front'` or
+  `'behind'`) option controlling how/when its tile badges draw; Candy Frenzy currently uses
+  `renderOrder: 'behind'`, so a tile's badge is only visible while that cell hasn't yet had a
+  new symbol land on it (candy sprite art is opaque, so a landed tile hides a `'behind'`
+  badge underneath it).
 - **Symbols** — Premium: Cotton Candy, Bubble Gum, Sugar Crystal, Candy Rocket, Candy Crown,
   Cake Slice. Regular: Mint, Gummy Bear, Jelly Bean, Chocolate, Chewy Candy, Cherry Candy.
   No wild in this version.

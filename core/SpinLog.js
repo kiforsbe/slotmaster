@@ -75,7 +75,10 @@ export function createSpinLogEntry({
  * @param {'base'|'free'} args.phase
  * @param {number} args.betAmount - this game's single flat bet (no bet-per-line/lines concept).
  * @param {number} args.chargedBet - what this spin actually cost (0 during free spins).
- * @param {number} [args.freeSpinsMultiplier=1] - 2 during free spins per this game's rules.
+ * @param {number} [args.freeSpinsMultiplier=1] - left at the default unless a caller has NOT
+ *   already baked its free-spins mode's bonus into cascadeSteps[i].clusterWins[j].payout
+ *   itself (CascadeEngine's own free-spins modes - see core/FreeSpinsModes.js - always do,
+ *   so it never passes anything other than the default here).
  * @param {Array<{clusterWins: Array<{symbol,count,payout}>}>} args.cascadeSteps - from
  *   resolveCascadeSequence's own result shape (core/CascadeMath.js); a step's `payout` field
  *   there is a currency-scaled sum and isn't re-derived here, only its per-cluster multiplier
