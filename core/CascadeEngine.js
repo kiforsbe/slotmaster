@@ -79,6 +79,10 @@ export class CascadeEngine {
     this.stepStartTime = 0;
     this.currentClearPositions = [];
     this.currentClearVariants = new Map();
+    // The current cascade step's cluster wins, animated one at a time (see _beginClusterClear/
+    // update()'s 'clearing' branch) rather than all bursting simultaneously.
+    this.currentClusterWins = [];
+    this.currentClusterIndex = 0;
     this._forceScatterNextSpin = false;
 
     // Previous spin's leftover grid: falls out the bottom, one reel at a time. The moment a
@@ -251,7 +255,14 @@ export class CascadeEngine {
       if (allDone) this._onStepLanded();
     } else if (this.state === 'clearing') {
       const clearDuration = this.turboMode ? CLEAR_DURATION_MS.turbo : CLEAR_DURATION_MS.normal;
-      if (now - this.clearStartTime >= clearDuration) this._advanceToNextStep();
+      if (now - this.clearStartTime >= clearDuration) {
+        this.currentClusterIndex++;
+        if (this.currentClusterIndex < this.currentClusterWins.length) {
+          this._beginClusterClear();
+        } else {
+          this._advanceToNextStep();
+        }
+      }
     }
 
     if (this.pendingSpinRequest && (this.state === 'idle' || this.state === 'showing_wins')) {
@@ -286,25 +297,38 @@ export class CascadeEngine {
   _onStepLanded() {
     const step = this.cascadeSequence.cascadeSteps[this.stepIndex];
     if (step.clusterWins.length > 0) {
-      this.state = 'clearing';
-      this.clearStartTime = Date.now();
-      this.currentClearPositions = step.clusterWins.flatMap(w => w.winningPositions);
-      // Each cleared symbol gets its own random vanish style, so a whole cluster popping
-      // doesn't look like one uniform stamp - variety over identical repetition.
-      this.currentClearVariants = new Map();
-      this.currentClearPositions.forEach(([col, row]) => {
-        this.currentClearVariants.set(`${col},${row}`, {
-          variant: CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
-          spinDirection: Math.random() < 0.5 ? -1 : 1,
-        });
-      });
-      this._spawnClearParticles(this.currentClearPositions);
-      this._spawnClusterWinPopups(step.clusterWins);
-      audio.playClusterWin(step.payout);
-      this.config.onStateChange(this.state);
+      // Clusters animate one at a time, not all at once - _beginClusterClear plays the first;
+      // update()'s 'clearing' branch advances currentClusterIndex through the rest before
+      // finally moving on to the next cascade step (_advanceToNextStep).
+      this.currentClusterWins = step.clusterWins;
+      this.currentClusterIndex = 0;
+      this._beginClusterClear();
     } else {
       this._finishSpin();
     }
+  }
+
+  // Plays the vanish animation for exactly one cluster (this.currentClusterWins at
+  // currentClusterIndex) - glow, per-symbol vanish variants, particles, its own floating win
+  // popup, and its own ding. Called once per cluster in a step, in sequence.
+  _beginClusterClear() {
+    const cluster = this.currentClusterWins[this.currentClusterIndex];
+    this.state = 'clearing';
+    this.clearStartTime = Date.now();
+    this.currentClearPositions = cluster.winningPositions;
+    // Each cleared symbol gets its own random vanish style, so a whole cluster popping
+    // doesn't look like one uniform stamp - variety over identical repetition.
+    this.currentClearVariants = new Map();
+    this.currentClearPositions.forEach(([col, row]) => {
+      this.currentClearVariants.set(`${col},${row}`, {
+        variant: CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
+        spinDirection: Math.random() < 0.5 ? -1 : 1,
+      });
+    });
+    this._spawnClearParticles(this.currentClearPositions);
+    this._spawnClusterWinPopups([cluster]);
+    audio.playClusterWin(cluster.payout);
+    this.config.onStateChange(this.state);
   }
 
   _spawnClusterWinPopups(clusterWins) {
