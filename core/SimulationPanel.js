@@ -452,7 +452,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
         ${biasSelectorsHtml}
       </div>
-      <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
+      <details style="margin-bottom: 12px;">
+        <summary style="font-size: 0.75em; color: #999; cursor: pointer; user-select: none;">How this search works, and what each option above does ▸</summary>
+        <p style="font-size: 0.75em; color: #888; margin: 8px 0 0;">
         Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
         Nelder-Mead simplex search. Each reel has its own ordering preference (above${isCascadeMechanic
           ? `, pre-selected as 'No preference' on every reel - the near-miss shape below only
@@ -481,18 +483,30 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         fighting it with a competing flat preference. Scatter symbols never participate (their
         ideal frequency plays too different a role). Any violation still present at the end is
         listed below.
-      </p>
+        </p>
+      </details>
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       </div>
-      <div id="tune-live-stats" style="display: none; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 12px;">
+      <div id="tune-live-stats" style="display: none; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px;">
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
-          <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Current</div>
+          <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <span style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Current</span>
+            <span id="tune-live-stats-current-step" style="font-size: 0.7em; color: #999;"></span>
+          </div>
           <div id="tune-live-stats-current" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
+          <div style="height: 4px; border-radius: 2px; background: rgba(255,255,255,0.12); margin-top: 8px; overflow: hidden;">
+            <div id="tune-live-stats-current-progress-bar" style="height: 100%; width: 0%; background: #7fbfff; transition: width 0.2s;"></div>
+          </div>
         </div>
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
           <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Best</div>
           <div id="tune-live-stats-best" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
+          <div id="tune-live-stats-best-improved" style="font-size: 0.72em; margin-top: 8px; min-height: 1.3em;"></div>
+        </div>
+        <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
+          <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Violations (best)</div>
+          <div id="tune-live-stats-violations" style="font-size: 0.85em; font-weight: 600; margin-top: 6px; line-height: 1.6;">—</div>
         </div>
       </div>
       <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
@@ -569,7 +583,7 @@ function renderFrequencyGauge(current, best, configuredMin, configuredMax, teste
 // "best" can disagree for many steps in a row (same reasoning as the progress log's own
 // current/best split). Every symbol's gauge on a given reel shares that reel's own scale (0 ->
 // the highest value seen anywhere on that reel), not its own - see renderFrequencyGauge's doc.
-function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial, bestTrial, paytable) {
+function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial, bestTrial, paytable, bestOrderingViolations = [], bestLimitViolations = []) {
   let html = `<div style="font-size: 0.7em; color: #888; margin-bottom: 6px;">
                  <span style="color: #7ec8ff;">▮</span> configured range &nbsp;
                  <span style="color: #ddd;">▮</span> tested range &nbsp;
@@ -578,7 +592,8 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
                  <span style="color: ${symbolTypeColor('scatter')};">●</span> scatter &nbsp;
                  <span style="color: ${symbolTypeColor('wild')};">●</span> wild &nbsp;
                  <span style="color: ${symbolTypeColor('premium')};">●</span> premium &nbsp;
-                 <span style="color: ${symbolTypeColor('regular')};">●</span> regular
+                 <span style="color: ${symbolTypeColor('regular')};">●</span> regular &nbsp; &nbsp;
+                 <span style="color: #ff8080;">▮</span> ordering/limit violation (best)
                </div>`;
   html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">`;
   reelFrequencyTables.forEach((baseReelTableWrapper, reelIdx) => {
@@ -605,7 +620,17 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
       const { minFrequency, maxFrequency } = boundsByReel[reelIdx][symbol];
       const tested = testedRange[symbol];
       const gauge = renderFrequencyGauge(current, best, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null, reelMax);
-      html += `<div style="display: grid; grid-template-columns: 66px 46px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em;">
+      // Marks a symbol currently involved in one of the BEST candidate's own ordering/limit
+      // violations (the same arrays the final results' "N ordering/limit violations remain"
+      // paragraphs list, surfaced live and per-symbol here instead of only after the run ends) -
+      // a row can carry both if a symbol happens to violate on two fronts at once.
+      const orderingHits = bestOrderingViolations.filter(v => v.reel === reelIdx && (v.higherPaySymbol === symbol || v.lowerPaySymbol === symbol));
+      const limitHits = bestLimitViolations.filter(v => v.reel === reelIdx && v.symbol === symbol);
+      const violationTitle = [...orderingHits.map(v => `ordering: ${v.amount.toFixed(3)} past preference`), ...limitHits.map(v => `${v.bound} limit: ${v.amount.toFixed(3)} past ${v.limit}`)].join(' | ');
+      const rowStyle = (orderingHits.length > 0 || limitHits.length > 0)
+        ? 'background: rgba(255,90,90,0.12); border-left: 2px solid #ff8080; padding-left: 4px;'
+        : 'border-left: 2px solid transparent; padding-left: 4px;';
+      html += `<div title="${violationTitle}" style="display: grid; grid-template-columns: 66px 46px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em; ${rowStyle}">
                   ${renderSymbolLabel(symbol, paytable)}
                   <span style="text-align: right; color: #ddd;">${current.toFixed(3)}</span>
                   <span style="text-align: right; color: #4ade80;">${best != null ? best.toFixed(3) : '–'}</span>
@@ -649,7 +674,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const liveTableEl = tuneContainer.querySelector('#tune-live-table');
   const liveStatsEl = tuneContainer.querySelector('#tune-live-stats');
   const liveStatsCurrentEl = tuneContainer.querySelector('#tune-live-stats-current');
+  const liveStatsCurrentStepEl = tuneContainer.querySelector('#tune-live-stats-current-step');
+  const liveStatsCurrentProgressBarEl = tuneContainer.querySelector('#tune-live-stats-current-progress-bar');
   const liveStatsBestEl = tuneContainer.querySelector('#tune-live-stats-best');
+  const liveStatsBestImprovedEl = tuneContainer.querySelector('#tune-live-stats-best-improved');
+  const liveStatsViolationsEl = tuneContainer.querySelector('#tune-live-stats-violations');
   // reelIdx -> symbol -> { min, max } actually assigned during the search so far this run -
   // grows as Phase 2 explores, reset fresh on every START TUNING click.
   const testedRangeByReel = reelFrequencyTables.map(() => ({}));
@@ -715,7 +744,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   logEl.innerHTML = '';
   liveStatsEl.style.display = 'grid';
   liveStatsCurrentEl.textContent = '—';
+  liveStatsCurrentStepEl.textContent = '';
+  liveStatsCurrentProgressBarEl.style.width = '0%';
   liveStatsBestEl.textContent = '—';
+  liveStatsBestImprovedEl.innerHTML = '';
+  liveStatsViolationsEl.textContent = '—';
   liveTableEl.style.display = 'block';
   liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, null, paytable);
 
@@ -744,6 +777,18 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   // the same row in place instead of appending a new one each time is what keeps this from
   // turning into a wall of near-duplicate lines for one slow step.
   let lastBusyRow = null, lastBusyKey = null;
+  // Tracks the previous progress event's best-so-far, so each new one can be compared against
+  // it to say WHAT actually moved (RTP error, measurement reliability, ordering/limit/uniformity
+  // violations), by how much, and at which step - rather than just "here's a number again".
+  // `previousBestCandidateRef` is what actually detects "did best just change" (by object
+  // identity - see its own comment further below); `lastBestChangeStep`/`lastBestChangeSummary`
+  // are what's actually rendered, and deliberately only get overwritten when it does, so the
+  // displayed summary persists across every other tick instead of blanking out. All reset fresh
+  // on every START TUNING click, same as every other per-run tracker above.
+  let previousBestSnapshot = null;
+  let previousBestCandidateRef = null;
+  let lastBestChangeStep = null;
+  let lastBestChangeSummary = [];
   const appendOrUpdateBusyLog = (key, line) => {
     if (lastBusyRow && lastBusyKey === key) {
       lastBusyRow.textContent = line;
@@ -765,7 +810,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // `bestTrial` was already tested in some earlier step, so it never needs to widen the
     // tracked range itself) and re-renders the live gauges. `bestTrial` is `null` for the
     // 'initial' preview (nothing has been measured yet, so there's no best to show).
-    const updateLiveTable = (trial, bestTrial) => {
+    const updateLiveTable = (trial, bestTrial, bestOrderingViolations = [], bestLimitViolations = []) => {
       trial.forEach((reelTableWrapper, reelIdx) => {
         const symbolsTable = reelTableWrapper.symbols || reelTableWrapper;
         const range = testedRangeByReel[reelIdx];
@@ -775,11 +820,43 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           range[symbol] = prev ? { min: Math.min(prev.min, freq), max: Math.max(prev.max, freq) } : { min: freq, max: freq };
         });
       });
-      liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, trial, bestTrial, paytable);
+      liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, trial, bestTrial, paytable, bestOrderingViolations, bestLimitViolations);
     };
 
     const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await runTuneFrequenciesWithPool(paytable, reelFrequencyTables, options,
       (phase, i, mult, r, best) => {
+        // Every reported RTP is shown WITH its own measurement uncertainty attached, always -
+        // never a bare number on its own. With only 1 trial there's no repeat measurement to
+        // compute variance FROM at all (not "zero variance" - genuinely no information), so
+        // that's said explicitly rather than printing a misleading "±0.00%". Otherwise this is
+        // always the candidate's std dev across its trialsPerPoint repeats plus the raw
+        // min-max range, regardless of how small or large it happens to be - a consistently
+        // present figure is what lets a large one actually stand out, instead of only
+        // appearing sometimes and inviting the assumption that "no figure" means "no problem".
+        // Defined up front (not just where it's first used) so the 'restart' handler below can
+        // use it too.
+        const varianceLabelFor = (candidate) => {
+          if (options.trialsPerPoint <= 1) return ' (1 trial - variance unknown)';
+          if (candidate.trialRtpStdDev == null) return '';
+          return ` (±${candidate.trialRtpStdDev.toFixed(2)}% std dev, ${candidate.trialRtpMin.toFixed(1)}-${candidate.trialRtpMax.toFixed(1)}% range)`;
+        };
+
+        // Phase 2 ('shape') candidates are accepted/rejected on a BLENDED loss - RTP error plus
+        // weighted ordering/limit/uniformity penalties (see tuneFrequencies' own `makeEvaluate`)
+        // - not on RTP alone. Without surfacing that breakdown, a candidate with great RTP and a
+        // tiny std dev can appear to be silently ignored when it's actually losing on ordering or
+        // limit penalty, which is invisible if only RTP/std-dev are shown. `null` for a Phase 1
+        // ('scatter') candidate - gradientDescent1D's result shape has no penalty fields at all
+        // (see its own doc), it's judged on trigger-rate error alone.
+        const lossBreakdownFor = (candidate) => {
+          if (candidate.orderingPenalty == null) return null;
+          const parts = [`RTP err ${candidate.error.toFixed(4)}`];
+          if (options.orderingPenaltyWeight > 0) parts.push(`ordering ${(candidate.orderingPenalty * options.orderingPenaltyWeight).toFixed(4)}`);
+          if (options.limitPenaltyWeight > 0) parts.push(`limit ${(candidate.limitPenalty * options.limitPenaltyWeight).toFixed(4)}`);
+          if (options.uniformityPenaltyWeight > 0) parts.push(`uniformity ${(candidate.uniformityPenalty * options.uniformityPenaltyWeight).toFixed(4)}`);
+          return `loss ${candidate.loss.toFixed(4)} (${parts.join(', ')})`;
+        };
+
         // Fired once, before Phase 1 even runs, with Phase 2's actual starting point (reflecting
         // Initial Frequency Strategy) - without this the live table stayed frozen on the raw
         // baseline all through Phase 1's scatter rounds, making the strategy look like it
@@ -791,11 +868,20 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         }
         // A stalled round restarting with a wider step is otherwise invisible here - the next
         // 'shape' log line looks identical whether or not a restart just happened underneath it.
+        // Separately from the stall itself, `candidateAccepted` (tuneFrequencies' own doc, next
+        // to where beatsIncumbent is called) says whether the round that just stalled actually
+        // became the new overall best - a round can produce a great-looking result and still
+        // lose to a noisier prior incumbent if its improvement doesn't clear the combined
+        // measurement-noise margin (see `bestAcceptanceZ`'s own doc), which otherwise looks
+        // identical to "nothing changed" from here.
         if (phase === 'restart') {
           appendLog(`⚠ Round stalled - restarting with a wider step (stepSize=${r.stepSize.toFixed(4)}, stall ${r.stallStreak}/${r.maxStallRestarts} in a row, ${r.restarts} restart${r.restarts === 1 ? '' : 's'} total${r.willStopNow ? ' - giving up after this' : ''})`);
+          if (r.candidateAccepted === false && r.roundResult) {
+            appendLog(`   … this round's own best (RTP=${r.roundResult.rtp.toFixed(2)}%${varianceLabelFor(r.roundResult)}) was NOT accepted as the new overall best - its improvement wasn't large enough to clear the combined measurement-noise margin against the current best (raise Max RTP Std Error if this much uncertainty is acceptable, or raise Trial Spins/Trials Averaged to shrink it instead)`);
+          }
           return;
         }
-        // Explains an otherwise-silent, unusually long gap between two ordinary progress lines
+        // Explains an otherwise-silent// Explains an otherwise-silent, unusually long gap between two ordinary progress lines
         // (a Nelder-Mead simplex shrink re-evaluating every vertex, a CMA-ES generation
         // evaluating its whole population, or a gradient-descent plateau-widening retry). Only
         // fires again while that same operation is still running, throttled server-side to at
@@ -821,20 +907,6 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
 
-        // Every reported RTP is shown WITH its own measurement uncertainty attached, always -
-        // never a bare number on its own. With only 1 trial there's no repeat measurement to
-        // compute variance FROM at all (not "zero variance" - genuinely no information), so
-        // that's said explicitly rather than printing a misleading "±0.00%". Otherwise this is
-        // always the candidate's std dev across its trialsPerPoint repeats plus the raw
-        // min-max range, regardless of how small or large it happens to be - a consistently
-        // present figure is what lets a large one actually stand out, instead of only
-        // appearing sometimes and inviting the assumption that "no figure" means "no problem".
-        const varianceLabelFor = (candidate) => {
-          if (options.trialsPerPoint <= 1) return ' (1 trial - variance unknown)';
-          if (candidate.trialRtpStdDev == null) return '';
-          return ` (±${candidate.trialRtpStdDev.toFixed(2)}% std dev, ${candidate.trialRtpMin.toFixed(1)}-${candidate.trialRtpMax.toFixed(1)}% range)`;
-        };
-
         // `r` (Phase 1/'scatter') or `r.attempted` (Phase 2/'shape') is what THIS iteration's
         // own work actually just tried - for 'scatter', gradientDescent1D always reports a
         // freshly-measured candidate every iteration, so `r` itself already is that. For
@@ -846,8 +918,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // by side is what makes a "no improvement" streak read as active search instead of a
         // silent freeze.
         const current = phase === 'scatter' ? r : r.attempted;
+        const currentLossBreakdown = current ? lossBreakdownFor(current) : null;
         const currentLabel = current
-          ? `current: RTP=${current.rtp.toFixed(2)}%${varianceLabelFor(current)}  trigger=${current.triggerRate.toFixed(3)}%  err=${current.error.toFixed(4)}`
+          ? `current: RTP=${current.rtp.toFixed(2)}%${varianceLabelFor(current)}  trigger=${current.triggerRate.toFixed(3)}%  err=${current.error.toFixed(4)}${currentLossBreakdown ? `  ${currentLossBreakdown}` : ''}`
           : `current: (already converged - nothing new to try this step)`;
 
         // gradientDescent1D's own `best` is shaped `{mult, error, result, trial}` (rtp/
@@ -855,9 +928,30 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // object with them directly on top - normalized here so this one line works for both
         // phases.
         const bestCandidate = best.result ?? best;
-        const bestLabel = `best: RTP=${bestCandidate.rtp.toFixed(2)}%${varianceLabelFor(bestCandidate)}  trigger=${bestCandidate.triggerRate.toFixed(3)}%  err=${best.error.toFixed(4)}`;
+        const bestLossBreakdown = lossBreakdownFor(bestCandidate);
+        const bestLabel = `best: RTP=${bestCandidate.rtp.toFixed(2)}%${varianceLabelFor(bestCandidate)}  trigger=${bestCandidate.triggerRate.toFixed(3)}%  err=${best.error.toFixed(4)}${bestLossBreakdown ? `  ${bestLossBreakdown}` : ''}`;
 
         appendLog(`[${label}]${multLabel}  ${currentLabel}  |  ${bestLabel}`);
+
+        // Phase 2 only (lossBreakdownFor is null for a Phase 1/'scatter' candidate, which has no
+        // penalty terms to blame) - explains a "why didn't that obviously-good RTP become best"
+        // moment by naming whichever penalty term actually cost it, comparing loss component by
+        // component against best rather than leaving the reader to do that arithmetic themselves.
+        // Computed once and shown BOTH in the log (full numbers) and in the tune-live-stats
+        // box below (short form) - the log alone isn't enough since it scrolls out of view on a
+        // long run, and this is exactly the kind of "why" a user watching the live stats wants
+        // without having to scroll back through it.
+        let notPromotedReason = null;
+        if (current && current.orderingPenalty != null && current.loss > bestCandidate.loss + 1e-9) {
+          const terms = [
+            { label: 'RTP error', delta: current.error - bestCandidate.error },
+            { label: 'ordering penalty', delta: (current.orderingPenalty - bestCandidate.orderingPenalty) * options.orderingPenaltyWeight },
+            { label: 'limit penalty', delta: (current.limitPenalty - bestCandidate.limitPenalty) * options.limitPenaltyWeight },
+            { label: 'uniformity penalty', delta: (current.uniformityPenalty - bestCandidate.uniformityPenalty) * options.uniformityPenaltyWeight },
+          ];
+          notPromotedReason = terms.reduce((a, b) => (b.delta > a.delta ? b : a));
+          appendLog(`   … not promoted to best - ${notPromotedReason.label} is worse by ${notPromotedReason.delta.toFixed(4)} (loss ${current.loss.toFixed(4)} vs best's ${bestCandidate.loss.toFixed(4)})`);
+        }
 
         // Prominent current/best RTP readout above the live per-symbol table - the log/table
         // below both require reading down a scrolling list or a wide grid to find "where is
@@ -871,10 +965,110 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.trialsPerPoint <= 1) return '#888';
           return (candidate.trialRtpStdError ?? 0) > options.maxRtpStdError ? '#ff8080' : '#7fd97f';
         };
-        const statHtml = (candidate) => `<span style="color: ${statColor(candidate)};">${candidate.rtp.toFixed(2)}%</span>` +
-          `<span style="display: block; font-size: 0.5em; font-weight: normal; color: #999; margin-top: 2px;">${varianceLabelFor(candidate).trim() || ' '}</span>`;
-        liveStatsCurrentEl.innerHTML = current ? statHtml(current) : '—';
+        // The std dev/range figure is the whole point of this box (see maxRtpStdError's own
+        // doc for why a "converged"-looking average can still be untrustworthy) - sized and
+        // colored to match the headline RTP itself, not tucked away as a muted footnote, so a
+        // high-variance reading is as hard to miss as the number it's qualifying. The loss
+        // breakdown line (RTP err/ordering/limit/uniformity) is what makes an accept/reject
+        // decision auditable at a glance instead of only inferable from the RTP number alone.
+        const statHtml = (candidate, extraLine) => {
+          const color = statColor(candidate);
+          const varianceText = varianceLabelFor(candidate).trim();
+          const lossText = lossBreakdownFor(candidate);
+          let html = `<span style="color: ${color};">${candidate.rtp.toFixed(2)}%</span>`;
+          if (varianceText) html += `<span style="display: block; font-size: 0.62em; font-weight: 600; color: ${color}; margin-top: 4px; opacity: 0.9;">${varianceText}</span>`;
+          if (lossText) html += `<span style="display: block; font-size: 0.6em; color: #999; margin-top: 3px;">${lossText}</span>`;
+          if (extraLine) html += extraLine;
+          return html;
+        };
+        // Current gets an explicit accept/reject verdict every step it carries a real Phase 2
+        // candidate (never for the "already converged, nothing tried" case, nor for Phase 1
+        // which has no promotion concept at all) - amber "not promoted" naming the losing term
+        // (mirrors the log line above), or green "new best" confirmation otherwise, so the
+        // question "did that just become the best, and if not why" never requires reading the log.
+        const currentVerdict = (current && current.orderingPenalty != null)
+          ? (notPromotedReason
+            ? `<span style="display: block; font-size: 0.62em; color: #ffb347; margin-top: 6px; font-weight: 600;">⚠ not promoted - ${notPromotedReason.label} worse by ${notPromotedReason.delta.toFixed(4)}</span>`
+            : `<span style="display: block; font-size: 0.62em; color: #7fd97f; margin-top: 6px; font-weight: 600;">✓ new best</span>`)
+          : '';
+        liveStatsCurrentEl.innerHTML = current ? statHtml(current, currentVerdict) : '—';
         liveStatsBestEl.innerHTML = statHtml(bestCandidate);
+
+        // Progress indicator on Current - "where am I in the budget" for a long, slow run. `i`
+        // is the absolute iteration/generation count tuneFrequencies already reports (0-based);
+        // `options.maxIterations` is the shared budget ceiling both Phase 1 and Phase 2 are
+        // configured with, so it's a reasonable approximation of "how deep in" even though the
+        // two phases count against it somewhat independently.
+        const stepTotal = options.maxIterations;
+        const stepNum = Math.min(i + 1, stepTotal);
+        liveStatsCurrentStepEl.textContent = `Step ${stepNum} / ${stepTotal}`;
+        liveStatsCurrentProgressBarEl.style.width = `${Math.min(100, (stepNum / stepTotal) * 100)}%`;
+
+        // What changed in Best the last time it actually updated, along which axis(es) - RTP
+        // error, measurement reliability (std error), or the ordering/limit/uniformity violation
+        // penalties already carried on the same candidate object evaluate() returns - by how
+        // much, and at which step. Compared by reference (`bestCandidate !== previousBestCandidateRef`),
+        // not by re-deriving "did anything change" from the snapshot values themselves: nelderMead/
+        // cmaes/gradientDescent1D all only ever reassign their own `best` to a NEW object when a
+        // candidate genuinely beat it (see each one's own doc), so reference equality is exactly
+        // "did best just update" with no epsilon-guessing needed for that part. This deliberately
+        // only recomputes and overwrites the displayed summary WHEN best actually changes - every
+        // other tick leaves the previous summary on screen untouched, rather than blanking it out
+        // just because nothing new happened this particular step.
+        const bestChanged = bestCandidate !== previousBestCandidateRef;
+        if (bestChanged) {
+          const EPSILON = 1e-9;
+          const bestSnapshot = {
+            error: best.error,
+            stdError: bestCandidate.trialRtpStdError ?? 0,
+            orderingPenalty: bestCandidate.orderingPenalty ?? 0,
+            limitPenalty: bestCandidate.limitPenalty ?? 0,
+            uniformityPenalty: bestCandidate.uniformityPenalty ?? 0,
+          };
+          const changes = [];
+          const compare = (fieldLabel, key, gateOn = true) => {
+            if (!gateOn || !previousBestSnapshot) return;
+            const delta = previousBestSnapshot[key] - bestSnapshot[key]; // positive = got better (decreased)
+            if (Math.abs(delta) < EPSILON) return;
+            changes.push({ label: fieldLabel, delta, improved: delta > 0 });
+          };
+          compare('RTP error', 'error');
+          compare('variance', 'stdError');
+          compare('ordering', 'orderingPenalty');
+          compare('limits', 'limitPenalty');
+          compare('uniformity', 'uniformityPenalty', options.uniformityPenaltyWeight > 0);
+          lastBestChangeStep = i + 1;
+          lastBestChangeSummary = changes;
+          previousBestSnapshot = bestSnapshot;
+          previousBestCandidateRef = bestCandidate;
+        }
+        const changeListHtml = lastBestChangeSummary.map(c =>
+          `<span style="color: ${c.improved ? '#7fd97f' : '#ff8080'};">${c.improved ? '▲' : '▼'} ${c.label} ${c.improved ? 'improved' : 'worsened'} by ${Math.abs(c.delta).toFixed(4)}</span>`
+        ).join('<br>');
+        const stepLabelHtml = lastBestChangeStep != null
+          ? `<span style="display: block; font-size: 0.6em; color: #777; margin-top: ${changeListHtml ? 4 : 0}px;">last accepted at Step ${lastBestChangeStep}</span>`
+          : '';
+        liveStatsBestImprovedEl.innerHTML = changeListHtml + stepLabelHtml;
+
+        // Live ordering/limit/uniformity readout for the running BEST candidate - the same
+        // figures the final results' "N ordering/limit violations remain" paragraphs and
+        // "Uniformity penalty remaining" line report, surfaced live instead of only after the
+        // run ends. `null` for a Phase 1/'scatter' candidate (see lossBreakdownFor's own doc -
+        // no penalty fields exist yet), which leaves the box showing whatever Phase 2 last set,
+        // or its initial '—' before Phase 2 has run at all.
+        if (bestCandidate.orderingViolations != null) {
+          const orderingCount = bestCandidate.orderingViolations.length;
+          const limitCount = bestCandidate.limitViolations.length;
+          const lines = [
+            `<span style="color: ${orderingCount > 0 ? '#ff8080' : '#7fd97f'};">${orderingCount} ordering violation${orderingCount === 1 ? '' : 's'}</span>${orderingCount > 0 ? ` (total ${bestCandidate.orderingPenalty.toFixed(3)})` : ''}`,
+            `<span style="color: ${limitCount > 0 ? '#ff8080' : '#7fd97f'};">${limitCount} limit violation${limitCount === 1 ? '' : 's'}</span>${limitCount > 0 ? ` (total ${bestCandidate.limitPenalty.toFixed(3)})` : ''}`,
+          ];
+          if (options.uniformityPenaltyWeight > 0) {
+            lines.push(`<span style="color: #999;">uniformity penalty ${bestCandidate.uniformityPenalty.toFixed(3)}</span>`);
+          }
+          liveStatsViolationsEl.innerHTML = lines.join('<br>');
+        }
+
         // Only Phase 2 ('shape') carries a full live candidate reel table (r.trial) - Phase 1
         // ('scatter') only ever scales trigger symbols, which are excluded from Phase 2's
         // search entirely, so every value symbol's frequency is still exactly its baseline
@@ -886,7 +1080,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           // converged). best.trial is the overall best-ever candidate found so far - same
           // current/best distinction as the log line above, now shown per symbol too.
           const currentTrial = r.attempted?.trial ?? r.trial;
-          updateLiveTable(currentTrial, best.trial);
+          updateLiveTable(currentTrial, best.trial, bestCandidate.orderingViolations, bestCandidate.limitViolations);
         }
       }
     );

@@ -1424,7 +1424,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       const prevBestLimit = bestLimitPenalty;
       const prevBestUniformity = bestUniformityPenalty;
 
-      if (beatsIncumbent(nm.result, best, bestAcceptanceZ)) best = nm.result;
+      // Captured before mutating `best` so the 'restart' onProgress event below (fired only on
+      // a stall) can tell a caller whether THIS round's own best actually became the new
+      // cross-round incumbent, or was rejected because its improvement didn't clear the
+      // combined-standard-error margin against the previous incumbent - otherwise indistinguishable
+      // from the UI's perspective (both cases just move on to another round).
+      const candidateAccepted = beatsIncumbent(nm.result, best, bestAcceptanceZ);
+      if (candidateAccepted) best = nm.result;
       if (nm.result.orderingPenalty < bestOrderingPenalty) bestOrderingPenalty = nm.result.orderingPenalty;
       if (nm.result.limitPenalty < bestLimitPenalty) bestLimitPenalty = nm.result.limitPenalty;
       if (nm.result.uniformityPenalty < bestUniformityPenalty) bestUniformityPenalty = nm.result.uniformityPenalty;
@@ -1453,7 +1459,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // even though the search jumped back to `best.point` with a wider step underneath it.
         if (onProgress) {
           await onProgress('restart', iterationsUsed, null,
-            { stepSize, restarts, stallStreak, maxStallRestarts, willStopNow: stallStreak >= maxStallRestarts }, best);
+            {
+              stepSize, restarts, stallStreak, maxStallRestarts, willStopNow: stallStreak >= maxStallRestarts,
+              // Whether the round that just stalled actually became the new incumbent `best`
+              // (see `candidateAccepted` above) - `roundResult` is that round's own best candidate,
+              // included so a caller can explain why it wasn't accepted even though nothing about
+              // a stall inherently implies rejection (the two are independent: a round can stall
+              // AND still have produced a new incumbent, or stall while its own best still loses
+              // to a noisier-but-nominally-better previous incumbent).
+              candidateAccepted, roundResult: nm.result,
+            }, best);
         }
         if (stallStreak >= maxStallRestarts) {
           stalledOut = true;
