@@ -9,7 +9,6 @@ import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 // instead of the simulation/tuner silently drifting onto their own hardcoded defaults.
 const REELS_COUNT = 5;
 const ROWS_COUNT = 3;
-const REEL_LENGTH = 500;
 const REEL_SEEDS = [1234, 567, 89, 765, 3321];
 const BET_PER_LINE = 0.10;
 const BET_PER_LINE_STEP = 0.10;
@@ -49,31 +48,36 @@ const PAYTABLE = {
   ten:      { payout: [0,  0,   5,   30,  100], type: 'regular', paymode: 'line', wild: false, triggerFreeSpins: false, friendlyName: 'Lucky Ten' },
 };
 
-// Frequency tables for each reel. Every reel starts out identical (same numbers the flat
-// PAYTABLE.frequency used to carry) so this migration doesn't change RTP/trigger-rate by
-// itself - a pure data-model refactor. Differentiate them per reel via TUNE FREQUENCIES
-// (per-reel ordering preference, fixed, min/max, minGap, maxStack) same as fruitmachine.
-// `defaults` is empty on every reel here - `book`'s spacing comes entirely from
-// generateReel's own triggerFreeSpins-based fallback (see its doc in core/SlotMath.js),
-// reading PAYTABLE.book.triggerFreeSpins (passed as the 6th arg to generateReel below), not
-// from anything in these tables. Don't be surprised if TUNE FREQUENCIES leaves `book`'s
-// frequency completely unchanged on every reel - that's expected here, not a bug: see the
-// Phase 1 comment above tuneFrequencies() in core/SpinSimulator.js. In short, book's baseline
-// trigger rate (~0.57%) already sits inside the tuner's default target band (0.6% +/- 0.15),
-// so there's nothing for that phase to correct.
+// ---- Tuned 2026-07-26 ----
+// Achieved: RTP 96.56%  |  free-spin trigger 0.539%
+//
+// To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
+// same reel geometry, since strips are generated from them:
+//   searchSeed 12345   reelSeeds [1234, 567, 89, 765, 3321]
+//   reelLength 500   reels 5 x 3 rows
+//   target RTP 96% +/-1.5   target trigger 0.6% +/-0.15
+//   100,000 spins x 4 trials   cmaes, max 150 iterations
+//   initial weights: provided   max RTP std error 1
+//   loss weights: ordering 1, limit 0.5, uniformity 0.75, stdError 2, triggerRate 0, spacing 0
+//   ordering bias by reel: [1, 1, -1, -1, 0]
+//
+// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
+// against this length and do not reproduce the RTP above at any other.
+export const REEL_LENGTH = 500;
+
 export const FREQUENCY_REEL1 = {
   defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
     book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
-    explorer: { frequency: 0.1621 },
-    tut:      { frequency: 0.1502 },
-    anubis:   { frequency: 0.2206 },
-    scarab:   { frequency: 0.2208 },
-    ace:      { frequency: 0.1926 },
-    king:     { frequency: 0.1927 },
-    queen:    { frequency: 0.1902 },
-    jack:     { frequency: 0.19 },
-    ten:      { frequency: 0.1899 },
+    explorer: { frequency: 0.1254 },
+    tut:      { frequency: 0.2348 },
+    anubis:   { frequency: 0.2456 },
+    scarab:   { frequency: 0.3618 },
+    ace:      { frequency: 0.1815 },
+    king:     { frequency: 0.1819 },
+    queen:    { frequency: 0.09743 },
+    jack:     { frequency: 0.08196 },
+    ten:      { frequency: 0.1987 },
   },
 };
 
@@ -81,15 +85,15 @@ export const FREQUENCY_REEL2 = {
   defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
     book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
-    explorer: { frequency: 0.1257 },
-    tut:      { frequency: 0.1502 },
-    anubis:   { frequency: 0.2243 },
-    scarab:   { frequency: 0.2246 },
-    ace:      { frequency: 0.1968 },
-    king:     { frequency: 0.1968 },
-    queen:    { frequency: 0.1968 },
-    jack:     { frequency: 0.1968 },
-    ten:      { frequency: 0.1968 },
+    explorer: { frequency: 0.0799 },
+    tut:      { frequency: 0.3301 },
+    anubis:   { frequency: 0.4368 },
+    scarab:   { frequency: 0.1495 },
+    ace:      { frequency: 0.15 },
+    king:     { frequency: 0.1922 },
+    queen:    { frequency: 0.0399 },
+    jack:     { frequency: 0.2116 },
+    ten:      { frequency: 0.1188 },
   },
 };
 
@@ -97,15 +101,15 @@ export const FREQUENCY_REEL3 = {
   defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
     book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
-    explorer: { frequency: 0.0798 },
-    tut:      { frequency: 0.1586 },
-    anubis:   { frequency: 0.2317 },
-    scarab:   { frequency: 0.2235 },
-    ace:      { frequency: 0.2031 },
-    king:     { frequency: 0.2031 },
-    queen:    { frequency: 0.203 },
-    jack:     { frequency: 0.2031 },
-    ten:      { frequency: 0.203 },
+    explorer: { frequency: 0.01107 },
+    tut:      { frequency: 0.04584 },
+    anubis:   { frequency: 0.08015 },
+    scarab:   { frequency: 0.1573 },
+    ace:      { frequency: 0.2109 },
+    king:     { frequency: 0.3279 },
+    queen:    { frequency: 0.1773 },
+    jack:     { frequency: 0.1307 },
+    ten:      { frequency: 0.5677 },
   },
 };
 
@@ -113,15 +117,15 @@ export const FREQUENCY_REEL4 = {
   defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
     book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
-    explorer: { frequency: 0.07716 },
-    tut:      { frequency: 0.1498 },
-    anubis:   { frequency: 0.2176 },
-    scarab:   { frequency: 0.2274 },
-    ace:      { frequency: 0.1963 },
-    king:     { frequency: 0.1963 },
-    queen:    { frequency: 0.252 },
-    jack:     { frequency: 0.1963 },
-    ten:      { frequency: 0.1963 },
+    explorer: { frequency: 0.2864 },
+    tut:      { frequency: 0.06792 },
+    anubis:   { frequency: 0.2197 },
+    scarab:   { frequency: 0.1836 },
+    ace:      { frequency: 0.08335 },
+    king:     { frequency: 0.1286 },
+    queen:    { frequency: 0.2444 },
+    jack:     { frequency: 0.2964 },
+    ten:      { frequency: 0.1988 },
   },
 };
 
@@ -129,15 +133,15 @@ export const FREQUENCY_REEL5 = {
   defaults: { minFrequency: 0, maxFrequency: 1 },
   symbols: {
     book:     { frequency: 0.051, minGap: 3, maxStack: 1 },
-    explorer: { frequency: 0.07939 },
-    tut:      { frequency: 0.1547 },
-    anubis:   { frequency: 0.2314 },
-    scarab:   { frequency: 0.2343 },
-    ace:      { frequency: 0.2019 },
-    king:     { frequency: 0.2018 },
-    queen:    { frequency: 0.2019 },
-    jack:     { frequency: 0.2019 },
-    ten:      { frequency: 0.2019 },
+    explorer: { frequency: 0.05194 },
+    tut:      { frequency: 0.09915 },
+    anubis:   { frequency: 0.3734 },
+    scarab:   { frequency: 0.1399 },
+    ace:      { frequency: 0.1814 },
+    king:     { frequency: 0.1599 },
+    queen:    { frequency: 0.4149 },
+    jack:     { frequency: 0.1221 },
+    ten:      { frequency: 0.1664 },
   },
 };
 const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQUENCY_REEL4, FREQUENCY_REEL5];
