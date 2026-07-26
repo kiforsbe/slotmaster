@@ -154,6 +154,45 @@ class SlotAudio {
     }
   }
 
+  // Bright, percussive two/three-note "ding-ding!" bell chime - used by Candy Frenzy for its
+  // per-cascade-step cluster win instead of playWin's rising arpeggio (built for payline-style
+  // games). A bell timbre (fast attack, quick decay, faint octave-up shimmer, no vibrato) reads
+  // more like a cheerful "you won!" ding than a musical phrase.
+  playClusterWin(payoutMultiplier) {
+    this.resume();
+    if (!this.ctx || this.isMuted) return;
+
+    const isBigWin = payoutMultiplier >= 5;
+    const notes = isBigWin ? [1318.51, 1567.98, 2093.00] : [1318.51, 1567.98]; // E6, G6, (C7)
+    const noteSpacing = 0.14;
+
+    notes.forEach((freq, idx) => {
+      const delay = idx * noteSpacing;
+      this._playBellTone(freq, delay, 0.7);
+      this._playBellTone(freq * 2, delay, 0.22); // faint octave-up shimmer for a bell-like timbre
+    });
+  }
+
+  // One percussive bell-like tone: fast attack, exponential decay, no vibrato - reads as a
+  // sharp "ding" rather than a sung note.
+  _playBellTone(freq, delaySeconds, volumeScale) {
+    const channel = this.createSynthChannel();
+    if (!channel) return;
+    const { osc, gain, time } = channel;
+    const startTime = time + delaySeconds;
+    const duration = 0.5;
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, startTime);
+
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(this.globalVolume * volumeScale, startTime + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+    osc.start(startTime);
+    osc.stop(startTime + duration + 0.02);
+  }
+
   playBigWinSubBass() {
     const channel = this.createSynthChannel();
     if (!channel) return;

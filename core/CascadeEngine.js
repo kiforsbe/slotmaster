@@ -17,6 +17,10 @@ const SPIN_LOG_MAX_ENTRIES = 20000;
 // whole cluster popping doesn't look like one uniform stamp repeated across every cell.
 const CLEAR_VARIANTS = ['scaleFade', 'stretch', 'jump', 'spin'];
 
+// How long the "clearing" state (a winning cluster's vanish animation + glow) lingers before
+// the next cascade step's grid appears.
+const CLEAR_DURATION_MS = { normal: 760, turbo: 300 };
+
 export class CascadeEngine {
   constructor(canvas, config = {}) {
     this.canvas = canvas;
@@ -188,7 +192,6 @@ export class CascadeEngine {
 
     if (this.state === 'dropping_in' || this.state === 'falling') {
       const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
-      const columnStagger = this.turboMode ? 20 : 70; // ms between each successive reel starting to exit
       const rampDuration = this.turboMode ? 80 : 220; // ms to ease from a standstill up to full speed
       let allDone = true;
 
@@ -200,7 +203,7 @@ export class CascadeEngine {
           // naturally follow a little after, preserving the left-to-right wave without ever
           // waiting on a "have all reels finished exiting" global barrier.
           allDone = false;
-          const exitStartAt = this.stepStartTime + col * columnStagger;
+          const exitStartAt = this.stepStartTime + this._columnStartDelay(col);
           const effectiveSpeed = this._rampSpeed(speed, now - exitStartAt, rampDuration);
           let colFinishedExiting = true;
           for (let row = 0; row < this.config.rowsCount; row++) {
@@ -247,7 +250,7 @@ export class CascadeEngine {
 
       if (allDone) this._onStepLanded();
     } else if (this.state === 'clearing') {
-      const clearDuration = this.turboMode ? 150 : 380;
+      const clearDuration = this.turboMode ? CLEAR_DURATION_MS.turbo : CLEAR_DURATION_MS.normal;
       if (now - this.clearStartTime >= clearDuration) this._advanceToNextStep();
     }
 
@@ -267,6 +270,19 @@ export class CascadeEngine {
     return baseSpeed * Math.sin(t * (Math.PI / 2));
   }
 
+  // How long after a step begins the col-th reel starts (exiting or entering). Ease-out
+  // rather than a flat per-reel delay: the gap between the first couple of reels starting is
+  // biggest, then shrinks reel by reel - the wave starts slow and gathers momentum, instead of
+  // ticking across the grid at one constant, metronome-even interval.
+  _columnStartDelay(col) {
+    const reelsCount = this.config.reelsCount;
+    if (reelsCount <= 1) return 0;
+    const totalSpan = (reelsCount - 1) * (this.turboMode ? 20 : 70);
+    const t = col / (reelsCount - 1);
+    const eased = 1 - Math.pow(1 - t, 2);
+    return eased * totalSpan;
+  }
+
   _onStepLanded() {
     const step = this.cascadeSequence.cascadeSteps[this.stepIndex];
     if (step.clusterWins.length > 0) {
@@ -284,7 +300,7 @@ export class CascadeEngine {
       });
       this._spawnClearParticles(this.currentClearPositions);
       this._spawnClusterWinPopups(step.clusterWins);
-      audio.playWin(step.payout);
+      audio.playClusterWin(step.payout);
       this.config.onStateChange(this.state);
     } else {
       this._finishSpin();
@@ -320,9 +336,8 @@ export class CascadeEngine {
     // A mid-spin cascade refill has no "leftover grid to exit" concept - every column is
     // immediately free to enter, staggered left-to-right same as always.
     this.stepStartTime = Date.now();
-    const columnStagger = this.turboMode ? 20 : 70;
     this.columnOutgoingDone = new Array(this.config.reelsCount).fill(true);
-    this.columnEnterStartTime = this.columnEnterStartTime.map((_, col) => this.stepStartTime + col * columnStagger);
+    this.columnEnterStartTime = this.columnEnterStartTime.map((_, col) => this.stepStartTime + this._columnStartDelay(col));
 
     this.state = 'falling';
     this.config.onStateChange(this.state);
@@ -439,7 +454,6 @@ export class CascadeEngine {
     // neighbors to finish exiting first.
     const hasExistingGrid = this.grid.some(col => col.some(cell => cell !== null));
     this.stepStartTime = Date.now();
-    const columnStagger = this.turboMode ? 20 : 70;
     if (hasExistingGrid) {
       this.outgoingGrid = this.grid;
       this.outgoingOffsets = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(0));
@@ -449,7 +463,7 @@ export class CascadeEngine {
       this.outgoingGrid = null;
       this.outgoingOffsets = null;
       this.columnOutgoingDone = new Array(this.config.reelsCount).fill(true);
-      this.columnEnterStartTime = Array.from({ length: this.config.reelsCount }, (_, col) => this.stepStartTime + col * columnStagger);
+      this.columnEnterStartTime = Array.from({ length: this.config.reelsCount }, (_, col) => this.stepStartTime + this._columnStartDelay(col));
     }
 
     this.stepIndex = 0;
@@ -590,7 +604,7 @@ export class CascadeEngine {
   _renderGridSymbols() {
     const now = Date.now();
     const isClearing = this.state === 'clearing';
-    const clearDuration = this.turboMode ? 150 : 380;
+    const clearDuration = this.turboMode ? CLEAR_DURATION_MS.turbo : CLEAR_DURATION_MS.normal;
     const clearProgress = isClearing ? Math.min((now - this.clearStartTime) / clearDuration, 1) : null;
     const bounceDuration = this.turboMode ? 140 : 260;
 
@@ -611,6 +625,11 @@ export class CascadeEngine {
         const clearInfo = isClearing ? this.currentClearVariants.get(`${col},${row}`) : null;
         const bounceElapsed = now - this.cellBounceStartTime[col][row];
         const isBouncing = !clearInfo && offsetRows === 0 && bounceElapsed >= 0 && bounceElapsed < bounceDuration;
+
+        // Drawn underneath, fixed to the cell's actual grid position (not the vanish
+        // animation's moving/scaling one) - a stable "this tile is part of the winning
+        // cluster" marker regardless of what its symbol is doing on top of it.
+        if (clearInfo) this._renderClearGlow(cx, cy, clearProgress);
 
         this.ctx.save();
         if (clearInfo) {
@@ -638,6 +657,25 @@ export class CascadeEngine {
     this.ctx.translate(centerX, bottomY);
     this.ctx.scale(squashX, squashY);
     this.ctx.translate(-centerX, -bottomY);
+  }
+
+  // A glowing outline around a cell that's part of the cluster currently being cleared, so
+  // it's obvious at a glance which tiles just won even before/while their symbol animates
+  // away. Pulses in quickly, then fades out alongside the rest of the clear animation.
+  _renderClearGlow(cx, cy, progress) {
+    const pulseIn = Math.sin(Math.min(progress * 3, 1) * (Math.PI / 2));
+    const alpha = pulseIn * (1 - progress * 0.6);
+    if (alpha <= 0) return;
+
+    const inset = 2;
+    this.ctx.save();
+    this.ctx.globalAlpha = alpha;
+    this.ctx.strokeStyle = '#ffe94a';
+    this.ctx.lineWidth = 3;
+    this.ctx.shadowColor = '#ffe94a';
+    this.ctx.shadowBlur = 14;
+    this.ctx.strokeRect(cx + inset, cy + inset, this.symbolWidth - inset * 2, this.symbolHeight - inset * 2);
+    this.ctx.restore();
   }
 
   // Applies one of a few random per-symbol "vanish" animations to a cleared cell (see
