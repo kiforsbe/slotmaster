@@ -714,6 +714,19 @@ export function beatsIncumbent(candidate, incumbent, z) {
  *   the search but never blocks 'converged'/'converged-with-violations' classification (real
  *   payout-tiered reels essentially never land exactly on any target line, so requiring this to
  *   hit exactly 0 would make 'converged' unreachable whenever it's enabled).
+ * @param {number} [options.stdErrorPenaltyWeight=0] - Weight of a soft penalty on a candidate's
+ *   own measurement unreliability (`trialRtpStdError` - the standard error of the mean across
+ *   its `trialsPerPoint` repeats, see `measure()`'s own doc) added directly into `loss`. Off by
+ *   default (0), unlike `maxRtpStdError`/`bestAcceptanceZ` (which only ever GATE whether a
+ *   result can count as 'converged' or replace the incumbent `best`, after the fact), this
+ *   actively steers the search itself DURING the search - two candidates with identical RTP
+ *   error but different std error no longer score identically; the noisier one now costs more,
+ *   so the optimizer has a genuine incentive to prefer more reliably-reproducible regions of the
+ *   search space, not just whichever one look best on a single noisy average. Collapses to
+ *   today's behavior (loss ignores std error entirely) at the default of 0 - raise this instead
+ *   of (or alongside) `maxRtpStdError`/`bestAcceptanceZ` if the search keeps landing on
+ *   high-variance candidates that only pass those gates by chance rather than genuinely
+ *   avoiding noisy regions in the first place.
  * @param {number[]} [options.orderingBiasByReel] - Per-reel direction/strength for the
  *   ordering preference, indexed by reel. `-1` (the default for every reel, if omitted or if
  *   a specific reel's entry is missing) keeps today's behavior: a higher-paying symbol is
@@ -897,6 +910,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     orderingPenaltyWeight = 0.5,
     limitPenaltyWeight = 0.5,
     uniformityPenaltyWeight = 0,
+    stdErrorPenaltyWeight = 0,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchAlgorithm = 'nelderMead',
@@ -1355,7 +1369,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         if (measured.rtp < rtpMin) rtpMin = measured.rtp;
         if (measured.rtp > rtpMax) rtpMax = measured.rtp;
         return {
-          loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty,
+          loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty
+            + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0),
           rtp: measured.rtp,
           triggerRate: measured.triggerRate,
           trialRtpMin: measured.trialRtpMin,
@@ -1589,7 +1604,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     targetRtp, rtpTolerancePct, maxRtpStdError,
     targetTriggerRatePct, triggerRateTolerancePct,
     trialSpins, trialsPerPoint, maxIterations,
-    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, orderingBiasByReel,
+    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight, orderingBiasByReel,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild,

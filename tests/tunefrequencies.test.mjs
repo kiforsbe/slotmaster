@@ -703,6 +703,40 @@ test('tuneFrequencies uniformityPenaltyWeight defaults to off and never blocks a
   assert.ok(typeof result.diagnostics.rtpPhase.uniformityPenaltyRemaining === 'number');
 });
 
+test('tuneFrequencies options.stdErrorPenaltyWeight adds stdErrorPenaltyWeight * trialRtpStdError directly into loss', async () => {
+  // maxIterations: 0 + initialStepSize: 0 (same trick used elsewhere in this file) makes both
+  // calls measure the exact same unperturbed starting candidate, under the same seed - so
+  // trialRtpStdError is identical between them, and the only possible difference in `loss` is
+  // this new term itself, isolated from every other source of variation.
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 3, maxIterations: 0, initialStepSize: 0, searchSeed: 21,
+  };
+  const withoutPenalty = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, stdErrorPenaltyWeight: 0 });
+  const withPenalty = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, stdErrorPenaltyWeight: 2 });
+  const stdError = withoutPenalty.diagnostics.rtpPhase.trialRtpStdError;
+  assert.ok(stdError > 0, 'expected a nonzero std error (trialsPerPoint > 1) for this test to be meaningful');
+  const expectedDelta = 2 * stdError;
+  const actualDelta = withPenalty.diagnostics.rtpPhase.loss - withoutPenalty.diagnostics.rtpPhase.loss;
+  assert.ok(
+    Math.abs(actualDelta - expectedDelta) < 1e-9,
+    `expected loss to differ by exactly stdErrorPenaltyWeight * stdError (${expectedDelta}), got ${actualDelta}`
+  );
+});
+
+test('tuneFrequencies options.stdErrorPenaltyWeight defaults to 0 (off), matching pre-existing behavior exactly', async () => {
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 2, maxIterations: 8, searchSeed: 33,
+  };
+  const withDefault = await tuneFrequencies(PAYTABLE, REEL_TABLES, sharedOpts);
+  const withExplicitZero = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, stdErrorPenaltyWeight: 0 });
+  assert.deepEqual(withDefault.reelFrequencyTables, withExplicitZero.reelFrequencyTables);
+  assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
+});
+
 test('tuneFrequencies excludes a fixed: true symbol from uniformity\'s equal-share target entirely', async () => {
   // fixedSym's frequency (100) is wildly larger than a/b/c's own budget (1+19+10=30) - if it
   // leaked into uniformity's "equal share" computation at all, a/b/c would get pulled toward
@@ -1030,6 +1064,7 @@ test('tuneFrequencies diagnostics.inputParameters reflects both explicit options
   assert.equal(params.orderingPenaltyWeight, 0.5);
   assert.equal(params.limitPenaltyWeight, 0.5);
   assert.equal(params.uniformityPenaltyWeight, 0);
+  assert.equal(params.stdErrorPenaltyWeight, 0);
   assert.equal(params.bestAcceptanceZ, 1.0);
   assert.equal(params.initialWeightStrategy, 'provided');
   // Not JSON-safe / not a tuning knob - must not leak function values or game-layout data onto

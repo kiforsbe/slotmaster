@@ -435,6 +435,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label title="Discourages any one tunable symbol's frequency on a reel from sitting far from a straight-line target across payout tiers - that line is flat (an equal split) when the reel's ordering preference is 'No preference', and tilts to match that preference's direction/Strength otherwise, so this never fights ordering with a competing flat target. 0 (default) is off; raise it if the search keeps producing one or two outlier symbols relative to that line." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
           <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
+        <label title="Adds a candidate's own measurement unreliability (standard error across its Trials Averaged repeats) directly into the search's loss, on top of Max RTP Std Error / a candidate's Best-acceptance margin (which only ever gate whether a result can count as converged or replace the current best AFTER the fact). Raising this gives the search an active incentive to prefer more reliably-reproducible regions of the search space DURING the search itself, not just whichever candidate happens to look best on one noisy average. 0 (default) is off - loss ignores std error entirely, unchanged from before this option existed." style="font-size: 0.8em; color: #ccc;">Std Error Penalty Weight<br>
+          <input id="tune-std-error-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
         <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
           <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
             <option value="provided" selected>Use configured baseline (default)</option>
@@ -670,6 +673,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     orderingPenaltyWeight: tuneContainer.querySelector('#tune-ordering-weight'),
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
     uniformityPenaltyWeight: tuneContainer.querySelector('#tune-uniformity-weight'),
+    stdErrorPenaltyWeight: tuneContainer.querySelector('#tune-std-error-weight'),
     initialWeightStrategy: tuneContainer.querySelector('#tune-initial-weight-strategy'),
     searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
   };
@@ -734,6 +738,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
     uniformityPenaltyWeight: parseFloat(inputs.uniformityPenaltyWeight.value) || 0,
+    stdErrorPenaltyWeight: parseFloat(inputs.stdErrorPenaltyWeight.value) || 0,
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
@@ -877,6 +882,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.orderingPenaltyWeight > 0) parts.push(`ordering ${candidate.orderingPenalty.toFixed(4)}×${options.orderingPenaltyWeight}=${(candidate.orderingPenalty * options.orderingPenaltyWeight).toFixed(4)}`);
           if (options.limitPenaltyWeight > 0) parts.push(`limit ${candidate.limitPenalty.toFixed(4)}×${options.limitPenaltyWeight}=${(candidate.limitPenalty * options.limitPenaltyWeight).toFixed(4)}`);
           if (options.uniformityPenaltyWeight > 0) parts.push(`uniformity ${candidate.uniformityPenalty.toFixed(4)}×${options.uniformityPenaltyWeight}=${(candidate.uniformityPenalty * options.uniformityPenaltyWeight).toFixed(4)}`);
+          if (options.stdErrorPenaltyWeight > 0) parts.push(`std error ${(candidate.trialRtpStdError ?? 0).toFixed(4)}×${options.stdErrorPenaltyWeight}=${((candidate.trialRtpStdError ?? 0) * options.stdErrorPenaltyWeight).toFixed(4)}`);
           return `loss ${candidate.loss.toFixed(4)} (${parts.join(', ')})`;
         };
 
@@ -892,6 +898,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.orderingPenaltyWeight > 0) components.push({ label: 'ordering', raw: candidate.orderingPenalty, weight: options.orderingPenaltyWeight, color: '#e6b800' });
           if (options.limitPenaltyWeight > 0) components.push({ label: 'limit', raw: candidate.limitPenalty, weight: options.limitPenaltyWeight, color: '#ff8080' });
           if (options.uniformityPenaltyWeight > 0) components.push({ label: 'uniformity', raw: candidate.uniformityPenalty, weight: options.uniformityPenaltyWeight, color: '#c58fff' });
+          if (options.stdErrorPenaltyWeight > 0) components.push({ label: 'std error', raw: candidate.trialRtpStdError ?? 0, weight: options.stdErrorPenaltyWeight, color: '#5fd4c4' });
           components.forEach(c => { c.contribution = c.raw * c.weight; });
           return components;
         };
@@ -1012,6 +1019,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             { label: 'ordering penalty', delta: (current.orderingPenalty - bestCandidate.orderingPenalty) * options.orderingPenaltyWeight },
             { label: 'limit penalty', delta: (current.limitPenalty - bestCandidate.limitPenalty) * options.limitPenaltyWeight },
             { label: 'uniformity penalty', delta: (current.uniformityPenalty - bestCandidate.uniformityPenalty) * options.uniformityPenaltyWeight },
+            { label: 'std error penalty', delta: ((current.trialRtpStdError ?? 0) - (bestCandidate.trialRtpStdError ?? 0)) * options.stdErrorPenaltyWeight },
           ];
           notPromotedReason = terms.reduce((a, b) => (b.delta > a.delta ? b : a));
           appendLog(`   … not promoted to best - ${notPromotedReason.label} is worse by ${notPromotedReason.delta.toFixed(4)} (loss ${current.loss.toFixed(4)} vs best's ${bestCandidate.loss.toFixed(4)})`);
@@ -1140,6 +1148,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           ];
           if (options.uniformityPenaltyWeight > 0) {
             lines.push(`<span style="color: #999;">uniformity penalty${withContribution(bestCandidate.uniformityPenalty, options.uniformityPenaltyWeight)}</span>`);
+          }
+          if (options.stdErrorPenaltyWeight > 0) {
+            lines.push(`<span style="color: #999;">std error penalty${withContribution(bestCandidate.trialRtpStdError ?? 0, options.stdErrorPenaltyWeight)}</span>`);
           }
           liveStatsViolationsEl.innerHTML = lines.join('<br>');
         }
