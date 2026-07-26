@@ -272,6 +272,9 @@ export function renormalizeWeights(raw, valueBudget) {
  *   iteration (damping against noisy slope estimates); decays each step.
  * @param {number} [args.trustFactorDecay=0.9]
  * @param {number} [args.epsilon=0.05] - Finite-difference probe distance in log-space.
+ * @param {AbortSignal} [args.signal] - Checked once per iteration, after that iteration's own
+ *   measurement (so `best` is always already set) and before the potentially-expensive
+ *   widen-probe section - cooperative cancellation stops there rather than throwing.
  * @returns {Promise<{ mult: number, error: number, result: Object, trial: Object, converged: boolean }>} -
  *   `converged` is true iff the best candidate found landed within `tolerance` of `target`;
  *   false means the search exhausted its iterations (or every direction was a flat
@@ -284,6 +287,7 @@ export async function gradientDescent1D({
   onProgress, onBusy, yieldToEventLoop,
   trustFactor = 0.8, trustFactorDecay = 0.9, epsilon = 0.05,
   busyReportIntervalMs = 300,
+  signal = null,
 }) {
   const minX = Math.log(minParam);
   const maxX = Math.log(maxParam);
@@ -303,6 +307,11 @@ export async function gradientDescent1D({
     if (onProgress) await onProgress(i, param, resultWithError, best);
     await yieldToEventLoop();
     if (error <= tolerance || i === maxIterations - 1) break;
+    // Checked after `best` is already guaranteed set from this iteration's own measurement (so
+    // stopping here never leaves the caller without a usable result) and before the potentially
+    // expensive widen-probe section below - a user-requested stop shouldn't spend several more
+    // measurements searching for a slope it's about to discard anyway.
+    if (signal?.aborted) break;
 
     // Probe for a measurable slope, widening the probe distance (and, failing that,
     // trying the opposite direction) when the first probe lands on a flat plateau -
@@ -415,6 +424,11 @@ export async function gradientDescent1D({
  *   `onBusy` progress updates within the same shrink (see above). Lower only for tests that
  *   need every vertex's update to fire deterministically.
  * @param {() => Promise<void>} args.yieldToEventLoop
+ * @param {AbortSignal} [args.signal] - Checked once per iteration, before that iteration's own
+ *   reflect/expand/contract/shrink work starts (safe even on iteration 0 - `best` is already
+ *   valid from the initial simplex) - cooperative cancellation stops there rather than
+ *   throwing, returning whatever `best` has been found so far with `iterations` less than
+ *   `maxIterations`.
  * @returns {Promise<{ point: number[], loss: number, result: Object, iterations: number, converged: boolean }>} -
  *   `converged` is true iff the search stopped because the simplex's spread collapsed below
  *   `convergenceTolerance`, not because `maxIterations` ran out.
@@ -423,6 +437,7 @@ export async function nelderMead({
   initialPoint, initialStepSize, evaluate, maxIterations,
   convergenceTolerance = 1e-4, onProgress, onBusy, yieldToEventLoop,
   busyReportIntervalMs = 300,
+  signal = null,
 }) {
   const n = initialPoint.length;
   const ALPHA = 1, GAMMA = 2, RHO = 0.5, SIGMA = 0.5;
@@ -453,6 +468,11 @@ export async function nelderMead({
   let converged = false;
 
   for (let iter = 0; iter < maxIterations; iter++) {
+    // `best` is already valid from the initial simplex above, so it's safe to stop here before
+    // this iteration's own work even starts - unlike cmaes/gradientDescent1D, which only get a
+    // usable `best` partway through their own first iteration (see their own signal-check
+    // placement for why).
+    if (signal?.aborted) break;
     iterations = iter + 1;
     vertices.sort((a, b) => a.loss - b.loss);
     if (vertices[0].loss < best.loss) best = vertices[0];
@@ -831,6 +851,14 @@ export function beatsIncumbent(candidate, incumbent, z) {
  *   sequential measurements on one CPU core" for a high-dimensional search (e.g. Candy Frenzy's
  *   ~84 tunable dims). Omitted (the default), every existing caller/test keeps running exactly
  *   today's in-process sequential loop - fully backward compatible.
+ * @param {AbortSignal} [options.signal] - Lets a caller stop a long-running tune early (e.g. a
+ *   STOP button) without losing whatever's already been found. Checked cooperatively - between
+ *   Phase 1 and Phase 2, and once per round of Phase 2 (after that round's `nelderMead`/`cmaes`
+ *   call returns, itself checking every iteration/generation - see each one's own doc) - never
+ *   mid-measurement, and never throws: `reason` in the returned diagnostics becomes `'stopped'`
+ *   (taking priority over `'converged'`/`'converged-with-violations'`/`'stalled'`/`'exhausted'`)
+ *   and everything else in the result reflects whatever the best candidate found before the
+ *   signal fired actually was, exactly as if `maxIterations` had simply been reached there.
  * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>} -
  *   `diagnostics.inputParameters` is a snapshot of every resolved (defaults-applied) tuning
  *   knob used to produce this specific result - see its own comment above the `return` statement
@@ -889,6 +917,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     busyReportIntervalMs = 300,
     onProgress = null,
     runTrial = null,
+    signal = null,
   } = options;
 
   const orderingBiasFor = (r) => (orderingBiasByReel && orderingBiasByReel[r] != null) ? orderingBiasByReel[r] : -1;
@@ -1080,6 +1109,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       onBusy: onProgress ? (info) => onProgress('busy', info.iteration, null, { ...info, sourcePhase: 'scatter' }, null) : null,
       busyReportIntervalMs,
       yieldToEventLoop,
+      signal,
     });
     currentReelTables = scatterPhase.trial;
   }
@@ -1379,6 +1409,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     let bestUniformityPenalty = Infinity;
     let stallStreak = 0;
     let stalledOut = false;
+    let userStopped = false;
     let stillImproving = { rtp: true, ordering: true, limits: true, uniformity: true };
 
     // CMA-ES-only: seed `best` with an actual measurement of the starting point itself, before
@@ -1439,6 +1470,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
           : null,
         busyReportIntervalMs,
         yieldToEventLoop,
+        signal,
       });
       iterationsUsed += nm.iterations;
 
@@ -1467,6 +1499,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
       const fullyResolved = best.error <= earlyAcceptErrorPct && bestOrderingPenalty <= 0 && bestLimitPenalty <= 0 && reliable(best);
       if (fullyResolved) break;
+
+      // Checked before the stall/restart branch below, not folded into it - a user-requested
+      // stop isn't a stall (the search may well have still been actively improving), so it
+      // shouldn't also widen the step or fire a "Round stalled" event for something that isn't
+      // one. `best` (and every penalty tracker) already reflects this round's own work by this
+      // point regardless of which branch is taken, so stopping here never discards anything.
+      if (signal?.aborted) { userStopped = true; break; }
 
       if (stillImproving.rtp || stillImproving.ordering || stillImproving.limits || stillImproving.uniformity) {
         stallStreak = 0;
@@ -1502,6 +1541,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
     currentReelTables = best.trial;
     const reason = (() => {
+      // Takes priority over every other classification, even one that would otherwise read as
+      // 'converged' - the search was stopped by explicit request, not by its own criteria, and
+      // that's the more honest thing to report regardless of how close the result happens to be.
+      if (userStopped) return 'stopped';
       const rtpOk = best.error <= rtpTolerancePct && reliable(best);
       const violationsOk = bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
       if (rtpOk && violationsOk) return 'converged';
@@ -1570,7 +1613,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // this result.
         loss: rtpPhaseResult.loss,
         error: rtpPhaseResult.error,
-        converged: rtpPhaseResult.error <= rtpTolerancePct && (rtpPhaseResult.trialRtpStdError ?? 0) <= maxRtpStdError,
+        // Always false when `reason` is 'stopped' - the search was ended by explicit request,
+        // not by meeting its own criteria, even if the error happened to be within tolerance
+        // when the signal fired - consistent with `reason` itself taking the same priority.
+        converged: rtpPhaseResult.reason !== 'stopped'
+          && rtpPhaseResult.error <= rtpTolerancePct && (rtpPhaseResult.trialRtpStdError ?? 0) <= maxRtpStdError,
         reason: rtpPhaseResult.reason,
         rtp: rtpPhaseResult.rtp,
         triggerRate: rtpPhaseResult.triggerRate,

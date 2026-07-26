@@ -110,6 +110,42 @@ test('cmaes respects maxIterations and still returns the best point found', asyn
   assert.ok(iterations <= 3, `expected iterations capped at 3, got ${iterations}`);
 });
 
+test('cmaes stops cooperatively once signal.aborted is set, returning a usable best-so-far', async () => {
+  const controller = new AbortController();
+  let generationsSeen = 0;
+  const { iterations, point } = await cmaes({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 100,
+    seed: 1,
+    signal: controller.signal,
+    onProgress: () => { generationsSeen++; if (generationsSeen === 3) controller.abort(); },
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.ok(iterations < 100, `expected far fewer than 100 generations to have run, got ${iterations}`);
+  assert.equal(iterations, generationsSeen, 'expected to stop right after the generation that requested the abort, not later');
+  assert.ok(Number.isFinite(point[0]) && Number.isFinite(point[1]), 'expected a real, usable point even though the search was cut short');
+});
+
+test('cmaes never checks signal before generation 0 has a usable best', async () => {
+  // Aborting before the very first onProgress call fires must still return a real result (from
+  // generation 0's own evaluation) rather than crashing on a null `best`.
+  const controller = new AbortController();
+  controller.abort();
+  const { iterations, loss } = await cmaes({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 100,
+    seed: 1,
+    signal: controller.signal,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(iterations, 1, 'expected exactly one generation to have run before the already-set signal was noticed');
+  assert.ok(Number.isFinite(loss));
+});
+
 test('cmaes carries extra evaluate() fields through onto the returned result', async () => {
   const { result } = await cmaes({
     initialPoint: [0],

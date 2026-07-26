@@ -99,6 +99,11 @@ function sampleGaussian(rng) {
  *   reporting.
  * @param {number} [busyReportIntervalMs=300]
  * @param {() => Promise<void>} yieldToEventLoop
+ * @param {AbortSignal} [signal] - Checked once per generation, after that generation's
+ *   population has fully evaluated and been incorporated into `best`/the search distribution -
+ *   cooperative cancellation stops at the next generation boundary (never mid-generation,
+ *   never discarding already-completed work) rather than throwing, returning whatever `best`
+ *   has been found so far with `iterations` less than `maxIterations`.
  * @returns {Promise<{ point: number[], loss: number, result: Object, iterations: number, converged: boolean }>}
  */
 export async function cmaes({
@@ -106,6 +111,7 @@ export async function cmaes({
   convergenceTolerance = 1e-4,
   onProgress = null, onBusy = null, busyReportIntervalMs = 300,
   yieldToEventLoop,
+  signal = null,
 }) {
   const n = initialPoint.length;
   const lambda = 4 + Math.floor(3 * Math.log(n));
@@ -213,6 +219,11 @@ export async function cmaes({
     await yieldToEventLoop();
 
     if (sigma * Math.max(...D) < convergenceTolerance) { converged = true; break; }
+    // Checked last, after this generation's population has fully evaluated and `best`/mean/
+    // sigma/covariance have all already incorporated it - a user-requested stop takes effect at
+    // the next generation boundary rather than discarding a generation's already-completed work,
+    // and `best` is guaranteed non-null by this point regardless of how early gen 0 stops here.
+    if (signal?.aborted) break;
   }
 
   return { point: best.point, loss: best.loss, result: best, iterations, converged };

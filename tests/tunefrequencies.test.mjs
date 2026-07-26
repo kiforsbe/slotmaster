@@ -101,6 +101,41 @@ test('nelderMead respects maxIterations and still returns the best point found',
   assert.ok(loss < 13, `expected some improvement over the initial loss (9+4=13), got ${loss}`);
 });
 
+test('nelderMead stops cooperatively once signal.aborted is set, returning a usable best-so-far', async () => {
+  const controller = new AbortController();
+  let iterationsSeen = 0;
+  const { iterations, point } = await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 100,
+    convergenceTolerance: 1e-9,
+    onProgress: () => { iterationsSeen++; if (iterationsSeen === 5) controller.abort(); },
+    signal: controller.signal,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.ok(iterations < 100, `expected far fewer than 100 iterations to have run, got ${iterations}`);
+  assert.equal(iterations, iterationsSeen, 'expected to stop right after the iteration that requested the abort, not later');
+  assert.ok(Number.isFinite(point[0]) && Number.isFinite(point[1]));
+});
+
+test('nelderMead never checks signal before the initial simplex has a usable best', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const { iterations, loss } = await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 100,
+    convergenceTolerance: 1e-9,
+    onProgress: null,
+    signal: controller.signal,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(iterations, 0, 'expected zero iterations to have run - the initial simplex itself already gives a valid best');
+  assert.ok(Number.isFinite(loss));
+});
+
 test('nelderMead carries extra evaluate() fields through onto the returned result', async () => {
   const { result } = await nelderMead({
     initialPoint: [0],
@@ -1053,4 +1088,37 @@ test('tuneFrequencies with searchAlgorithm: "cmaes" never regresses (by loss) wh
     continued.diagnostics.rtpPhase.loss <= first.diagnostics.rtpPhase.loss + 1e-9,
     `expected continuing (loss=${continued.diagnostics.rtpPhase.loss}) to be no worse than the first run's own result (loss=${first.diagnostics.rtpPhase.loss})`
   );
+});
+
+test('tuneFrequencies stops early via options.signal, reporting reason "stopped" and converged: false', async () => {
+  const controller = new AbortController();
+  let shapeStepsSeen = 0;
+  const result = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, searchAlgorithm: 'cmaes', searchSeed: 55,
+    maxIterations: 100,
+    signal: controller.signal,
+    onProgress: (phase) => { if (phase === 'shape') { shapeStepsSeen++; if (shapeStepsSeen === 3) controller.abort(); } },
+  });
+  assert.equal(result.diagnostics.rtpPhase.reason, 'stopped');
+  assert.equal(result.diagnostics.rtpPhase.converged, false, 'expected converged: false even if the stopped-at result happened to be within tolerance');
+  assert.ok(result.diagnostics.rtpPhase.iterationsRun < 100, `expected far fewer than 100 iterations to have run, got ${result.diagnostics.rtpPhase.iterationsRun}`);
+  assert.ok(Number.isFinite(result.rtp), 'expected a real, usable RTP even though the search was cut short');
+  assert.ok(Array.isArray(result.reelFrequencyTables) && result.reelFrequencyTables.length === REEL_TABLES.length);
+});
+
+test('tuneFrequencies with searchAlgorithm: "nelderMead" also stops early via options.signal', async () => {
+  const controller = new AbortController();
+  let shapeStepsSeen = 0;
+  const result = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, searchSeed: 55,
+    maxIterations: 100,
+    signal: controller.signal,
+    onProgress: (phase) => { if (phase === 'shape') { shapeStepsSeen++; if (shapeStepsSeen === 3) controller.abort(); } },
+  });
+  assert.equal(result.diagnostics.rtpPhase.reason, 'stopped');
+  assert.ok(result.diagnostics.rtpPhase.iterationsRun < 100, `expected far fewer than 100 iterations to have run, got ${result.diagnostics.rtpPhase.iterationsRun}`);
 });

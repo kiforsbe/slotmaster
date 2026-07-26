@@ -487,6 +487,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       </details>
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
+        <button id="tune-stop-btn" class="btn-icon btn-sim-btn" style="display: none; padding: 6px 14px; font-size: 0.9em; background: rgba(255,90,90,0.2); border-color: #ff8080;">STOP</button>
       </div>
       <div id="tune-live-stats" style="display: none; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px;">
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
@@ -645,6 +646,17 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
 
 async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables, continuedFrom = null }) {
   const startBtn = tuneContainer.querySelector('#tune-start-btn');
+  // `stopBtn` is a persistent element (created once in the panel's template, not per-run) - using
+  // `.onclick` assignment rather than `addEventListener` is what lets each new startTuning() call
+  // simply replace the previous run's handler (and its now-stale AbortController closure) instead
+  // of accumulating one listener per START TUNING/CONTINUE click over a long panel session.
+  const stopBtn = tuneContainer.querySelector('#tune-stop-btn');
+  const abortController = new AbortController();
+  stopBtn.onclick = () => {
+    stopBtn.disabled = true;
+    stopBtn.textContent = 'STOPPING...';
+    abortController.abort();
+  };
   const logEl = tuneContainer.querySelector('#tune-progress-log');
   const resultsEl = tuneContainer.querySelector('#tune-results');
   const inputs = {
@@ -684,6 +696,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const testedRangeByReel = reelFrequencyTables.map(() => ({}));
 
   const options = {
+    signal: abortController.signal,
     reelsCount: tuneConfig.reelsCount,
     rowsCount: tuneConfig.rowsCount,
     paylines: tuneConfig.paylines,
@@ -739,6 +752,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   biasStrengthInputs.forEach(el => { el.disabled = true; });
   startBtn.disabled = true;
   startBtn.textContent = 'TUNING...';
+  stopBtn.style.display = 'inline-block';
+  stopBtn.disabled = false;
+  stopBtn.textContent = 'STOP';
   resultsEl.innerHTML = '';
   logEl.style.display = 'block';
   logEl.innerHTML = '';
@@ -1165,7 +1181,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     const rtpConverged = !!diagnostics.rtpPhase?.converged;
     const scatterConverged = diagnostics.scatterPhase == null || !!diagnostics.scatterPhase.converged;
     appendLog(
-      rtpConverged && scatterConverged
+      diagnostics.rtpPhase?.reason === 'stopped'
+        ? `⏹ Stopped by user. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%  (whatever the search had found so far, not a completed tune)`
+        : rtpConverged && scatterConverged
         ? `Done. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%`
         : `⚠ Did NOT converge. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%  (this is the closest attempt found, not a successful tune)`
     );
@@ -1209,7 +1227,19 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
 
     const targetRtp = options.targetRtp;
     const reason = diagnostics.rtpPhase?.reason;
-    if (reason && reason !== 'converged') {
+    // Its own distinct, neutral-toned block (not the generic amber warning below) - stopping was
+    // an explicit user action, not the search failing to converge, so it shouldn't read like a
+    // problem the way 'stalled'/'exhausted' do. Still shows the closest RTP found and how far
+    // into the iteration budget the stop landed, same information a caller would want either way.
+    if (reason === 'stopped') {
+      const rp = diagnostics.rtpPhase;
+      html += `<p style="font-size: 0.8em; color: #7fbfff; background: rgba(127,191,255,0.1); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
+                 <strong>⏹ Stopped by user</strong> - the closest attempt found is off by ${rp.error.toFixed(2)} percentage points from
+                 Target RTP (${targetRtp}%) (used ${rp.iterationsRun} of ${rp.iterationsBudget} iterations before stopping). This is
+                 whatever the search had found so far, not a completed tune - CONTINUE TUNING FROM THIS RESULT below picks up right
+                 from here if you want to keep going.
+               </p>`;
+    } else if (reason && reason !== 'converged') {
       const rp = diagnostics.rtpPhase;
       const rangeNote = rp.rtpRange
         ? ` RTP ranged from ${rp.rtpRange.min.toFixed(2)}% to ${rp.rtpRange.max.toFixed(2)}% during the search.`
@@ -1367,5 +1397,6 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     biasStrengthInputs.forEach(el => { el.disabled = false; });
     startBtn.disabled = false;
     startBtn.textContent = 'START TUNING';
+    stopBtn.style.display = 'none';
   }
 }
