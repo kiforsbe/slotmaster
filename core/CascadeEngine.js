@@ -68,6 +68,7 @@ export class CascadeEngine {
     this.grid = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(null));
     this.cellOffsets = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(0));
     this.clearStartTime = 0;
+    this.stepStartTime = 0;
     this.currentClearPositions = [];
     this._forceScatterNextSpin = false;
 
@@ -143,12 +144,18 @@ export class CascadeEngine {
 
     if (this.state === 'dropping_in' || this.state === 'falling') {
       const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
+      // Reels start falling one after another, left to right, instead of all at once - a
+      // "wave" cascading across the grid rather than a flat drop.
+      const columnStagger = this.turboMode ? 20 : 70; // ms between each successive reel starting
       let allLanded = true;
       for (let col = 0; col < this.config.reelsCount; col++) {
+        const columnStarted = now - this.stepStartTime >= col * columnStagger;
         for (let row = 0; row < this.config.rowsCount; row++) {
           if (this.cellOffsets[col][row] > 0) {
-            this.cellOffsets[col][row] = Math.max(0, this.cellOffsets[col][row] - speed);
             allLanded = false;
+            if (columnStarted) {
+              this.cellOffsets[col][row] = Math.max(0, this.cellOffsets[col][row] - speed);
+            }
           }
         }
       }
@@ -184,6 +191,7 @@ export class CascadeEngine {
     this.grid = step.grid;
     this.cellOffsets = step.fallOffsets.map(col => col.slice());
     this.currentClearPositions = [];
+    this.stepStartTime = Date.now();
     this.state = 'falling';
     this.config.onStateChange(this.state);
   }
@@ -297,6 +305,7 @@ export class CascadeEngine {
     this.cellOffsets = firstStep.fallOffsets.map(col => col.slice());
     this.currentClearPositions = [];
 
+    this.stepStartTime = Date.now();
     this.state = 'dropping_in';
     audio.playSpin();
     this.config.onStateChange(this.state);
