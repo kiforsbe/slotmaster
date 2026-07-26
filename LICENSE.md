@@ -32,6 +32,13 @@ AND NON-INFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY C
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT
 OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## AI-assisted development
+
+Portions of this project's source code, documentation, and image/artwork assets were
+developed with the assistance of AI tools, including Claude Code, GitHub Copilot, and Google
+Gemini's image generation. This disclosure does not expand or alter any right, license, or
+permission granted (or not granted) elsewhere in this document.
+
 ## Licensing inquiries
 
 For permission requests (commercial or otherwise), contact the copyright holder at
