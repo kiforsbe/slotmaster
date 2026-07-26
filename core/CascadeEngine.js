@@ -77,6 +77,13 @@ export class CascadeEngine {
     this.currentClearVariants = new Map();
     this._forceScatterNextSpin = false;
 
+    // Previous spin's leftover grid (dropping_out state): falls out the bottom before the new
+    // spin's grid starts falling in, with a brief empty-reel gap between the two (empty_gap
+    // state). Null whenever there's nothing exiting.
+    this.outgoingGrid = null;
+    this.outgoingOffsets = null;
+    this._gapUntil = 0;
+
     // Floating per-cluster win-amount popups. Kept on their own timeline (not tied to
     // clearDuration/the state machine) so they can outlive a fast "clearing" phase and
     // still be readable, even overlapping across rapid-fire cascade steps.
@@ -153,7 +160,36 @@ export class CascadeEngine {
     this.particleSystem.update();
     this.activePopups = this.activePopups.filter(p => now - p.startTime < p.duration);
 
-    if (this.state === 'dropping_in' || this.state === 'falling') {
+    if (this.state === 'dropping_out') {
+      // The previous spin's leftover grid falls out the bottom, same speed/wave stagger as a
+      // normal drop-in but in reverse (offset grows from 0 up to rowsCount instead of
+      // shrinking to 0), so it reads as the same motion applied to symbols leaving instead of
+      // arriving.
+      const speed = this.turboMode ? 0.6 : 0.055;
+      const columnStagger = this.turboMode ? 20 : 70;
+      let allExited = true;
+      for (let col = 0; col < this.config.reelsCount; col++) {
+        const columnStarted = now - this.stepStartTime >= col * columnStagger;
+        for (let row = 0; row < this.config.rowsCount; row++) {
+          if (this.outgoingOffsets[col][row] < this.config.rowsCount) {
+            allExited = false;
+            if (columnStarted) {
+              this.outgoingOffsets[col][row] = Math.min(this.config.rowsCount, this.outgoingOffsets[col][row] + speed);
+            }
+          }
+        }
+      }
+      if (allExited) {
+        this.outgoingGrid = null;
+        this.outgoingOffsets = null;
+        this._gapUntil = now + (this.turboMode ? 80 : 220);
+        this.state = 'empty_gap';
+        this.config.onStateChange(this.state);
+      }
+    } else if (this.state === 'empty_gap') {
+      // A brief pause with a visibly empty reel before the new grid starts dropping in.
+      if (now >= this._gapUntil) this._beginDropIn();
+    } else if (this.state === 'dropping_in' || this.state === 'falling') {
       const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
       // Reels start falling one after another, left to right, instead of all at once - a
       // "wave" cascading across the grid rather than a flat drop.
@@ -339,6 +375,24 @@ export class CascadeEngine {
       this.cascadeSequence.scatterWin = { symbol: scatterSym, count: 3, positions, triggerFreeSpins: true, payout: 0 };
     }
 
+    audio.playSpin();
+
+    // If a previous spin left symbols on the grid, they fall out the bottom first (with a
+    // brief empty-reel gap after) before this spin's grid starts dropping in - see
+    // _beginDropIn(). The very first spin ever (grid still all-null) skips straight to it.
+    const hasExistingGrid = this.grid.some(col => col.some(cell => cell !== null));
+    if (hasExistingGrid) {
+      this.outgoingGrid = this.grid;
+      this.outgoingOffsets = Array.from({ length: this.config.reelsCount }, () => new Array(this.config.rowsCount).fill(0));
+      this.stepStartTime = Date.now();
+      this.state = 'dropping_out';
+      this.config.onStateChange(this.state);
+    } else {
+      this._beginDropIn();
+    }
+  }
+
+  _beginDropIn() {
     this.stepIndex = 0;
     const firstStep = this.cascadeSequence.cascadeSteps[0];
     this.grid = firstStep.grid;
@@ -347,7 +401,6 @@ export class CascadeEngine {
 
     this.stepStartTime = Date.now();
     this.state = 'dropping_in';
-    audio.playSpin();
     this.config.onStateChange(this.state);
   }
 
@@ -440,7 +493,13 @@ export class CascadeEngine {
     this.ctx.rect(this.reelsX, this.reelsY, this.reelsWidth, this.reelsHeight);
     this.ctx.clip();
 
-    this._renderGridSymbols();
+    this._renderOutgoingGridSymbols();
+    // During dropping_out/empty_gap, this.grid still holds the previous spin's settled
+    // contents (not yet overwritten - see _beginDropIn) - it's outgoingGrid's job to draw
+    // those symbols as they exit, so skip the normal draw entirely here to avoid a duplicate.
+    if (this.state !== 'dropping_out' && this.state !== 'empty_gap') {
+      this._renderGridSymbols();
+    }
 
     this.ctx.restore();
 
@@ -490,20 +549,72 @@ export class CascadeEngine {
         const cy = this.reelsY + (row - offsetRows) * this.symbolHeight;
         const tile = this.symbolsConfig[symbol];
 
-        const isBeingCleared = isClearing && this.currentClearPositions.some(([c, r]) => c === col && r === row);
+        const clearInfo = isClearing ? this.currentClearVariants.get(`${col},${row}`) : null;
 
         this.ctx.save();
-        if (isBeingCleared) {
-          this.ctx.globalAlpha = 1 - clearProgress;
-          const scale = 1 + clearProgress * 0.4;
-          const centerX = cx + this.symbolWidth / 2;
-          const centerY = cy + this.symbolHeight / 2;
-          this.ctx.translate(centerX, centerY);
-          this.ctx.scale(scale, scale);
-          this.ctx.translate(-centerX, -centerY);
+        if (clearInfo) {
+          this._applyClearTransform(clearInfo, clearProgress, cx, cy);
         }
         drawSpriteSymbol(this.ctx, this.spritesheet, tile, cx, cy, this.symbolWidth, this.symbolHeight, 0);
         this.ctx.restore();
+      }
+    }
+  }
+
+  // Applies one of a few random per-symbol "vanish" animations to a cleared cell (see
+  // CLEAR_VARIANTS) so a whole cluster popping doesn't look like one uniform stamp repeated
+  // across every cell. All variants pivot around the cell's own center.
+  _applyClearTransform(clearInfo, progress, cx, cy) {
+    const centerX = cx + this.symbolWidth / 2;
+    const centerY = cy + this.symbolHeight / 2;
+    this.ctx.globalAlpha = Math.max(0, 1 - progress);
+    this.ctx.translate(centerX, centerY);
+
+    switch (clearInfo.variant) {
+      case 'stretch': {
+        // Taffy-pull squish: narrows while stretching tall, fitting the candy theme.
+        this.ctx.scale(1 - progress * 0.5, 1 + progress * 0.9);
+        break;
+      }
+      case 'jump': {
+        const hop = -Math.sin(Math.min(progress, 1) * Math.PI) * this.symbolHeight * 0.6;
+        this.ctx.translate(0, hop);
+        const scale = 1 - progress * 0.3;
+        this.ctx.scale(scale, scale);
+        break;
+      }
+      case 'spin': {
+        this.ctx.rotate(progress * Math.PI * 2 * clearInfo.spinDirection);
+        const scale = 1 - progress * 0.5;
+        this.ctx.scale(scale, scale);
+        break;
+      }
+      case 'scaleFade':
+      default: {
+        const scale = 1 + progress * 0.4;
+        this.ctx.scale(scale, scale);
+        break;
+      }
+    }
+
+    this.ctx.translate(-centerX, -centerY);
+  }
+
+  // The previous spin's leftover grid, falling out the bottom during dropping_out (see
+  // spin()/update()). Positive outgoingOffsets move a symbol DOWN from its original row
+  // (opposite sign convention from cellOffsets, which move a symbol up into place).
+  _renderOutgoingGridSymbols() {
+    if (!this.outgoingGrid) return;
+    for (let col = 0; col < this.config.reelsCount; col++) {
+      for (let row = 0; row < this.config.rowsCount; row++) {
+        const symbol = this.outgoingGrid[col][row];
+        if (!symbol) continue;
+        const offsetRows = this.outgoingOffsets[col][row] || 0;
+        if (offsetRows >= this.config.rowsCount) continue; // fully exited - nothing to draw
+        const cx = this.reelsX + col * this.symbolWidth;
+        const cy = this.reelsY + (row + offsetRows) * this.symbolHeight;
+        const tile = this.symbolsConfig[symbol];
+        drawSpriteSymbol(this.ctx, this.spritesheet, tile, cx, cy, this.symbolWidth, this.symbolHeight, 0);
       }
     }
   }
@@ -534,5 +645,42 @@ export class CascadeEngine {
 
   renderParticles() {
     this.particleSystem.render(this.ctx);
+  }
+
+  // Floating "+$X.XX" / "Nx symbol" text centered over each cluster's centroid (see
+  // _spawnClusterWinPopups), rendered outside the grid's clip region since a popup may rise
+  // above the cell it started in.
+  _renderClusterWinPopups() {
+    const now = Date.now();
+    this.activePopups.forEach(p => {
+      const progress = Math.min((now - p.startTime) / p.duration, 1);
+      const rise = this.symbolHeight * 0.9 * progress;
+      const y = p.y - rise;
+      const scale = progress < 0.15 ? 0.5 + (0.5 * (progress / 0.15)) : 1;
+      const alpha = progress < 0.6 ? 1 : Math.max(0, 1 - (progress - 0.6) / 0.4);
+
+      this.ctx.save();
+      this.ctx.globalAlpha = alpha;
+      this.ctx.translate(p.x, y);
+      this.ctx.scale(scale, scale);
+      this.ctx.textAlign = 'center';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.lineWidth = 4;
+      this.ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+
+      this.ctx.font = "bold 20px Outfit, sans-serif";
+      const amountText = `+$${p.amount.toFixed(2)}`;
+      this.ctx.strokeText(amountText, 0, -8);
+      this.ctx.fillStyle = '#ffe94a';
+      this.ctx.fillText(amountText, 0, -8);
+
+      this.ctx.font = "600 12px Outfit, sans-serif";
+      const detailText = `${p.count}x ${p.symbol}`;
+      this.ctx.strokeText(detailText, 0, 12);
+      this.ctx.fillStyle = '#ffffff';
+      this.ctx.fillText(detailText, 0, 12);
+
+      this.ctx.restore();
+    });
   }
 }
