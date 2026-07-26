@@ -391,7 +391,24 @@ export class CascadeEngine {
     const scatterWin = this.cascadeSequence.scatterWin;
     if (scatterWin && scatterWin.triggerFreeSpins) {
       audio.playScatterTrigger();
-      this.config.onScatterTrigger(scatterWin.count, this.inFreeSpins);
+
+      if (this.inFreeSpins) {
+        // Retrigger: don't pause the free-spins loop, just add spins and let it keep going -
+        // same state/autoplay handling as any other spin finishing. Critically, this.state
+        // MUST move off 'falling'/'dropping_in' here (as below) - leaving it unchanged made
+        // update()'s "allDone" check re-fire _onStepLanded -> _finishSpin every single frame,
+        // which re-triggered the scatter callback (and so retriggerFreeSpins) every frame too.
+        this.state = payoutAmount > 0 ? 'showing_wins' : 'idle';
+        this.config.onScatterTrigger(scatterWin.count, this.inFreeSpins);
+        this.handleAutoPlay();
+        this.config.onStateChange(this.state);
+      } else {
+        // First-time trigger (base game -> free spins): pause on a stable state - game.js
+        // shows the trigger modal and only resumes once the player confirms (enterFreeSpins()).
+        this.state = 'idle';
+        this.config.onScatterTrigger(scatterWin.count, this.inFreeSpins);
+        this.config.onStateChange(this.state);
+      }
       return;
     }
 
