@@ -9,7 +9,6 @@ import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 // instead of the simulation/tuner silently drifting onto their own hardcoded defaults.
 export const REELS_COUNT = 3;
 export const ROWS_COUNT = 3;
-export const REEL_LENGTH = 500;
 export const REEL_SEEDS = [123, 456, 789];
 // Paytable payouts (e.g. bar's 10x) were designed against a $1 total bet spread across
 // all 5 lines - i.e. 20 cents per line, not $1 per line - so the default/minimum
@@ -53,13 +52,23 @@ export const PAYTABLE = {
   strawberry: { payout: [0.00, 0.00,  0.00], type: 'wild',    friendlyName: 'Strawberry', aloneBonus: 4.00 },
 };
 
-// Frequency tables for each reel. These are based on the actual symbol weights used in the
-// original machines. `fixed: true` marks a symbol as excluded from TUNE FREQUENCIES' Phase 2
-// search on that specific reel (its frequency there is never touched) - star and strawberry
-// are wild symbols and are always meant to stay fixed, independent of payout ordering.
-// `defaults` holds this reel's fallback minGap/maxStack (empty here - fruitmachine has no
-// symbol that needs spacing/stacking constraints); a symbol can override either under its
-// own entry in `symbols`. Note that REEL_1 does not contain the star or strawberry symbols.
+// ---- Tuned 2026-07-26 ----
+// Achieved: RTP 95.03%  |  free-spin trigger 0%
+//
+// To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
+// same reel geometry, since strips are generated from them:
+//   searchSeed 12345   reelSeeds [123, 456, 789]
+//   reelLength 500   reels 3 x 3 rows
+//   target RTP 96% +/-1.5   target trigger 0.6% +/-0.15
+//   200,000 spins x 4 trials   cmaes, max 150 iterations
+//   initial weights: provided   max RTP std error 1
+//   loss weights: ordering 1, limit 1, uniformity 1, stdError 0.75, triggerRate 0, spacing 0
+//   ordering bias by reel: [1, -0.5, 0]
+//
+// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
+// against this length and do not reproduce the RTP above at any other.
+export const REEL_LENGTH = 500;
+
 export const FREQUENCY_REEL1 = {
   defaults: { minFrequency: 1, maxFrequency: 10 },
   symbols: {
