@@ -831,7 +831,10 @@ export function beatsIncumbent(candidate, incumbent, z) {
  *   sequential measurements on one CPU core" for a high-dimensional search (e.g. Candy Frenzy's
  *   ~84 tunable dims). Omitted (the default), every existing caller/test keeps running exactly
  *   today's in-process sequential loop - fully backward compatible.
- * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
+ * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>} -
+ *   `diagnostics.inputParameters` is a snapshot of every resolved (defaults-applied) tuning
+ *   knob used to produce this specific result - see its own comment above the `return` statement
+ *   for exactly what's included/excluded.
  */
 export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
   if (!paytable || typeof paytable !== 'object') {
@@ -1510,11 +1513,31 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       }
     : await measure(finalReelTables);
 
+  // Snapshot of the actually-*resolved* tuning knobs (defaults applied, not just whatever the
+  // caller happened to pass explicitly) - lets anything serializing `diagnostics` as JSON (the
+  // TUNE FREQUENCIES panel's own `console.log('Frequency tuner diagnostics:', ...)`, a test, a
+  // future export feature) show exactly what parameters produced this specific result, without
+  // the reader having to separately track what was typed into the panel at the time. Deliberately
+  // limited to the JSON-safe tuning knobs a user actually configures - not `winEvaluator`/
+  // `mechanic`/`payoutOf`/`onProgress`/`runTrial` (functions, not serializable) or `paylines`
+  // (game layout, not a tuning parameter).
+  const inputParameters = {
+    reelsCount, rowsCount, reelLength, reelSeeds, betPerLine, linesCount,
+    targetRtp, rtpTolerancePct, maxRtpStdError,
+    targetTriggerRatePct, triggerRateTolerancePct,
+    trialSpins, trialsPerPoint, maxIterations,
+    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, orderingBiasByReel,
+    initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
+    stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
+    initialWeightStrategy, freeSpinsCount, hasExpandingWild,
+  };
+
   return {
     reelFrequencyTables: finalReelTables,
     rtp: finalResult.rtp,
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
+      inputParameters,
       scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
       rtpPhase: rtpPhaseResult ? {
         error: rtpPhaseResult.error,

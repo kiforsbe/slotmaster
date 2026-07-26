@@ -974,3 +974,35 @@ test('tuneFrequencies with searchAlgorithm: "cmaes" converges to a sane RTP on a
   assert.ok(Math.abs(rtp - 96) < 10, `expected cmaes to get reasonably close to target RTP 96, got ${rtp}`);
   assert.ok(diagnostics.rtpPhase.iterationsRun > 0, 'expected the cmaes path to actually run iterations');
 });
+
+test('tuneFrequencies diagnostics.inputParameters reflects both explicit options and resolved defaults', async () => {
+  const { diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 97, trialSpins: 3000, trialsPerPoint: 1, maxIterations: 5, searchAlgorithm: 'cmaes', searchSeed: 7,
+  });
+  const params = diagnostics.inputParameters;
+  // Explicitly passed - should reflect exactly what was passed, not some other value.
+  assert.equal(params.targetRtp, 97);
+  assert.equal(params.trialSpins, 3000);
+  assert.equal(params.trialsPerPoint, 1);
+  assert.equal(params.maxIterations, 5);
+  assert.equal(params.searchAlgorithm, 'cmaes');
+  assert.equal(params.searchSeed, 7);
+  // Left at their default - should reflect the RESOLVED default value, not be missing/undefined,
+  // since the whole point is a caller shouldn't have to separately know what the defaults were.
+  assert.equal(params.rtpTolerancePct, 1.5);
+  assert.equal(params.orderingPenaltyWeight, 0.5);
+  assert.equal(params.limitPenaltyWeight, 0.5);
+  assert.equal(params.uniformityPenaltyWeight, 0);
+  assert.equal(params.bestAcceptanceZ, 1.0);
+  assert.equal(params.initialWeightStrategy, 'provided');
+  // Not JSON-safe / not a tuning knob - must not leak function values or game-layout data onto
+  // a section meant to be serialized wholesale.
+  assert.equal(params.winEvaluator, undefined);
+  assert.equal(params.mechanic, undefined);
+  assert.equal(params.paylines, undefined);
+  // Survives JSON.stringify/parse round-trip cleanly (the actual point of this whole field).
+  const roundTripped = JSON.parse(JSON.stringify(diagnostics)).inputParameters;
+  assert.equal(roundTripped.targetRtp, 97);
+});
