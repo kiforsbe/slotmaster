@@ -183,13 +183,14 @@ the exact grammar.
 
 ## License
 
-Copyright © 2026 Kim Forsberg. All rights reserved. This is a personal/educational project,
-provided with no warranty of any kind and not suitable for commercial or real-money use.
-Commercial use requires the copyright holder's prior express written consent. See
+Copyright © 2026 Kim Forsberg. All rights reserved. Non-commercial use, modification, and
+redistribution are permitted with attribution and share-alike (same terms passed on to any
+derivative). Commercial use requires the copyright holder's prior express written consent.
+Provided with no warranty of any kind and not suitable for commercial or real-money use. See
 [LICENSE.md](LICENSE.md) for the full terms.
 
 Portions of this project (code, docs, and image assets) were developed with the assistance
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `ee4542b`._
+_Docs last synced with the codebase: 2026-07-26, commit `a684a06`._
