@@ -884,6 +884,134 @@ test('tuneFrequencies options.stdErrorPenaltyWeight defaults to 0 (off), matchin
   assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
 });
 
+// ---- Phase 1b: per-reel trigger-count refinement ----
+
+// A synthetic game whose trigger rate is deliberately coarse under a shared multiplier: the
+// scatter lands only a handful of times per strip, so every reel crosses its rounding threshold
+// at the same multiplier and the achievable rates jump in big lockstep steps. This is the shape
+// Candy Frenzy really has (bonus lands 2-6 times on a 500-position strip); the point of the
+// test is that the target is reachable by an UNEVEN per-reel distribution even though no shared
+// multiplier can reach it.
+const COARSE_PAYTABLE = {
+  scat: { payout: [0, 0, 2, 20, 200], type: 'scatter', paymode: 'any', triggerFreeSpins: true },
+  a:    { payout: [0, 0, 5, 40, 150] },
+  b:    { payout: [0, 0, 5, 30, 100] },
+};
+const coarseReels = () => Array.from({ length: 5 }, () => ({
+  symbols: { scat: { frequency: 0.075, maxStack: 1 }, a: { frequency: 0.5 }, b: { frequency: 0.5 } },
+}));
+
+test('Phase 1b refines per-reel trigger counts when a shared multiplier cannot reach the target band', async () => {
+  const perReelCountsSeen = [];
+  const { diagnostics } = await tuneFrequencies(COARSE_PAYTABLE, coarseReels(), {
+    // NO winEvaluator: checkWildLineWins takes no scatterSymbol and cannot produce a scatter
+    // win at all, so a fixture using it has a trigger rate of exactly 0 and Phase 1 has nothing
+    // to tune. The default evaluator (checkWins) is the one that detects scatters.
+    reelsCount: 5, rowsCount: 3, paylines: PAYLINES,
+    reelSeeds: [11, 22, 33, 44, 55], betPerLine: 1, linesCount: 5, reelLength: 200,
+    scatterSymbol: 'scat', targetRtp: 96,
+    // Deliberately tight, sitting between two whole-symbol steps.
+    targetTriggerRatePct: 0.9, triggerRateTolerancePct: 0.25,
+    trialSpins: 40000, trialsPerPoint: 1, maxIterations: 3, searchSeed: 5,
+    onProgress: (phase, i, mult, r) => { if (phase === 'scatter-refine') perReelCountsSeen.push(r.counts); },
+  });
+  assert.ok(perReelCountsSeen.length > 0,
+    'expected Phase 1b to run at all - if the shared multiplier happened to land in band, this fixture no longer reproduces the coarse-lattice case it exists to test');
+  // The whole point: at least one step must produce an UNEVEN distribution. A refinement that
+  // only ever moved every reel together would be no better than the shared multiplier.
+  assert.ok(perReelCountsSeen.some(c => new Set(c).size > 1),
+    `expected at least one per-reel count vector to be uneven, got ${JSON.stringify(perReelCountsSeen)}`);
+  assert.equal(diagnostics.scatterPhase.refinedPerReelCounts?.length ?? 0, 5,
+    'the winning per-reel counts must be reported, one entry per reel');
+});
+
+test('Phase 1b is skipped entirely when maxTriggerRefineSteps is 0', async () => {
+  let refineSteps = 0;
+  const { diagnostics } = await tuneFrequencies(COARSE_PAYTABLE, coarseReels(), {
+    // NO winEvaluator: checkWildLineWins takes no scatterSymbol and cannot produce a scatter
+    // win at all, so a fixture using it has a trigger rate of exactly 0 and Phase 1 has nothing
+    // to tune. The default evaluator (checkWins) is the one that detects scatters.
+    reelsCount: 5, rowsCount: 3, paylines: PAYLINES,
+    reelSeeds: [11, 22, 33, 44, 55], betPerLine: 1, linesCount: 5, reelLength: 200,
+    scatterSymbol: 'scat', targetRtp: 96,
+    targetTriggerRatePct: 0.9, triggerRateTolerancePct: 0.25,
+    trialSpins: 40000, trialsPerPoint: 1, maxIterations: 3, searchSeed: 5,
+    maxTriggerRefineSteps: 0,
+    onProgress: (phase) => { if (phase === 'scatter-refine') refineSteps++; },
+  });
+  assert.equal(refineSteps, 0, 'no refinement steps may run when the budget is 0');
+  assert.equal(diagnostics.scatterPhase.refinedPerReelCounts, null,
+    'refinedPerReelCounts must be null when Phase 1b never ran');
+});
+
+test('Phase 1b never runs when the shared multiplier already reached the target band', async () => {
+  let refineSteps = 0;
+  await tuneFrequencies(COARSE_PAYTABLE, coarseReels(), {
+    // NO winEvaluator: checkWildLineWins takes no scatterSymbol and cannot produce a scatter
+    // win at all, so a fixture using it has a trigger rate of exactly 0 and Phase 1 has nothing
+    // to tune. The default evaluator (checkWins) is the one that detects scatters.
+    reelsCount: 5, rowsCount: 3, paylines: PAYLINES,
+    reelSeeds: [11, 22, 33, 44, 55], betPerLine: 1, linesCount: 5, reelLength: 200,
+    scatterSymbol: 'scat', targetRtp: 96,
+    // A tolerance wide enough that Phase 1a cannot fail - so the expensive refinement must not fire.
+    targetTriggerRatePct: 0.9, triggerRateTolerancePct: 100,
+    trialSpins: 20000, trialsPerPoint: 1, maxIterations: 2, searchSeed: 5,
+    onProgress: (phase) => { if (phase === 'scatter-refine') refineSteps++; },
+  });
+  assert.equal(refineSteps, 0, 'refinement must not run when the shared multiplier already converged');
+});
+
+// ---- triggerRatePenaltyWeight ----
+// fruitmachine has no triggerFreeSpins symbol, so its trigger rate is a flat 0 and the penalty
+// is a pure function of the target/tolerance - which is exactly what makes it a clean way to
+// verify the arithmetic in isolation, with no Phase 1 and no cascade coupling in the way.
+
+test('tuneFrequencies options.triggerRatePenaltyWeight adds weight * distance OUTSIDE the tolerance band into loss', async () => {
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0, searchSeed: 21,
+    targetTriggerRatePct: 2, triggerRateTolerancePct: 0.5,
+  };
+  const withoutPenalty = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, triggerRatePenaltyWeight: 0 });
+  const withPenalty = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, triggerRatePenaltyWeight: 3 });
+  const triggerRate = withoutPenalty.diagnostics.rtpPhase.triggerRate;
+  // Distance outside the band, not distance from the target - the band is the whole point.
+  const expectedDelta = 3 * Math.max(0, Math.abs(triggerRate - 2) - 0.5);
+  assert.ok(expectedDelta > 0, 'expected this candidate to sit outside the band for the test to be meaningful');
+  const actualDelta = withPenalty.diagnostics.rtpPhase.loss - withoutPenalty.diagnostics.rtpPhase.loss;
+  assert.ok(Math.abs(actualDelta - expectedDelta) < 1e-9,
+    `expected loss to differ by exactly weight * outside-band distance (${expectedDelta}), got ${actualDelta}`);
+});
+
+test('tuneFrequencies triggerRatePenaltyWeight costs nothing while the trigger rate is INSIDE the band', async () => {
+  // A tolerance wide enough to swallow the measured rate must make the term exactly zero, so
+  // raising the weight cannot perturb a search whose trigger rate was already acceptable.
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0, searchSeed: 21,
+    targetTriggerRatePct: 0, triggerRateTolerancePct: 100,
+  };
+  const off = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, triggerRatePenaltyWeight: 0 });
+  const on = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, triggerRatePenaltyWeight: 50 });
+  assert.equal(on.diagnostics.rtpPhase.loss, off.diagnostics.rtpPhase.loss,
+    'a candidate inside the tolerance band must score identically at any weight');
+});
+
+test('tuneFrequencies options.triggerRatePenaltyWeight defaults to 0 (off), matching pre-existing behavior exactly', async () => {
+  const sharedOpts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 2, maxIterations: 8, searchSeed: 33,
+  };
+  const withDefault = await tuneFrequencies(PAYTABLE, REEL_TABLES, sharedOpts);
+  const withExplicitZero = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, triggerRatePenaltyWeight: 0 });
+  assert.deepEqual(withDefault.reelFrequencyTables, withExplicitZero.reelFrequencyTables);
+  assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
+  assert.equal(withDefault.diagnostics.inputParameters.triggerRatePenaltyWeight, 0);
+});
+
 test('tuneFrequencies excludes a fixed: true symbol from uniformity\'s equal-share target entirely', async () => {
   // fixedSym's frequency (100) is wildly larger than a/b/c's own budget (1+19+10=30) - if it
   // leaked into uniformity's "equal share" computation at all, a/b/c would get pulled toward

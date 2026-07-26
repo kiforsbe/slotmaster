@@ -345,6 +345,29 @@ async function initGame() {
           minClusterSize: MIN_CLUSTER_SIZE,
           scatterTriggerCount: SCATTER_TRIGGER_COUNT,
           freeSpinsCount: FREE_SPINS_AWARD,
+          // Deliberately 0 for now, with a caveat worth reading before raising it.
+          //
+          // This IS a cascade game, so unlike a line-pay game its trigger rate genuinely is
+          // coupled to the non-trigger symbols: candy weights govern how readily clusters form,
+          // which governs cascade depth, and every cascade refills the grid with fresh chances to
+          // draw `bonus`. Under deliberately extreme reweighting (bonus held byte-identical,
+          // every reel's candy budget preserved) that coupling spans a 0.75%-2.04% trigger range.
+          // So a non-zero weight here is the right tool IN PRINCIPLE.
+          //
+          // What blocks it today is upstream: at REEL_LENGTH 500 the default 0.6% +/-0.15 target
+          // is not reachable AT ALL. `bonus` lands only 2-6 times on a 500-position strip, so one
+          // whole symbol is a huge relative step and the achievable trigger rates near the target
+          // go 0.207% -> 0.343% -> 0.368% -> 0.893% - straight over the 0.45%-0.75% band with
+          // nothing inside it. Phase 1 now reports that honestly as reason 'lattice-gap' rather
+          // than burning its budget on it.
+          //
+          // With the target unreachable, a non-zero weight just trades RTP away for trigger-rate
+          // progress that can never arrive: measured at weight 2, RTP went 94.88% -> 103.83%
+          // while the trigger rate moved only 0.353% -> 0.400%. Fix the reachability first -
+          // REEL_LENGTH ~3000 puts several multipliers inside the band (0.458%/0.460%/0.713%), or
+          // widen the tolerance, or pick a target that exists - and only then raise this to stop
+          // Phase 2 from undoing Phase 1's work.
+          triggerRatePenaltyWeight: 0,
         },
         domRefs: { simModal, simStats },
       });

@@ -877,6 +877,58 @@ export function beatsIncumbent(candidate, incumbent, z) {
  *   of (or alongside) `maxRtpStdError`/`bestAcceptanceZ` if the search keeps landing on
  *   high-variance candidates that only pass those gates by chance rather than genuinely
  *   avoiding noisy regions in the first place.
+ * @param {number} [options.maxTriggerRefineSteps=12] - Budget for Phase 1b, the per-reel
+ *   refinement that runs ONLY when Phase 1's shared multiplier could not land the trigger rate
+ *   inside its target band. Set to 0 to disable it and keep Phase 1 to a single shared
+ *   multiplier across every reel (the pre-existing behavior).
+ *
+ *   Phase 1 scales the trigger symbol by one multiplier applied identically to every reel, so
+ *   all reels cross their whole-number rounding thresholds at the same time and the trigger rate
+ *   can only move in lockstep jumps. Where those jumps are large relative to the tolerance band,
+ *   the target can sit in a gap between two of them and be unreachable by ANY multiplier - not
+ *   because the target is unreasonable, but because a single shared scalar cannot express the
+ *   distribution that would hit it. Candy Frenzy is the clear case: `bonus` lands only 2-6 times
+ *   on its 500-position strip, and the shared multiplier produces 0.368% then 0.893%, straight
+ *   over the default 0.45%-0.75% band.
+ *
+ *   Phase 1b instead walks a SINGLE trigger symbol at a time onto (or off) individual reels,
+ *   re-measuring each step, which fills those gaps at the existing reel length - no change to
+ *   `reelLength`, `targetTriggerRatePct`, or `triggerRateTolerancePct` required. Measured on
+ *   Candy Frenzy: [4,4,4,4,4,4,4] -> 0.875%, [3,4,4,4,4,4,4] -> 0.775%, [3,3,4,4,4,4,4] ->
+ *   0.505%, converged, against a shared multiplier that could not get inside the band at all.
+ *
+ *   Symbols go onto the reels holding the fewest first (and come off the ones holding the most),
+ *   keeping the spread as even as possible - a deliberate choice rather than arbitrary
+ *   tie-breaking, since concentrating trigger symbols on a few reels changes how the game feels
+ *   (near-misses cluster on the same reels) even at an identical overall trigger rate. The
+ *   resulting counts are reported as `diagnostics.scatterPhase.refinedPerReelCounts`, which is
+ *   null whenever this did not run or did not improve on the shared multiplier.
+ * @param {number} [options.triggerRatePenaltyWeight=0] - Weight of a soft penalty on how far a
+ *   candidate's measured trigger rate sits OUTSIDE the `targetTriggerRatePct` +/-
+ *   `triggerRateTolerancePct` band (exactly zero anywhere inside it, so this never competes with
+ *   the RTP term over a trigger rate that was already acceptable).
+ *
+ *   This exists because Phase 2 is otherwise completely blind to the trigger rate: it excludes
+ *   trigger symbols from its own dimensions, so it can only affect the trigger rate INDIRECTLY -
+ *   and whether it does depends entirely on the mechanic.
+ *
+ *   For a line-pay mechanic it essentially cannot. Phase 2 preserves each reel's total weight and
+ *   never touches a trigger symbol's own frequency, so P(scatter in view) is unchanged by
+ *   construction, and leaving this at 0 (the default) costs nothing.
+ *
+ *   For a CASCADE mechanic it very much can, and the effect is large. The non-trigger symbols'
+ *   weights govern how readily clusters form, which governs cascade depth, and every cascade
+ *   refills the grid - handing out fresh chances to draw the scatter. Measured on Candy Frenzy
+ *   with `bonus`'s frequency held byte-identical and every reel's candy budget preserved exactly,
+ *   reweighting only the candies moves the trigger rate across a 0.75%-2.04% range (a 2.7x swing,
+ *   against a default tolerance band of +/-0.15pp). Phase 1 tunes the scatter against the
+ *   BASELINE distribution; Phase 2 then replaces that distribution wholesale while optimizing
+ *   RTP, and with this weight at 0 nothing in `loss` registers the damage. That is the concrete
+ *   reason a cascade tune can report a good RTP and a trigger rate nowhere near its target.
+ *
+ *   Set this non-zero for any cascade-mechanic game (games/candyfrenzy/game.js does). Units are
+ *   percentage points of trigger rate, the same scale as the RTP `error` term, so a weight of 1
+ *   trades 1pp of trigger-rate drift against 1pp of RTP error.
  * @param {number[]} [options.orderingBiasByReel] - Per-reel direction/strength for the
  *   ordering preference, indexed by reel. `-1` (the default for every reel, if omitted or if
  *   a specific reel's entry is missing) keeps today's behavior: a higher-paying symbol is
@@ -1061,6 +1113,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     limitPenaltyWeight = 0.5,
     uniformityPenaltyWeight = 0,
     stdErrorPenaltyWeight = 0,
+    triggerRatePenaltyWeight = 0,
+    maxTriggerRefineSteps = 12,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchAlgorithm = 'nelderMead',
@@ -1095,7 +1149,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
   const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
 
-  function buildReelStrips(reelTables) {
+  // `lengthOverride` exists for Phase 1's reel-length reachability probe (see
+  // findReachableReelLength below), which needs to ask "what would this same frequency table
+  // measure on a LONGER strip?" without disturbing the real `reelLength` every other phase and
+  // the returned result are built against. Omitted everywhere else, i.e. unchanged behavior.
+  function buildReelStrips(reelTables, lengthOverride) {
     // paytable (this function's outer `paytable` param, the real canonical rules table) is
     // passed as the 6th arg so generateReel's scatter min-gap spacing works correctly even
     // though these per-reel tables carry only `.frequency`, never `.type`. Seeded identically
@@ -1104,7 +1162,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // against a reel arrangement that's never actually the one built and shipped, which
     // previously made a candidate's measured RTP a (small but real) misprediction of what
     // pasting the same frequencies back into game.js would actually produce.
-    return reelTables.map((rt, i) => generateReel(rt, reelLength, reelSeeds[i % reelSeeds.length], [], 3, paytable));
+    return reelTables.map((rt, i) => generateReel(rt, lengthOverride ?? reelLength, reelSeeds[i % reelSeeds.length], [], 3, paytable));
   }
 
   // rngSeed is optional - omitted, this falls back to unseeded Math.random per trial (via
@@ -1131,8 +1189,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // number is trustworthy" apart from "this number got lucky" - trialsPerPoint: 1 collapses
   // trialRtpMin/trialRtpMax to the same single value, which correctly signals "no repeat
   // measurement was taken, so no variance information is available."
-  async function measure(reelTables, rngSeed) {
-    const reelStrips = buildReelStrips(reelTables);
+  async function measure(reelTables, rngSeed, lengthOverride) {
+    const reelStrips = buildReelStrips(reelTables, lengthOverride);
     const config = {
       reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
       freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
@@ -1262,6 +1320,97 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // searching will help - the reel strip needs to be longer, or the tolerance wider.
   let currentReelTables = baseReelTables;
   let scatterPhase = null;
+  // Builds the Phase 1 trial for a given multiplier - shared by the search itself and by the
+  // reel-length reachability probe below, so both scale the trigger symbol identically.
+  const buildScatterTrial = (mult) => baseReelTables.map(rt => {
+    const trial = JSON.parse(JSON.stringify(rt));
+    triggerSymbols.forEach(s => { if (trial.symbols[s]) trial.symbols[s].frequency = rt.symbols[s].frequency * mult; });
+    return trial;
+  });
+
+  // How many positions of `symbol` a reel's frequency table currently produces on the strip -
+  // the same rounding generateReel itself applies (core/SlotMath.js), so this is the real
+  // integer count, not an idealized share.
+  function stripCountOf(reelTable, symbol, length) {
+    const total = Object.values(reelTable.symbols).reduce((sum, v) => sum + (v.frequency > 0 ? v.frequency : 0), 0);
+    return Math.max(1, Math.round((reelTable.symbols[symbol].frequency / total) * length));
+  }
+
+  // Inverse of the above: the frequency that makes `symbol` land exactly `count` times on this
+  // reel. share = freq / (freq + others) and count = round(share * length), so solving
+  // share = count/length gives freq = count * others / (length - count).
+  function frequencyForCount(reelTable, symbol, count, length) {
+    const others = Object.entries(reelTable.symbols)
+      .filter(([s]) => s !== symbol)
+      .reduce((sum, [, v]) => sum + (v.frequency > 0 ? v.frequency : 0), 0);
+    return (count * others) / (length - count);
+  }
+
+  // Phase 1b: per-reel integer refinement, run only when the shared multiplier could not reach
+  // the target band.
+  //
+  // Phase 1a applies ONE multiplier to every reel identically, so all reels cross their rounding
+  // thresholds together and the trigger rate can only move in whole-lockstep jumps. That lockstep
+  // IS the coarseness: on Candy Frenzy the shared multiplier can produce 0.368% and then 0.893%
+  // with nothing in between, straight over a 0.45%-0.75% target band.
+  //
+  // Letting individual reels differ by a single symbol dissolves that. Measured on Candy Frenzy
+  // at its real REEL_LENGTH of 500, walking one bonus symbol at a time across reels fills the
+  // gap the shared multiplier jumped: [3,3,6,3,3,3,3] -> 0.382%, [4,3,6,3,3,3,3] -> 0.427%,
+  // [4,4,6,3,3,3,3] -> 0.695% (in band). No change to reel length, tolerance, or target needed -
+  // the target was always reachable, Phase 1 just had no way to express it.
+  //
+  // Symbols are added to (or removed from) the reels with the fewest (most) first, so the
+  // distribution stays as even as it can. That is a deliberate design choice, not just
+  // tie-breaking: concentrating trigger symbols on a few reels changes how the game FEELS
+  // (near-misses cluster on the same reels every time) even at an identical overall trigger rate.
+  //
+  // Costs one measurement per single-symbol step, and stops the moment the target band is
+  // reached or the walk crosses the target without landing in it (which means the remaining
+  // lattice really is too coarse - at which point a longer reel strip is the genuine fix).
+  async function refineTriggerCountsPerReel(startTables, startTriggerRate) {
+    const counts = startTables.map(rt => stripCountOf(rt, triggerSymbols[0], reelLength));
+    const goingUp = startTriggerRate < targetTriggerRatePct;
+    let best = null;
+    let current = startTriggerRate;
+
+    for (let step = 0; step < maxTriggerRefineSteps; step++) {
+      if (signal?.aborted) break;
+      // Pick the reel that keeps the spread tightest: lowest count when adding, highest when
+      // removing. Reels already at the floor of 1 can't give a symbol up.
+      const eligible = counts.map((c, i) => ({ c, i })).filter(({ c }) => goingUp || c > 1);
+      if (eligible.length === 0) break;
+      eligible.sort((a, b) => goingUp ? a.c - b.c : b.c - a.c);
+      const pick = eligible[0].i;
+      counts[pick] += goingUp ? 1 : -1;
+
+      const trial = startTables.map((rt, i) => {
+        const t = JSON.parse(JSON.stringify(rt));
+        triggerSymbols.forEach(s => {
+          if (t.symbols[s]) t.symbols[s].frequency = frequencyForCount(rt, s, counts[i], reelLength);
+        });
+        return t;
+      });
+      const measured = await measure(trial, searchSeed);
+      const error = Math.abs(measured.triggerRate - targetTriggerRatePct);
+      if (!best || error < best.error) best = { trial, error, triggerRate: measured.triggerRate, counts: [...counts] };
+      if (onProgress) {
+        await onProgress('scatter-refine', step, null,
+          { ...measured, error, counts: [...counts], target: targetTriggerRatePct, tolerance: triggerRateTolerancePct }, best);
+      }
+      await yieldToEventLoop();
+
+      if (error <= triggerRateTolerancePct) return { ...best, converged: true, reason: 'converged' };
+      // Crossed the target without landing inside the band - one symbol is simply too big a
+      // step here, and no further walking in this direction can help.
+      if (goingUp ? measured.triggerRate > targetTriggerRatePct : measured.triggerRate < targetTriggerRatePct) {
+        return { ...best, converged: false, reason: 'lattice-gap' };
+      }
+      current = measured.triggerRate;
+    }
+    return best ? { ...best, converged: false, reason: 'exhausted' } : null;
+  }
+
   if (triggerSymbols.length > 0) {
     scatterPhase = await bisect1D({
       initialParam: 1,
@@ -1269,11 +1418,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       maxParam: 8,
       target: targetTriggerRatePct,
       tolerance: triggerRateTolerancePct,
-      buildTrial: (mult) => baseReelTables.map(rt => {
-        const trial = JSON.parse(JSON.stringify(rt));
-        triggerSymbols.forEach(s => { if (trial.symbols[s]) trial.symbols[s].frequency = rt.symbols[s].frequency * mult; });
-        return trial;
-      }),
+      buildTrial: buildScatterTrial,
       metricOf: (result) => result.triggerRate,
       measure,
       maxIterations,
@@ -1285,6 +1430,46 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       signal,
     });
     currentReelTables = scatterPhase.trial;
+
+    // Phase 1b - only when the shared multiplier left the trigger rate outside the band, and
+    // only when there is something left to try (a user-requested stop is not a lattice problem).
+    if (!scatterPhase.converged && scatterPhase.reason !== 'stopped' && maxTriggerRefineSteps > 0) {
+      const refined = await refineTriggerCountsPerReel(currentReelTables, scatterPhase.result?.triggerRate ?? 0);
+      if (refined && refined.error < scatterPhase.error) {
+        currentReelTables = refined.trial;
+        scatterPhase = {
+          ...scatterPhase,
+          error: refined.error,
+          converged: refined.converged,
+          reason: refined.reason,
+          trial: refined.trial,
+          result: { ...scatterPhase.result, triggerRate: refined.triggerRate },
+          // The per-reel counts the refinement settled on, and the fact that it ran at all -
+          // without this a caller can't tell an even, shared-multiplier result apart from one
+          // that deliberately differs by a symbol on some reels.
+          refinedPerReelCounts: refined.counts,
+        };
+      }
+    }
+    // Announced at the moment Phase 1 hands over, not just in the final diagnostics. Phase 1
+    // stopping SHORT of the target is a normal, expected outcome (the reachable trigger rates
+    // are a coarse lattice - see bisect1D's own doc), but without this the log jumps straight
+    // from the last scatter measurement into Phase 2's steps, which reads as the phase silently
+    // giving up. Phase 2 cannot fix it either: it excludes trigger symbols from its dimensions
+    // entirely, so whatever trigger rate this phase settled on is final for the whole run, and
+    // that is worth saying out loud exactly once, right here.
+    if (onProgress) {
+      await onProgress('scatter-complete', 0, scatterPhase.mult, {
+        converged: !!scatterPhase.converged,
+        reason: scatterPhase.reason,
+        refinedPerReelCounts: scatterPhase.refinedPerReelCounts ?? null,
+        triggerRate: scatterPhase.result?.triggerRate,
+        target: targetTriggerRatePct,
+        tolerance: triggerRateTolerancePct,
+        error: scatterPhase.error,
+        bracket: scatterPhase.bracket,
+      }, null);
+    }
   }
 
   // ---- Phase 2: joint multi-dimensional tuning of every reel's value-symbol weights ----
@@ -1527,9 +1712,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         const error = Math.abs(measured.rtp - targetRtp);
         if (measured.rtp < rtpMin) rtpMin = measured.rtp;
         if (measured.rtp > rtpMax) rtpMax = measured.rtp;
+        // How far this candidate's trigger rate sits OUTSIDE the target band (zero anywhere
+        // inside it) - a band, not a point target, so this never fights the RTP term over
+        // trigger-rate differences that were already acceptable.
+        const triggerPenalty = Math.max(0, Math.abs(measured.triggerRate - targetTriggerRatePct) - triggerRateTolerancePct);
         return {
           loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty
-            + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0),
+            + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0)
+            + triggerRatePenaltyWeight * triggerPenalty,
+          triggerRatePenalty: triggerPenalty,
           rtp: measured.rtp,
           triggerRate: measured.triggerRate,
           trialRtpMin: measured.trialRtpMin,
@@ -1763,7 +1954,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     targetRtp, rtpTolerancePct, maxRtpStdError,
     targetTriggerRatePct, triggerRateTolerancePct,
     trialSpins, trialsPerPoint, maxIterations,
-    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight, orderingBiasByReel,
+    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
+    triggerRatePenaltyWeight, maxTriggerRefineSteps, orderingBiasByReel,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild,
@@ -1791,7 +1983,31 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // closest achievable trigger rates above and below the target - i.e. exactly what IS
         // reachable, which is the information needed to pick a feasible target.
         bracket: scatterPhase.bracket,
+        // Present only when Phase 1b's per-reel refinement ran AND improved on the shared
+        // multiplier: the exact number of trigger-symbol positions each reel ended up with.
+        // Absent means every reel carries the same shared multiplier, unrefined - worth being
+        // able to tell apart, since a deliberately uneven distribution is a real design choice
+        // (it changes which reels near-misses cluster on), not an artifact.
+        refinedPerReelCounts: scatterPhase.refinedPerReelCounts ?? null,
         ...scatterPhase.result,
+      } : null,
+      // How much the trigger rate MOVED between Phase 1 handing over and the final tuned result.
+      // Phase 2 never tunes a trigger symbol's own frequency, so for a line-pay mechanic this is
+      // ~0 by construction. For a cascade mechanic it is not: the other symbols' weights govern
+      // cascade depth, and every cascade refills the grid with fresh chances to draw the scatter
+      // (measured on Candy Frenzy: a 0.75%-2.04% swing from candy reweighting alone). Reported
+      // unconditionally, including when `triggerRatePenaltyWeight` is 0 and the search was
+      // therefore blind to it - a large drift here with a zero weight is exactly the situation
+      // where a tune reports a healthy RTP alongside a trigger rate nowhere near its target, and
+      // it should be visible rather than inferred.
+      triggerRateDrift: scatterPhase ? {
+        afterPhase1: scatterPhase.result?.triggerRate,
+        final: finalResult.triggerRate,
+        delta: finalResult.triggerRate - (scatterPhase.result?.triggerRate ?? finalResult.triggerRate),
+        target: targetTriggerRatePct,
+        tolerance: triggerRateTolerancePct,
+        finalWithinTolerance: Math.abs(finalResult.triggerRate - targetTriggerRatePct) <= triggerRateTolerancePct,
+        penaltyWeight: triggerRatePenaltyWeight,
       } : null,
       rtpPhase: rtpPhaseResult ? {
         // The actual scalar every accept/reject decision (beatsIncumbent, Nelder-Mead/CMA-ES's

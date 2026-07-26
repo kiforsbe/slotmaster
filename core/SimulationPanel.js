@@ -438,6 +438,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label title="Adds a candidate's own measurement unreliability (standard error across its Trials Averaged repeats) directly into the search's loss, on top of Max RTP Std Error / a candidate's Best-acceptance margin (which only ever gate whether a result can count as converged or replace the current best AFTER the fact). Raising this gives the search an active incentive to prefer more reliably-reproducible regions of the search space DURING the search itself, not just whichever candidate happens to look best on one noisy average. 0 (default) is off - loss ignores std error entirely, unchanged from before this option existed." style="font-size: 0.8em; color: #ccc;">Std Error Penalty Weight<br>
           <input id="tune-std-error-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
+        <label title="Penalizes how far a candidate's trigger rate sits OUTSIDE the target band (zero anywhere inside it), in percentage points - the same scale as RTP error, so a weight of 1 trades 1pp of trigger-rate drift against 1pp of RTP error. Phase 2 never tunes trigger symbols directly, so for a line-pay game the trigger rate cannot move and this can stay 0. For a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies (bonus frequency held identical) swings the trigger rate from 0.75% to 2.04%. With this at 0 the search cannot see that happening, which is how a cascade tune ends up with a good RTP and a trigger rate nowhere near target." style="font-size: 0.8em; color: #ccc;">Trigger Rate Penalty Weight<br>
+          <input id="tune-trigger-rate-weight" type="number" value="${tuneConfig.triggerRatePenaltyWeight ?? 0}" step="0.5" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
         <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
           <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
             <option value="provided" selected>Use configured baseline (default)</option>
@@ -674,6 +677,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
     uniformityPenaltyWeight: tuneContainer.querySelector('#tune-uniformity-weight'),
     stdErrorPenaltyWeight: tuneContainer.querySelector('#tune-std-error-weight'),
+    triggerRatePenaltyWeight: tuneContainer.querySelector('#tune-trigger-rate-weight'),
     initialWeightStrategy: tuneContainer.querySelector('#tune-initial-weight-strategy'),
     searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
   };
@@ -739,6 +743,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
     uniformityPenaltyWeight: parseFloat(inputs.uniformityPenaltyWeight.value) || 0,
     stdErrorPenaltyWeight: parseFloat(inputs.stdErrorPenaltyWeight.value) || 0,
+    triggerRatePenaltyWeight: parseFloat(inputs.triggerRatePenaltyWeight.value) || 0,
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
@@ -883,6 +888,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.limitPenaltyWeight > 0) parts.push(`limit ${candidate.limitPenalty.toFixed(4)}×${options.limitPenaltyWeight}=${(candidate.limitPenalty * options.limitPenaltyWeight).toFixed(4)}`);
           if (options.uniformityPenaltyWeight > 0) parts.push(`uniformity ${candidate.uniformityPenalty.toFixed(4)}×${options.uniformityPenaltyWeight}=${(candidate.uniformityPenalty * options.uniformityPenaltyWeight).toFixed(4)}`);
           if (options.stdErrorPenaltyWeight > 0) parts.push(`std error ${(candidate.trialRtpStdError ?? 0).toFixed(4)}×${options.stdErrorPenaltyWeight}=${((candidate.trialRtpStdError ?? 0) * options.stdErrorPenaltyWeight).toFixed(4)}`);
+          if (options.triggerRatePenaltyWeight > 0) parts.push(`trigger rate ${(candidate.triggerRatePenalty ?? 0).toFixed(4)}×${options.triggerRatePenaltyWeight}=${((candidate.triggerRatePenalty ?? 0) * options.triggerRatePenaltyWeight).toFixed(4)}`);
           return `loss ${candidate.loss.toFixed(4)} (${parts.join(', ')})`;
         };
 
@@ -899,6 +905,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.limitPenaltyWeight > 0) components.push({ label: 'limit', raw: candidate.limitPenalty, weight: options.limitPenaltyWeight, color: '#ff8080' });
           if (options.uniformityPenaltyWeight > 0) components.push({ label: 'uniformity', raw: candidate.uniformityPenalty, weight: options.uniformityPenaltyWeight, color: '#c58fff' });
           if (options.stdErrorPenaltyWeight > 0) components.push({ label: 'std error', raw: candidate.trialRtpStdError ?? 0, weight: options.stdErrorPenaltyWeight, color: '#5fd4c4' });
+          if (options.triggerRatePenaltyWeight > 0) components.push({ label: 'trigger rate', raw: candidate.triggerRatePenalty ?? 0, weight: options.triggerRatePenaltyWeight, color: '#ff9f5f' });
           components.forEach(c => { c.contribution = c.raw * c.weight; });
           return components;
         };
@@ -935,6 +942,51 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         if (phase === 'initial') {
           appendLog(`Starting point selected (${initialWeightStrategyLabels[options.initialWeightStrategy] || options.initialWeightStrategy})`);
           if (r.trial) updateLiveTable(r.trial, null);
+          return;
+        }
+        // Phase 1b: the shared multiplier couldn't land inside the target band (all reels step
+        // together, so the trigger rate can only move in whole-lockstep jumps), and the search is
+        // now walking ONE trigger symbol at a time across individual reels to fill the gap
+        // between two of those jumps. Logged per step because the per-reel counts are the
+        // interesting part - this is where an uneven distribution gets introduced.
+        if (phase === 'scatter-refine') {
+          appendLog(`   ↳ Phase 1b refine ${i + 1}: per-reel trigger counts [${r.counts.join(', ')}] → trigger ${r.triggerRate.toFixed(3)}% (target ${r.target}% ±${r.tolerance}, off by ${r.error.toFixed(3)}pp)`);
+          return;
+        }
+        // Fired once, at the Phase 1 -> Phase 2 handover. Phase 1 finishing SHORT of the target
+        // trigger rate is a normal outcome rather than a malfunction - the reachable trigger
+        // rates form a coarse lattice, so the target can simply not exist (see bisect1D in
+        // core/SpinSimulator.js) - but without saying so here the log runs straight on into
+        // Phase 2's steps and reads as the phase quietly giving up. It also matters that this is
+        // FINAL: Phase 2 excludes trigger symbols from its search entirely, so nothing later in
+        // the run will revisit it.
+        if (phase === 'scatter-complete') {
+          const pct = (v) => v == null ? '?' : `${v.toFixed(3)}%`;
+          if (r.converged) {
+            appendLog(`✓ Phase 1 done - trigger rate ${pct(r.triggerRate)} (target ${pct(r.target)} ±${r.tolerance}, multiplier ×${mult.toFixed(4)})${r.refinedPerReelCounts ? `, with per-reel trigger counts [${r.refinedPerReelCounts.join(', ')}] - a shared multiplier alone could not land in the band` : ''}. Moving on to Phase 2: per-symbol reel weights.`);
+          } else {
+            // NB: deliberately does NOT claim the trigger rate is settled. Phase 2 never tunes a
+            // trigger symbol's own frequency, which makes the trigger rate final for a line-pay
+            // game - but NOT for a cascade mechanic, where the other symbols' weights control
+            // cascade depth and every cascade refills the grid with fresh chances to draw the
+            // scatter. Measured on Candy Frenzy, reweighting candies alone (bonus frequency held
+            // byte-identical, each reel's candy budget preserved) moves the trigger rate from
+            // 0.75% to 2.04%. Claiming finality here would be actively misleading on exactly the
+            // game where this matters most.
+            const why = r.reason === 'lattice-gap' && r.bracket
+              ? `No multiplier can hit it. Scatter counts are whole positions on a reel strip, so only certain trigger rates exist at all - the two nearest are ${pct(r.bracket.loMetric)} (×${r.bracket.loParam.toFixed(3)}) and ${pct(r.bracket.hiMetric)} (×${r.bracket.hiParam.toFixed(3)}), with nothing in between.`
+              : r.reason === 'unreachable-low'
+              ? `Even the highest allowed multiplier (×8) only reaches ${pct(r.bracket?.hiMetric)} - the target is above everything reachable.`
+              : r.reason === 'unreachable-high'
+              ? `Even the lowest allowed multiplier (×0.05) still measures ${pct(r.bracket?.loMetric)} - the target is below everything reachable.`
+              : r.reason === 'stopped'
+              ? `Stopped by request before it finished.`
+              : `Ran out of iterations before landing in the target band.`;
+            appendLog(`⚠ Phase 1 stopped at trigger rate ${pct(r.triggerRate)}, ${r.error.toFixed(3)}pp off the ${pct(r.target)} ±${r.tolerance} target (multiplier ×${mult.toFixed(4)}). ${why}`);
+            if (r.reason !== 'exhausted' && r.reason !== 'stopped') {
+              appendLog(`   … to change this: widen Trigger Rate Tolerance, pick a target that exists (see the two nearest above), or raise the game's reel strip length so the reachable rates sit closer together. More tuning iterations will not help.`);
+            }
+          }
           return;
         }
         // A stalled round restarting with a wider step is otherwise invisible here - the next
@@ -1022,6 +1074,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             { label: 'limit penalty', delta: (current.limitPenalty - bestCandidate.limitPenalty) * options.limitPenaltyWeight },
             { label: 'uniformity penalty', delta: (current.uniformityPenalty - bestCandidate.uniformityPenalty) * options.uniformityPenaltyWeight },
             { label: 'std error penalty', delta: ((current.trialRtpStdError ?? 0) - (bestCandidate.trialRtpStdError ?? 0)) * options.stdErrorPenaltyWeight },
+            { label: 'trigger rate penalty', delta: ((current.triggerRatePenalty ?? 0) - (bestCandidate.triggerRatePenalty ?? 0)) * options.triggerRatePenaltyWeight },
           ];
           notPromotedReason = terms.reduce((a, b) => (b.delta > a.delta ? b : a));
           appendLog(`   … not promoted to best - ${notPromotedReason.label} is worse by ${notPromotedReason.delta.toFixed(4)} (loss ${current.loss.toFixed(4)} vs best's ${bestCandidate.loss.toFixed(4)})`);
@@ -1154,6 +1207,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           if (options.stdErrorPenaltyWeight > 0) {
             lines.push(`<span style="color: #999;">std error penalty${withContribution(bestCandidate.trialRtpStdError ?? 0, options.stdErrorPenaltyWeight)}</span>`);
           }
+          if (options.triggerRatePenaltyWeight > 0) {
+            lines.push(`<span style="color: #999;">trigger rate penalty${withContribution(bestCandidate.triggerRatePenalty ?? 0, options.triggerRatePenaltyWeight)}</span>`);
+          }
           liveStatsViolationsEl.innerHTML = lines.join('<br>');
         }
 
@@ -1217,6 +1273,25 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // Spelling out the closest achievable rates either side turns an otherwise baffling
     // "did not converge" into an actionable choice: widen the tolerance, move the target onto a
     // value that exists, or lengthen the reel strip to make the lattice finer.
+    // Phase 2 can move the trigger rate even though it never tunes a trigger symbol - on a
+    // cascade mechanic the other symbols' weights drive cascade depth, and every cascade refills
+    // the grid with fresh chances to draw the scatter. If Trigger Rate Penalty Weight is 0 the
+    // search had no way to see that happening, so a run can end with a perfectly good RTP and a
+    // trigger rate that drifted far off target with nothing flagging it. Surfaced whenever the
+    // final rate is out of band and Phase 1 had actually got it in band - i.e. specifically the
+    // case where Phase 2 undid Phase 1's work.
+    const drift = diagnostics.triggerRateDrift;
+    if (drift && !drift.finalWithinTolerance && Math.abs(drift.delta) > drift.tolerance) {
+      const phase1WasFine = Math.abs(drift.afterPhase1 - drift.target) <= drift.tolerance;
+      html += `<p style="font-size: 0.8em; color: #ff8080; margin: 8px 0; padding: 8px; background: #2a2a2a; border-left: 3px solid #ff8080;">`
+        + `<strong>Phase 2 moved the trigger rate off target</strong> - ${drift.afterPhase1.toFixed(3)}% after Phase 1 → <strong>${drift.final.toFixed(3)}%</strong> now (target ${drift.target}% ±${drift.tolerance}, drift ${drift.delta >= 0 ? '+' : ''}${drift.delta.toFixed(3)}pp).`
+        + (phase1WasFine ? ' Phase 1 had it inside the band; tuning the other symbols\' weights pushed it back out.' : '')
+        + (drift.penaltyWeight > 0
+          ? ` Trigger Rate Penalty Weight is ${drift.penaltyWeight} - raise it to make the search defend the trigger rate harder against RTP.`
+          : ` <em>Trigger Rate Penalty Weight is 0, so the search could not see this at all.</em> On a cascade game the symbol weights control cascade depth, and every cascade refills the grid with fresh chances to draw the scatter - set that weight above 0 so the trigger rate is part of what the search optimizes.`)
+        + `</p>`;
+    }
+
     const sp = diagnostics.scatterPhase;
     if (sp && !sp.converged && sp.reason !== 'stopped') {
       const b = sp.bracket;
