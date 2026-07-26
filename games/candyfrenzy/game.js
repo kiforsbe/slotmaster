@@ -9,7 +9,6 @@ import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/Sim
 
 export const REELS_COUNT = 7;
 export const ROWS_COUNT = 7;
-export const REEL_LENGTH = 500;
 export const REEL_SEEDS = [101, 202, 303, 404, 505, 606, 707];
 export const BET_AMOUNT = 1.00;
 export const BET_STEP = 0.50;
@@ -24,15 +23,15 @@ const REGULAR_PAYOUT = [
   { min:  5, multiplier: 0.75 },
   { min:  7, multiplier: 1.25 },
   { min: 10, multiplier: 1.50 },
-  { min: 15, multiplier: 2.00 },
-  { min: 25, multiplier: 3.00 },
+  { min: 15, multiplier: 3.00 },
+  { min: 25, multiplier: 6.00 },
 ];
 const PREMIUM_PAYOUT = [
-  { min:  5, multiplier: 0.75 },
-  { min:  7, multiplier: 1.75 },
-  { min: 10, multiplier: 3.00 },
-  { min: 15, multiplier: 4.50 },
-  { min: 25, multiplier: 7.50 },
+  { min:  5, multiplier:  0.75 },
+  { min:  7, multiplier:  1.75 },
+  { min: 10, multiplier:  3.00 },
+  { min: 15, multiplier:  6.50 },
+  { min: 25, multiplier: 12.50 },
 ];
 
 // chest, clover, and wild exist in the art but are unused in v1 - excluded here entirely,
@@ -53,174 +52,153 @@ export const PAYTABLE = {
   bonus:       { type: 'scatter', paymode: 'any', triggerFreeSpins: true, friendlyName: 'Bonus' },
 };
 
-// All 7 reels start identical (same starting-point convention as barfruits/bookbookbook) -
-// each its own object so a future per-reel hand-edit can't silently affect the others.
-// bonus's triggerFreeSpins gets generateReel's automatic minGap-3 spacing for free.
-// const BASE_FREQUENCIES = {
-//   cottoncandy: 0.05,
-//   gum:         0.05,
-//   crystal:     0.05,
-//   rocket:      0.05,
-//   crown:       0.05,
-//   cake:        0.05,
-//   mint:        0.10,
-//   gummy:       0.10,
-//   bean:        0.10,
-//   chocolate:   0.10,
-//   chewy:       0.10,
-//   cherry:      0.10,
-//   bonus:       0.01,
-// };
-// function buildFrequencyReel() {
-//   const symbols = Object.fromEntries(Object.entries(BASE_FREQUENCIES).map(([sym, f]) => [sym, { frequency: f }]));
-//   // bonus is the scatter - it stays spaced out (minGap already handles that via
-//   // triggerFreeSpins) rather than ever clumping into a stack like the candy symbols do.
-//   symbols.bonus.minStack = 1;
-//   return {
-//     // 10% chance a given candy occurrence starts a 2-4 stack instead of landing as a lone
-//     // single - occasional clumps of the same candy, not a reel that's always/never stacked.
-//     defaults: { minStack: 2, maxStack: 4, stackChance: 0.10, minFrequency: 0.01, maxFrequency: 1.00 },
-//     symbols,
-//   };
-// }
-// export const FREQUENCY_REEL1 = buildFrequencyReel();
-// export const FREQUENCY_REEL2 = buildFrequencyReel();
-// export const FREQUENCY_REEL3 = buildFrequencyReel();
-// export const FREQUENCY_REEL4 = buildFrequencyReel();
-// export const FREQUENCY_REEL5 = buildFrequencyReel();
-// export const FREQUENCY_REEL6 = buildFrequencyReel();
-// export const FREQUENCY_REEL7 = buildFrequencyReel();
+// ---- Tuned 2026-07-26 ----
+// Achieved: RTP 92.75%  |  free-spin trigger 0.518%
+//
+// To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
+// same reel geometry, since strips are generated from them:
+//   searchSeed 12345   reelSeeds [101, 202, 303, 404, 505, 606, 707]
+//   reelLength 500   reels 7 x 7 rows
+//   target RTP 96% +/-1.5   target trigger 0.6% +/-0.15
+//   30,000 spins x 3 trials   cmaes, max 150 iterations
+//   initial weights: uniform   max RTP std error 1
+//   loss weights: ordering 0.5, limit 2, uniformity 3, stdError 0.5, triggerRate 0, spacing 0
+//   ordering bias by reel: [0, 0, 0, 0, 0, 0, 0]
+//
+// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
+// against this length and do not reproduce the RTP above at any other.
+export const REEL_LENGTH = 500;
 
 export const FREQUENCY_REEL1 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.02147 },
-    gum:         { frequency: 0.1825 },
-    crystal:     { frequency: 0.1388 },
-    rocket:      { frequency: 0.07503 },
-    crown:       { frequency: 0.08109 },
-    cake:        { frequency: 0.1201 },
-    mint:        { frequency: 0.01075 },
-    gummy:       { frequency: 0.06323 },
-    bean:        { frequency: 0.04464 },
-    chocolate:   { frequency: 0.02019 },
-    chewy:       { frequency: 0.01969 },
-    cherry:      { frequency: 0.1225 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.045 },
+    gum:         { frequency: 0.03806 },
+    crystal:     { frequency: 0.1132 },
+    rocket:      { frequency: 0.06637 },
+    crown:       { frequency: 0.04367 },
+    cake:        { frequency: 0.08252 },
+    mint:        { frequency: 0.05885 },
+    gummy:       { frequency: 0.103 },
+    bean:        { frequency: 0.07012 },
+    chocolate:   { frequency: 0.1023 },
+    chewy:       { frequency: 0.03041 },
+    cherry:      { frequency: 0.1465 },
+    bonus:       { frequency: 0.007258, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.05986 },
-    gum:         { frequency: 0.01624 },
-    crystal:     { frequency: 0.001452 },
-    rocket:      { frequency: 0.04305 },
-    crown:       { frequency: 0.03313 },
-    cake:        { frequency: 0.009062 },
-    mint:        { frequency: 0.01822 },
-    gummy:       { frequency: 0.1527 },
-    bean:        { frequency: 0.1308 },
-    chocolate:   { frequency: 0.01661 },
-    chewy:       { frequency: 0.4105 },
-    cherry:      { frequency: 0.008583 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.1558 },
+    gum:         { frequency: 0.1001 },
+    crystal:     { frequency: 0.008095 },
+    rocket:      { frequency: 0.07036 },
+    crown:       { frequency: 0.067 },
+    cake:        { frequency: 0.01025 },
+    mint:        { frequency: 0.01959 },
+    gummy:       { frequency: 0.05598 },
+    bean:        { frequency: 0.1651 },
+    chocolate:   { frequency: 0.06354 },
+    chewy:       { frequency: 0.1287 },
+    cherry:      { frequency: 0.05564 },
+    bonus:       { frequency: 0.005434, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.01293 },
-    gum:         { frequency: 0.01738 },
-    crystal:     { frequency: 0.033 },
-    rocket:      { frequency: 0.0378 },
-    crown:       { frequency: 0.04474 },
-    cake:        { frequency: 0.005989 },
-    mint:        { frequency: 0.2007 },
-    gummy:       { frequency: 0.03219 },
-    bean:        { frequency: 0.007371 },
-    chocolate:   { frequency: 0.0941 },
-    chewy:       { frequency: 0.005553 },
-    cherry:      { frequency: 0.00832 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.01465 },
+    gum:         { frequency: 0.03903 },
+    crystal:     { frequency: 0.09772 },
+    rocket:      { frequency: 0.0285 },
+    crown:       { frequency: 0.0417 },
+    cake:        { frequency: 0.04431 },
+    mint:        { frequency: 0.1411 },
+    gummy:       { frequency: 0.03123 },
+    bean:        { frequency: 0.006208 },
+    chocolate:   { frequency: 0.04117 },
+    chewy:       { frequency: 0.01276 },
+    cherry:      { frequency: 0.001704 },
+    bonus:       { frequency: 0.006074, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL4 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.1943 },
-    gum:         { frequency: 0.008352 },
-    crystal:     { frequency: 0.001758 },
-    rocket:      { frequency: 0.001864 },
-    crown:       { frequency: 0.01903 },
-    cake:        { frequency: 0.1401 },
-    mint:        { frequency: 0.002027 },
-    gummy:       { frequency: 0.1103 },
-    bean:        { frequency: 0.2683 },
-    chocolate:   { frequency: 0.03629 },
-    chewy:       { frequency: 0.03147 },
-    cherry:      { frequency: 0.08604 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.06033 },
+    gum:         { frequency: 0.01783 },
+    crystal:     { frequency: 0.001093 },
+    rocket:      { frequency: 0.03975 },
+    crown:       { frequency: 0.05339 },
+    cake:        { frequency: 0.07667 },
+    mint:        { frequency: 0.00768 },
+    gummy:       { frequency: 0.3076 },
+    bean:        { frequency: 0.07033 },
+    chocolate:   { frequency: 0.107 },
+    chewy:       { frequency: 0.08659 },
+    cherry:      { frequency: 0.07157 },
+    bonus:       { frequency: 0.005432, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL5 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.02284 },
-    gum:         { frequency: 0.05049 },
-    crystal:     { frequency: 0.01526 },
-    rocket:      { frequency: 0.2742 },
-    crown:       { frequency: 0.1104 },
-    cake:        { frequency: 0.02978 },
-    mint:        { frequency: 0.0311 },
-    gummy:       { frequency: 0.01056 },
-    bean:        { frequency: 0.02855 },
-    chocolate:   { frequency: 0.2135 },
-    chewy:       { frequency: 0.06093 },
-    cherry:      { frequency: 0.05234 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.06622 },
+    gum:         { frequency: 0.1364 },
+    crystal:     { frequency: 0.08726 },
+    rocket:      { frequency: 0.1411 },
+    crown:       { frequency: 0.1225 },
+    cake:        { frequency: 0.0133 },
+    mint:        { frequency: 0.01601 },
+    gummy:       { frequency: 0.03014 },
+    bean:        { frequency: 0.0697 },
+    chocolate:   { frequency: 0.0653 },
+    chewy:       { frequency: 0.09253 },
+    cherry:      { frequency: 0.05944 },
+    bonus:       { frequency: 0.005432, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL6 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.03467 },
-    gum:         { frequency: 0.09424 },
-    crystal:     { frequency: 0.2087 },
-    rocket:      { frequency: 0.007139 },
-    crown:       { frequency: 0.009431 },
-    cake:        { frequency: 0.03599 },
-    mint:        { frequency: 0.006822 },
-    gummy:       { frequency: 0.2578 },
-    bean:        { frequency: 0.07427 },
-    chocolate:   { frequency: 0.007995 },
-    chewy:       { frequency: 0.05403 },
-    cherry:      { frequency: 0.109 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.008941 },
+    gum:         { frequency: 0.05354 },
+    crystal:     { frequency: 0.06543 },
+    rocket:      { frequency: 0.004154 },
+    crown:       { frequency: 0.05742 },
+    cake:        { frequency: 0.1292 },
+    mint:        { frequency: 0.01313 },
+    gummy:       { frequency: 0.1353 },
+    bean:        { frequency: 0.09517 },
+    chocolate:   { frequency: 0.05745 },
+    chewy:       { frequency: 0.1117 },
+    cherry:      { frequency: 0.1687 },
+    bonus:       { frequency: 0.005433, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL7 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.30, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.1988 },
-    gum:         { frequency: 0.1156 },
-    crystal:     { frequency: 0.05341 },
-    rocket:      { frequency: 0.1136 },
-    crown:       { frequency: 0.0638 },
-    cake:        { frequency: 0.09508 },
-    mint:        { frequency: 0.01521 },
-    gummy:       { frequency: 0.03867 },
-    bean:        { frequency: 0.02602 },
-    chocolate:   { frequency: 0.06688 },
-    chewy:       { frequency: 0.06411 },
-    cherry:      { frequency: 0.04889 },
-    bonus:       { frequency: 0.005824, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
+    cottoncandy: { frequency: 0.06334 },
+    gum:         { frequency: 0.06801 },
+    crystal:     { frequency: 0.06962 },
+    rocket:      { frequency: 0.09204 },
+    crown:       { frequency: 0.1237 },
+    cake:        { frequency: 0.1209 },
+    mint:        { frequency: 0.04499 },
+    gummy:       { frequency: 0.04525 },
+    bean:        { frequency: 0.05486 },
+    chocolate:   { frequency: 0.09246 },
+    chewy:       { frequency: 0.05745 },
+    cherry:      { frequency: 0.06744 },
+    bonus:       { frequency: 0.005433, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQUENCY_REEL4, FREQUENCY_REEL5, FREQUENCY_REEL6, FREQUENCY_REEL7];
