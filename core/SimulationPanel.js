@@ -3,6 +3,8 @@
 // Every game's game.js calls into this instead of maintaining its own copy.
 import { resolveFrequencyBounds } from './SlotMath.js';
 import { exportSpinLogCsv } from './SpinLog.js';
+import { tuneFrequencies } from './SpinSimulator.js';
+import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -34,51 +36,54 @@ function renderSymbolLabel(symbol, paytable, displayText = symbol) {
 }
 
 /**
- * Runs tuneFrequencies() in a dedicated Worker (core/tuneFrequenciesWorker.js) instead of on
- * this thread, so the potentially long Monte Carlo search never blocks page rendering/input -
- * see that worker file's own comment for why. `paytable`/`reelFrequencyTables`/`options` are
- * postMessage'd across, so they must be structured-cloneable (no functions - `onProgress` is
- * kept on this side and invoked locally as messages arrive).
+ * Runs tuneFrequencies() on this thread, backed by a pool of Worker threads (see
+ * core/SimulationWorkerPool.js) that each individual Monte Carlo trial is dispatched to - so
+ * the potentially long search still never blocks page rendering/input, and now spreads its
+ * actual CPU work across every available core instead of just one.
+ *
+ * tuneFrequencies' own control flow (building candidate reel tables, penalty math, deciding the
+ * next Nelder-Mead/gradient-descent step) is cheap - a handful of numbers over at most a few
+ * hundred tunable dimensions - so it's safe to run right here rather than isolated in its own
+ * dedicated Worker the way it used to be; the actual expensive part (simulateSpins over
+ * hundreds of thousands of spins) always runs on a pool Worker's own thread via `runTrial`.
+ *
+ * `runTrial`'s own `config` (real `mechanic`/`winEvaluator`/`freeSpinsMode` objects/functions,
+ * since tuneFrequencies runs in-process here) can't cross postMessage to a pool Worker as-is -
+ * converted to names the same way the old dedicated-worker version did for its whole options
+ * object (see mechanicName/winEvaluatorName/freeSpinsModeName below).
  * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
-function runTuneFrequenciesInWorker(paytable, reelFrequencyTables, options, onProgress) {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./tuneFrequenciesWorker.js', import.meta.url), { type: 'module' });
-    // winEvaluator (a function, e.g. checkWildLineWins) can't cross postMessage - send its
-    // name instead, resolved back to the real function inside the worker (see its own
-    // WIN_EVALUATORS table) - this is how every line-pay game already does it, since their
-    // winEvaluator is always one of a couple of reusable bare functions.
-    //
-    // A cascade game's winEvaluator is instead a per-game closure baking in its own paytable/
-    // minClusterSize/scatterSymbol (see CascadeMath.js's own doc), so `.name` (which would
-    // just be the closure's own variable name, e.g. 'winEvaluator') can't identify it the same
-    // way - tuneConfig sets `winEvaluatorName` explicitly instead (e.g. 'checkClusterWins',
-    // alongside minClusterSize/scatterTriggerCount), which wins over any derived name here.
-    //
-    // mechanic/freeSpinsMode (SpinSimulator.js's pluggable components) are likewise objects
-    // with function hooks - sent by name (their own `.name` property) the same way.
-    const { onProgress: _ignored, winEvaluator, mechanic, freeSpinsMode, ...cloneableOptions } = options;
-    cloneableOptions.winEvaluatorName = cloneableOptions.winEvaluatorName ?? (winEvaluator ? winEvaluator.name : null);
-    cloneableOptions.mechanicName = mechanic ? mechanic.name : null;
-    cloneableOptions.freeSpinsModeName = freeSpinsMode ? freeSpinsMode.name : null;
-    worker.onmessage = (event) => {
-      const msg = event.data;
-      if (msg.type === 'progress') {
-        onProgress(msg.phase, msg.i, msg.mult, msg.result, msg.best);
-      } else if (msg.type === 'done') {
-        worker.terminate();
-        resolve(msg.result);
-      } else if (msg.type === 'error') {
-        worker.terminate();
-        reject(new Error(msg.message));
-      }
-    };
-    worker.onerror = (event) => {
-      worker.terminate();
-      reject(new Error(event.message || 'tuneFrequencies worker failed'));
-    };
-    worker.postMessage({ paytable, reelFrequencyTables, options: cloneableOptions });
-  });
+async function runTuneFrequenciesWithPool(paytable, reelFrequencyTables, options, onProgress) {
+  // winEvaluatorName/minClusterSize/scatterTriggerCount are pool-dispatch metadata only -
+  // tuneFrequencies itself never reads them (a cascade game's real winEvaluator, still a real
+  // closure, is passed straight through in `tuneOptions` below for the (unused when runTrial is
+  // set) in-process fallback path).
+  const { winEvaluatorName: explicitWinEvaluatorName, minClusterSize, scatterTriggerCount, ...tuneOptions } = options;
+  const pool = createSimulationWorkerPool();
+  try {
+    return await tuneFrequencies(paytable, reelFrequencyTables, {
+      ...tuneOptions,
+      onProgress,
+      runTrial: (config, numSpins, betPerLine, linesCount, rngSeed) => {
+        const { mechanic, winEvaluator, freeSpinsMode, ...restConfig } = config;
+        const cloneableConfig = {
+          ...restConfig,
+          mechanicName: mechanic ? mechanic.name : null,
+          // A cascade game's winEvaluator is a per-game closure baking in its own paytable/
+          // minClusterSize/scatterSymbol (see CascadeMath.js's own doc), so `.name` (just the
+          // closure's own variable name, e.g. 'winEvaluator') can't identify it - the explicit
+          // override from tuneConfig (e.g. 'checkClusterWins') wins over any derived name.
+          winEvaluatorName: explicitWinEvaluatorName ?? (winEvaluator ? winEvaluator.name : null),
+          freeSpinsModeName: freeSpinsMode ? freeSpinsMode.name : null,
+          minClusterSize,
+          scatterTriggerCount,
+        };
+        return pool.runTrial(cloneableConfig, numSpins, betPerLine, linesCount, rngSeed);
+      },
+    });
+  } finally {
+    pool.terminate();
+  }
 }
 
 function renderWinTable(counts, hitLabel, accentColor, emptyText) {
@@ -342,8 +347,9 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
  * @param {Object} args.tuneConfig - { reelsCount, rowsCount, paylines, reelSeeds, betPerLine, linesCount, reelLength, winEvaluator, wildSymbol, scatterSymbol }.
  *   A cascade game additionally sets `mechanic` (CascadeSpinMechanic), `freeSpinsMode`, and -
  *   since its winEvaluator is a per-game closure, not a reusable named function -
- *   `minClusterSize`/`scatterTriggerCount` alongside `winEvaluator: checkClusterWins` so
- *   tuneFrequenciesWorker.js can rebuild an equivalent closure on its side of postMessage.
+ *   `minClusterSize`/`scatterTriggerCount` alongside `winEvaluator: checkClusterWins` so a pool
+ *   Worker (core/simulationTrialWorker.js) can rebuild an equivalent closure on its side of
+ *   postMessage.
  * @param {Object} args.domRefs - { simModal, simStats }
  */
 export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneConfig, domRefs }) {
@@ -414,6 +420,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label title="How many independent Trial Spins runs are averaged per candidate measurement. Higher further reduces noise in the RTP/trigger estimate, at a proportional cost in time (2 trials ≈ 2x the work per iteration)." style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
           <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
         </label>
+        <label title="Caps how uncertain a candidate's own averaged RTP is allowed to be before it can count as a genuine hit on Target RTP - measured as the standard error of the mean across its Trials Averaged repeats. A high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly) can average out to a plausible-looking RTP while its individual trials still disagree wildly - that's a lucky/unlucky sample, not a trustworthy measurement. Raise this (or raise Trial Spins/Trials Averaged instead, now cheap thanks to the Worker pool) if a real search keeps stalling here." style="font-size: 0.8em; color: #ccc;">Max RTP Std Error (%)<br>
+          <input id="tune-max-rtp-std-error" type="number" value="1" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+        </label>
         <label title="Upper bound on Nelder-Mead iterations for the joint frequency search (Phase 2). The search may stop earlier if it converges, stalls out after repeated restarts, or is already essentially resolved - see the reason reported after a run." style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
           <input id="tune-max-iterations" type="number" value="150" step="10" min="10" max="1000" style="width: 100%; margin-top: 4px;">
         </label>
@@ -467,7 +476,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         ideal frequency plays too different a role). Any violation still present at the end is
         listed below.
       </p>
-      <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
+      <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
+      </div>
       <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 1.05em; line-height: 1.5; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
@@ -486,16 +497,20 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
 }
 
 // One symbol's gauge: a single horizontal track, scaled 0 -> reelMax (the highest frequency
-// value seen anywhere on this symbol's own reel - configured bounds, tested range, or current
-// value, across every symbol on that reel, not just this one) so every symbol's bar on a given
-// reel is directly comparable at a glance - a symbol at 26 fills most of the track while one at
-// 1.6 is a sliver, instead of each bar independently stretching to fill its own box regardless
-// of magnitude. A light blue band for the configured minFrequency/maxFrequency range, a
-// brighter band for the tested min/max range (the actual low/high frequency this symbol has
-// been assigned to across every candidate evaluated so far this run), and a gold tick for the
-// current value. reelMax <= 0 can't derive a span (e.g. every symbol on the reel is 0) - the
-// tick renders centered with no bands rather than dividing by zero.
-function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, testedMax, reelMax) {
+// value seen anywhere on this symbol's own reel - configured bounds, tested range, current, or
+// best value, across every symbol on that reel, not just this one) so every symbol's bar on a
+// given reel is directly comparable at a glance - a symbol at 26 fills most of the track while
+// one at 1.6 is a sliver, instead of each bar independently stretching to fill its own box
+// regardless of magnitude. A light blue band for the configured minFrequency/maxFrequency
+// range, a brighter band for the tested min/max range (the actual low/high frequency this
+// symbol has been assigned to across every candidate evaluated so far this run), a gold tick
+// for the candidate this step just tried (`current` - may not be an improvement), and a green
+// tick for this symbol's value in the overall best-ever candidate found so far (`best` - same
+// distinction as the progress log's "current"/"best" split, see startTuning's own onProgress
+// handler doc for why the two can differ for many iterations in a row). reelMax <= 0 can't
+// derive a span (e.g. every symbol on the reel is 0) - ticks render centered with no bands
+// rather than dividing by zero.
+function renderFrequencyGauge(current, best, configuredMin, configuredMax, testedMin, testedMax, reelMax) {
   const pct = (v) => reelMax > 0 ? (v / reelMax) * 100 : 50;
 
   const configuredBand = (configuredMin != null && configuredMax != null)
@@ -504,63 +519,80 @@ function renderFrequencyGauge(current, configuredMin, configuredMax, testedMin, 
   const testedBand = (testedMin != null && testedMax != null)
     ? `<div style="position: absolute; left: ${pct(testedMin)}%; width: ${Math.max(pct(testedMax) - pct(testedMin), 1)}%; top: 30%; height: 40%; background: rgba(255,255,255,0.4); border-radius: 2px;"></div>`
     : '';
+  // Drawn before the current tick so current wins visually if the two ever land on the exact
+  // same pixel (common once the search has actually converged onto the best candidate).
+  const bestTick = best != null
+    ? `<div style="position: absolute; left: calc(${pct(best)}% - 1px); top: -2px; width: 2px; height: calc(100% + 4px); background: #4ade80;"></div>`
+    : '';
   const currentTick = current != null
     ? `<div style="position: absolute; left: calc(${pct(current)}% - 1px); top: -2px; width: 2px; height: calc(100% + 4px); background: #e6b800;"></div>`
     : '';
 
   const title = [
     current != null ? `current: ${current.toFixed(3)}` : null,
+    best != null ? `best: ${best.toFixed(3)}` : null,
     testedMin != null ? `tested: ${testedMin.toFixed(3)} – ${testedMax.toFixed(3)}` : null,
     configuredMin != null || configuredMax != null
       ? `configured: ${configuredMin != null ? configuredMin.toFixed(3) : '–'} – ${configuredMax != null ? configuredMax.toFixed(3) : '–'}`
       : null,
   ].filter(Boolean).join(' | ');
 
-  return `<div title="${title}" style="position: relative; height: 14px; background: rgba(255,255,255,0.06); border-radius: 3px;">${configuredBand}${testedBand}${currentTick}</div>`;
+  return `<div title="${title}" style="position: relative; height: 14px; background: rgba(255,255,255,0.06); border-radius: 3px;">${configuredBand}${testedBand}${bestTick}${currentTick}</div>`;
 }
 
 // Renders the TUNE FREQUENCIES panel's live per-reel view: one gauge row per value symbol,
-// showing its current frequency (from the live candidate being evaluated, or the untouched
-// baseline before Phase 2 starts moving anything) against both its configured soft
-// minFrequency/maxFrequency bounds (resolved once up front - static for the whole run) and the
-// min/max it's actually been tested at so far this run (`testedRangeByReel`, updated by the
-// caller on every Phase 2 iteration - grows monotonically, never shrinks, until the next run
-// resets it). Every symbol's gauge on a given reel shares that reel's own scale (0 -> the
-// highest value seen anywhere on that reel), not its own - see renderFrequencyGauge's doc.
-function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial, paytable) {
+// showing both the candidate this step just tried (`liveTrial` - "current", may not be an
+// improvement) and this symbol's value in the overall best-ever candidate found so far
+// (`bestTrial` - "best") against both its configured soft minFrequency/maxFrequency bounds
+// (resolved once up front - static for the whole run) and the min/max it's actually been tested
+// at so far this run (`testedRangeByReel`, updated by the caller on every Phase 2 iteration -
+// grows monotonically, never shrinks, until the next run resets it). Before Phase 2 has run at
+// all (or during Phase 1, which never touches value symbols), both `liveTrial`/`bestTrial` are
+// null and every symbol just shows its untouched baseline frequency with no best marker - see
+// startTuning's onProgress handler for exactly when each is populated, and why "current" and
+// "best" can disagree for many steps in a row (same reasoning as the progress log's own
+// current/best split). Every symbol's gauge on a given reel shares that reel's own scale (0 ->
+// the highest value seen anywhere on that reel), not its own - see renderFrequencyGauge's doc.
+function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, liveTrial, bestTrial, paytable) {
   let html = `<div style="font-size: 0.7em; color: #888; margin-bottom: 6px;">
                  <span style="color: #7ec8ff;">▮</span> configured range &nbsp;
                  <span style="color: #ddd;">▮</span> tested range &nbsp;
-                 <span style="color: #e6b800;">|</span> current &nbsp; &nbsp;
+                 <span style="color: #e6b800;">|</span> current &nbsp;
+                 <span style="color: #4ade80;">|</span> best &nbsp; &nbsp;
                  <span style="color: ${symbolTypeColor('scatter')};">●</span> scatter &nbsp;
                  <span style="color: ${symbolTypeColor('wild')};">●</span> wild &nbsp;
                  <span style="color: ${symbolTypeColor('premium')};">●</span> premium &nbsp;
                  <span style="color: ${symbolTypeColor('regular')};">●</span> regular
                </div>`;
-  html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px;">`;
+  html += `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">`;
   reelFrequencyTables.forEach((baseReelTableWrapper, reelIdx) => {
     const baseReelTable = baseReelTableWrapper.symbols || baseReelTableWrapper;
     const liveReelTable = liveTrial ? (liveTrial[reelIdx].symbols || liveTrial[reelIdx]) : null;
+    const bestReelTable = bestTrial ? (bestTrial[reelIdx].symbols || bestTrial[reelIdx]) : null;
     const testedRange = testedRangeByReel[reelIdx];
-    // Reel-wide scale ceiling: the highest of every symbol's current/configured-max/tested-max
-    // on this reel - computed once per reel, then shared by every symbol's gauge below so bars
-    // are comparable to each other, not just internally consistent with their own min/max.
+    // Reel-wide scale ceiling: the highest of every symbol's current/best/configured-max/
+    // tested-max on this reel - computed once per reel, then shared by every symbol's gauge
+    // below so bars are comparable to each other, not just internally consistent with their own
+    // min/max.
     let reelMax = 0;
     Object.keys(baseReelTable).forEach(symbol => {
       const current = liveReelTable ? liveReelTable[symbol].frequency : baseReelTable[symbol].frequency;
+      const best = bestReelTable ? bestReelTable[symbol].frequency : null;
       const { maxFrequency } = boundsByReel[reelIdx][symbol];
       const tested = testedRange[symbol];
-      [current, maxFrequency, tested ? tested.max : null].forEach(v => { if (v != null && v > reelMax) reelMax = v; });
+      [current, best, maxFrequency, tested ? tested.max : null].forEach(v => { if (v != null && v > reelMax) reelMax = v; });
     });
     html += `<div><h4 style="margin: 0 0 4px; font-size: 0.75em; color: #aaa; text-transform: uppercase;">Reel ${reelIdx + 1}</h4>`;
     Object.keys(baseReelTable).forEach(symbol => {
       const current = liveReelTable ? liveReelTable[symbol].frequency : baseReelTable[symbol].frequency;
+      const best = bestReelTable ? bestReelTable[symbol].frequency : null;
       const { minFrequency, maxFrequency } = boundsByReel[reelIdx][symbol];
       const tested = testedRange[symbol];
-      const gauge = renderFrequencyGauge(current, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null, reelMax);
-      html += `<div style="display: grid; grid-template-columns: 66px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em;">
+      const gauge = renderFrequencyGauge(current, best, minFrequency, maxFrequency, tested ? tested.min : null, tested ? tested.max : null, reelMax);
+      html += `<div style="display: grid; grid-template-columns: 66px 46px 46px 1fr; align-items: center; gap: 6px; padding: 2px 0; font-size: 0.78em;">
                   ${renderSymbolLabel(symbol, paytable)}
                   <span style="text-align: right; color: #ddd;">${current.toFixed(3)}</span>
+                  <span style="text-align: right; color: #4ade80;">${best != null ? best.toFixed(3) : '–'}</span>
                   ${gauge}
                 </div>`;
     });
@@ -570,7 +602,7 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
   return html;
 }
 
-async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables }) {
+async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables, continuedFrom = null }) {
   const startBtn = tuneContainer.querySelector('#tune-start-btn');
   const logEl = tuneContainer.querySelector('#tune-progress-log');
   const resultsEl = tuneContainer.querySelector('#tune-results');
@@ -580,6 +612,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     reelLength: tuneContainer.querySelector('#tune-reel-length'),
     trialSpins: tuneContainer.querySelector('#tune-trial-spins'),
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
+    maxRtpStdError: tuneContainer.querySelector('#tune-max-rtp-std-error'),
     maxIterations: tuneContainer.querySelector('#tune-max-iterations'),
     orderingPenaltyWeight: tuneContainer.querySelector('#tune-ordering-weight'),
     limitPenaltyWeight: tuneContainer.querySelector('#tune-limit-weight'),
@@ -610,7 +643,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     linesCount: tuneConfig.linesCount,
     winEvaluator: tuneConfig.winEvaluator,
     // Explicit override for a cascade game, whose winEvaluator is a per-game closure that
-    // can't be identified by its own `.name` (see runTuneFrequenciesInWorker's doc above).
+    // can't be identified by its own `.name` (see runTuneFrequenciesWithPool's doc above).
     winEvaluatorName: tuneConfig.winEvaluatorName,
     wildSymbol: tuneConfig.wildSymbol,
     scatterSymbol: tuneConfig.scatterSymbol,
@@ -620,9 +653,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     hasExpandingWild: tuneConfig.hasExpandingWild,
     // Cascade-mechanic-only (undefined/no-op for a line-pay tuneConfig - see SpinSimulator.js's
     // tuneFrequencies doc): the gameplay mechanic + free-spins mode to measure candidates
-    // against, plus the cluster-evaluator "recipe" runTuneFrequenciesInWorker needs since a
+    // against, plus the cluster-evaluator "recipe" runTuneFrequenciesWithPool needs since a
     // cascade winEvaluator is a per-game closure, not a reusable named function (see
-    // tuneFrequenciesWorker.js's own doc).
+    // mechanicRegistry.js's own doc).
     mechanic: tuneConfig.mechanic,
     freeSpinsMode: tuneConfig.freeSpinsMode,
     minClusterSize: tuneConfig.minClusterSize,
@@ -632,6 +665,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
+    // Number.isFinite (not `|| 1`) so an explicit 0 - "no measurement uncertainty at all
+    // tolerated" - isn't silently overridden by the fallback the way `0 || 1` would.
+    maxRtpStdError: Number.isFinite(parseFloat(inputs.maxRtpStdError.value)) ? parseFloat(inputs.maxRtpStdError.value) : 1,
     maxIterations: parseInt(inputs.maxIterations.value, 10) || 150,
     orderingPenaltyWeight: parseFloat(inputs.orderingPenaltyWeight.value) || 0.5,
     limitPenaltyWeight: parseFloat(inputs.limitPenaltyWeight.value) || 0.5,
@@ -657,7 +693,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   logEl.style.display = 'block';
   logEl.innerHTML = '';
   liveTableEl.style.display = 'block';
-  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, paytable);
+  liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, null, paytable);
 
   const appendLog = (line) => {
     const row = document.createElement('div');
@@ -665,6 +701,19 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   };
+
+  // Printed before anything else on a continued run so the user can immediately compare it
+  // against the previous round's own "Achieved RTP" line, instead of having to trust that the
+  // reel tables underneath actually carried over - the search DOES start from this exact
+  // baseline (see startTuning's own continueBtn handler below, and tuneFrequencies' initialPoint
+  // construction), but a fresh Nelder-Mead search fans out an exploratory initial simplex around
+  // it immediately, so the very next log lines' `current:` values can look nothing like this
+  // number even though `best:` stays anchored here until an actual improvement is found - without
+  // this line that fan-out alone reads as "it reset," especially on a high-variance mechanic
+  // where `current` swings wildly step to step (see varianceText's own doc further below).
+  if (continuedFrom) {
+    appendLog(`Continuing from previous result: RTP=${continuedFrom.rtp.toFixed(2)}%${continuedFrom.varianceText}  trigger=${continuedFrom.triggerRatePct.toFixed(3)}%`);
+  }
 
   // A 'busy' event (see tuneFrequencies' own doc) can fire more than once for the same
   // shrink/widen-probe - identified by `key` (iteration+operation) - as it progresses. Updating
@@ -687,9 +736,12 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     const initialWeightStrategyLabels = {
       provided: 'configured baseline', uniform: 'random, uniform', normal: 'random, normal',
     };
-    // Shared by the 'initial' preview event and every 'shape' iteration - folds a candidate's
-    // trial reel tables into the running tested-range tracker and re-renders the live gauges.
-    const updateLiveTable = (trial) => {
+    // Shared by the 'initial' preview event and every 'shape' iteration - folds the just-tried
+    // candidate's trial reel tables into the running tested-range tracker (the best-ever
+    // `bestTrial` was already tested in some earlier step, so it never needs to widen the
+    // tracked range itself) and re-renders the live gauges. `bestTrial` is `null` for the
+    // 'initial' preview (nothing has been measured yet, so there's no best to show).
+    const updateLiveTable = (trial, bestTrial) => {
       trial.forEach((reelTableWrapper, reelIdx) => {
         const symbolsTable = reelTableWrapper.symbols || reelTableWrapper;
         const range = testedRangeByReel[reelIdx];
@@ -699,10 +751,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           range[symbol] = prev ? { min: Math.min(prev.min, freq), max: Math.max(prev.max, freq) } : { min: freq, max: freq };
         });
       });
-      liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, trial, paytable);
+      liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, trial, bestTrial, paytable);
     };
 
-    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await runTuneFrequenciesInWorker(paytable, reelFrequencyTables, options,
+    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await runTuneFrequenciesWithPool(paytable, reelFrequencyTables, options,
       (phase, i, mult, r, best) => {
         // Fired once, before Phase 1 even runs, with Phase 2's actual starting point (reflecting
         // Initial Frequency Strategy) - without this the live table stayed frozen on the raw
@@ -710,7 +762,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // hadn't taken effect until well after the fact.
         if (phase === 'initial') {
           appendLog(`Starting point selected (${initialWeightStrategyLabels[options.initialWeightStrategy] || options.initialWeightStrategy})`);
-          if (r.trial) updateLiveTable(r.trial);
+          if (r.trial) updateLiveTable(r.trial, null);
           return;
         }
         // A stalled round restarting with a wider step is otherwise invisible here - the next
@@ -739,27 +791,115 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         }
         const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
-        appendLog(`[${label}]${multLabel}  RTP=${r.rtp.toFixed(2)}%  trigger=${r.triggerRate.toFixed(3)}%  err=${r.error.toFixed(4)}  (best err=${best.error.toFixed(4)})`);
+
+        // Every reported RTP is shown WITH its own measurement uncertainty attached, always -
+        // never a bare number on its own. With only 1 trial there's no repeat measurement to
+        // compute variance FROM at all (not "zero variance" - genuinely no information), so
+        // that's said explicitly rather than printing a misleading "±0.00%". Otherwise this is
+        // always the candidate's std dev across its trialsPerPoint repeats plus the raw
+        // min-max range, regardless of how small or large it happens to be - a consistently
+        // present figure is what lets a large one actually stand out, instead of only
+        // appearing sometimes and inviting the assumption that "no figure" means "no problem".
+        const varianceLabelFor = (candidate) => {
+          if (options.trialsPerPoint <= 1) return ' (1 trial - variance unknown)';
+          if (candidate.trialRtpStdDev == null) return '';
+          return ` (±${candidate.trialRtpStdDev.toFixed(2)}% std dev, ${candidate.trialRtpMin.toFixed(1)}-${candidate.trialRtpMax.toFixed(1)}% range)`;
+        };
+
+        // `r` (Phase 1/'scatter') or `r.attempted` (Phase 2/'shape') is what THIS iteration's
+        // own work actually just tried - for 'scatter', gradientDescent1D always reports a
+        // freshly-measured candidate every iteration, so `r` itself already is that. For
+        // 'shape', `r` is nelderMead's `vertices[0]` - the simplex's best *entering* this
+        // iteration, which stays unchanged across a run of iterations that each try something
+        // new but fail to beat it; `r.attempted` is the thing actually tried (see nelderMead's
+        // own onProgress doc), `null` only when nothing needed trying (already converged).
+        // Showing both `current` (what just happened) and `best` (the running best-ever) side
+        // by side is what makes a "no improvement" streak read as active search instead of a
+        // silent freeze.
+        const current = phase === 'scatter' ? r : r.attempted;
+        const currentLabel = current
+          ? `current: RTP=${current.rtp.toFixed(2)}%${varianceLabelFor(current)}  trigger=${current.triggerRate.toFixed(3)}%  err=${current.error.toFixed(4)}`
+          : `current: (already converged - nothing new to try this step)`;
+
+        // gradientDescent1D's own `best` is shaped `{mult, error, result, trial}` (rtp/
+        // triggerRate/trialRtp* live under `.result`), while nelderMead's is a full vertex
+        // object with them directly on top - normalized here so this one line works for both
+        // phases.
+        const bestCandidate = best.result ?? best;
+        const bestLabel = `best: RTP=${bestCandidate.rtp.toFixed(2)}%${varianceLabelFor(bestCandidate)}  trigger=${bestCandidate.triggerRate.toFixed(3)}%  err=${best.error.toFixed(4)}`;
+
+        appendLog(`[${label}]${multLabel}  ${currentLabel}  |  ${bestLabel}`);
         // Only Phase 2 ('shape') carries a full live candidate reel table (r.trial) - Phase 1
         // ('scatter') only ever scales trigger symbols, which are excluded from Phase 2's
         // search entirely, so every value symbol's frequency is still exactly its baseline
         // value during Phase 1 anyway; nothing to update yet.
         if (phase === 'shape' && r.trial) {
-          updateLiveTable(r.trial);
+          // r.attempted.trial (see nelderMead's own onProgress doc) is the candidate THIS
+          // step's own reflect/expand/contract/shrink actually produced - falls back to r.trial
+          // (the simplex's best entering this step) only when nothing needed trying (already
+          // converged). best.trial is the overall best-ever candidate found so far - same
+          // current/best distinction as the log line above, now shown per symbol too.
+          const currentTrial = r.attempted?.trial ?? r.trial;
+          updateLiveTable(currentTrial, best.trial);
         }
       }
     );
+
+    // Every reported RTP carries its own measurement uncertainty ALONGSIDE it, always - never
+    // a bare percentage on its own. A number like "96.02%" reads as precise and trustworthy by
+    // itself even when it's actually the average of trials that individually swung between,
+    // say, 20% and 190% - showing the std dev (and raw trial range) right next to it, every
+    // time, is what makes that impossible to miss. `finalStdDev == null` only when trialsPerPoint
+    // is 1 - no repeat measurement was ever taken, so there's genuinely no variance to report,
+    // said explicitly rather than omitted (omitting it would read as "no problem", not
+    // "unknown").
+    const finalTrialMin = diagnostics.rtpPhase?.trialRtpMin;
+    const finalTrialMax = diagnostics.rtpPhase?.trialRtpMax;
+    const finalStdDev = diagnostics.rtpPhase?.trialRtpStdDev;
+    const finalStdError = diagnostics.rtpPhase?.trialRtpStdError;
+    const hasVarianceData = options.trialsPerPoint > 1 && finalStdDev != null;
+    const isUnreliable = hasVarianceData && finalStdError > options.maxRtpStdError;
+    const varianceText = options.trialsPerPoint <= 1
+      ? ' (1 trial - variance unknown)'
+      : (hasVarianceData ? ` (±${finalStdDev.toFixed(2)}% std dev, ${finalTrialMin.toFixed(1)}-${finalTrialMax.toFixed(1)}% range)` : '');
 
     const rtpConverged = !!diagnostics.rtpPhase?.converged;
     const scatterConverged = diagnostics.scatterPhase == null || !!diagnostics.scatterPhase.converged;
     appendLog(
       rtpConverged && scatterConverged
-        ? `Done. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%`
-        : `⚠ Did NOT converge. Final RTP=${rtp.toFixed(2)}%  trigger=${triggerRatePct.toFixed(3)}%  (this is the closest attempt found, not a successful tune)`
+        ? `Done. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%`
+        : `⚠ Did NOT converge. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%  (this is the closest attempt found, not a successful tune)`
     );
     console.log('Frequency tuner diagnostics:', diagnostics);
 
-    let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+    // Colored inline with the headline number itself (green/low-contrast when trustworthy, red
+    // when it exceeds Max RTP Std Error, gray when unknown) rather than only in a separate
+    // banner further down - the point is that the variance figure travels WITH the RTP number
+    // everywhere it's shown, not just in one dedicated spot a reader might skip past.
+    const varianceColor = options.trialsPerPoint <= 1 ? '#888' : (isUnreliable ? '#ff8080' : '#7fd97f');
+    let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong><span style="color: ${varianceColor};">${varianceText}</span> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+
+    // Flags a measurement that's plausible-looking but not actually trustworthy - a
+    // high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly,
+    // producing rare huge wins) can report a "converged" RTP that's really just whichever way
+    // that particular trialsPerPoint sample happened to land, not a reliable read of what the
+    // frequencies pay out over a much larger run (this is exactly what a real re-run of RUN
+    // SIMULATION would then contradict). Independent of `reason` above - `reason` already
+    // factors Max RTP Std Error into whether a candidate counts as 'converged' at all (see
+    // tuneFrequencies' own `maxRtpStdError` doc), but this banner spells out WHY (the headline
+    // above already carries the actual std dev/range figures) rather than leaving
+    // "stalled"/"exhausted" unexplained.
+    if (hasVarianceData) {
+      html += isUnreliable
+        ? `<p style="font-size: 0.8em; color: #ff8080; background: rgba(255,90,90,0.12); padding: 8px; border-radius: 6px; margin-bottom: 10px;">
+             <strong>⚠ High measurement variance</strong> (standard error <strong>${finalStdError.toFixed(2)}%</strong>, above the Max RTP Std Error
+             setting of ${options.maxRtpStdError}%) - the ${rtp.toFixed(2)}% reported above may just be a lucky/unlucky sample, not a trustworthy
+             estimate (this is exactly why it wasn't accepted as a genuine "converged" hit above, regardless of how close the average landed to
+             Target RTP). Raise Trial Spins and/or Trials Per Point (now parallelized across a Worker pool, so this is far cheaper than it used to
+             be), or raise Max RTP Std Error if this much uncertainty is actually acceptable for this game, and re-tune.
+           </p>`
+        : `<p style="font-size: 0.75em; color: #888; margin: 0 0 10px;">Standard error ${finalStdError.toFixed(2)}%, within the Max RTP Std Error setting of ${options.maxRtpStdError}% - a reasonably trustworthy measurement.</p>`;
+    }
 
     // Only shown when the user actually asked for uniformity to be enforced - it's a soft
     // steer, never a pass/fail state, so this is informational only (see uniformityPenaltyWeight's
@@ -854,14 +994,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
       html += `</tbody></table></div>`;
     });
     html += `</div>`;
-    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by replacing FREQUENCY_REEL1/2/3 in game.js and reloading, so REEL_STRIPS regenerates from the new weights. Or keep refining it right here without leaving the panel:</p>`;
-
-    html += `<div style="margin: 8px 0 12px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-                <button id="tune-continue-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.8em;">CONTINUE TUNING FROM THIS RESULT</button>
-                ${reelFrequencyTables !== originalReelFrequencyTables
-                  ? `<button id="tune-reset-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.8em; opacity: 0.75;">RESET TO ORIGINAL BASELINE</button>`
-                  : ''}
-              </div>`;
+    html += `<p style="font-size: 0.75em; color: #888; margin-top: 10px;">This is a suggestion only - apply it by replacing FREQUENCY_REEL1/2/3 in game.js and reloading, so REEL_STRIPS regenerates from the new weights. Or keep refining it right here without leaving the panel, using the buttons up top:</p>`;
 
     html += `<div style="margin-top: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -873,20 +1006,43 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
 
     resultsEl.innerHTML = html;
 
+    // CONTINUE TUNING / RESET live on #tune-action-row (next to START TUNING, set up once in
+    // openTuneFrequenciesPanel) rather than inside #tune-results itself, so they sit on the same
+    // line as the button that kicked this run off instead of appearing far below a page of
+    // results - built as real elements (not embedded in the `html` string above) since this row
+    // persists across runs and needs its previous run's buttons cleared out first.
+    const actionRow = tuneContainer.querySelector('#tune-action-row');
+    actionRow.querySelectorAll('.tune-result-action').forEach(el => el.remove());
+
     // Re-runs startTuning with this result as the new baseline (whatever's currently in the
     // form - Target RTP, Trial Spins, etc. - carries over untouched, since none of that is
     // rebuilt here) - lets the user iteratively refine across multiple runs without leaving
     // the panel to copy-paste back into game.js and reload each time.
-    resultsEl.querySelector('#tune-continue-btn').addEventListener('click', () => {
-      startTuning({ paytable, reelFrequencyTables: tunedReelTables, tuneConfig, tuneContainer, originalReelFrequencyTables });
+    const continueBtn = document.createElement('button');
+    continueBtn.id = 'tune-continue-btn';
+    continueBtn.className = 'btn-icon btn-sim-btn tune-result-action';
+    continueBtn.style.cssText = 'padding: 6px 14px; font-size: 0.8em;';
+    continueBtn.textContent = 'CONTINUE TUNING FROM THIS RESULT';
+    continueBtn.addEventListener('click', () => {
+      startTuning({
+        paytable, reelFrequencyTables: tunedReelTables, tuneConfig, tuneContainer, originalReelFrequencyTables,
+        continuedFrom: { rtp, varianceText, triggerRatePct },
+      });
     });
-    // Only rendered once a run has actually diverged from the original baseline (see the html
-    // build above) - lets the user back out of a chain of continued runs without reloading.
-    const resetBtn = resultsEl.querySelector('#tune-reset-btn');
-    if (resetBtn) {
+    actionRow.appendChild(continueBtn);
+
+    // Only rendered once a run has actually diverged from the original baseline - lets the user
+    // back out of a chain of continued runs without reloading.
+    if (reelFrequencyTables !== originalReelFrequencyTables) {
+      const resetBtn = document.createElement('button');
+      resetBtn.id = 'tune-reset-btn';
+      resetBtn.className = 'btn-icon btn-sim-btn tune-result-action';
+      resetBtn.style.cssText = 'padding: 6px 14px; font-size: 0.8em; opacity: 0.75;';
+      resetBtn.textContent = 'RESET TO ORIGINAL BASELINE';
       resetBtn.addEventListener('click', () => {
         startTuning({ paytable, reelFrequencyTables: originalReelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables });
       });
+      actionRow.appendChild(resetBtn);
     }
 
     const paytableOutput = resultsEl.querySelector('#tune-paytable-output');

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, nelderMead, tuneFrequencies } from '../core/SpinSimulator.js';
+import { gradientDescent1D, nelderMead, tuneFrequencies, simulateSpins } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -299,6 +299,111 @@ test('tuneFrequencies diagnostics.rtpPhase reports fixedSymbols and a sane rtpRa
   const { min, max } = diagnostics.rtpPhase.rtpRange;
   assert.ok(min <= max, `expected rtpRange.min (${min}) <= rtpRange.max (${max})`);
   assert.ok(min <= rtp && rtp <= max, `expected achieved RTP ${rtp} within explored range [${min}, ${max}]`);
+});
+
+test('tuneFrequencies diagnostics.rtpPhase.trialRtpMin/Max collapse to a single value when trialsPerPoint is 1', async () => {
+  // No repeat measurement is ever taken with trialsPerPoint: 1, so there's no variance
+  // information to report - min/max both equal the one trial's own RTP, which itself equals
+  // the (only) measured rtp for the final candidate.
+  const { rtp, diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 10,
+  });
+  const { trialRtpMin, trialRtpMax } = diagnostics.rtpPhase;
+  assert.equal(trialRtpMin, trialRtpMax, 'expected no spread whatsoever with only one trial per point');
+  assert.equal(trialRtpMin, rtp, "expected the lone trial's RTP to equal the reported rtp exactly");
+});
+
+test('tuneFrequencies diagnostics.rtpPhase.trialRtpMin/Max report the final candidate\'s own trial-to-trial spread when trialsPerPoint > 1', async () => {
+  // A synthetic high-variance runTrial (alternates between a very low and very high RTP every
+  // other call) stands in for a real high-variance mechanic (e.g. a cascade bonus whose
+  // multiplier can stack) - this isolates the reporting plumbing from real Monte Carlo noise,
+  // which could randomly happen to produce a near-zero spread and make the assertion flaky.
+  let callCount = 0;
+  const runTrial = async () => {
+    callCount++;
+    const rtpRaw = (callCount % 2 === 0) ? 1.90 : 0.10; // alternates ~10% and ~190% RTP
+    return { rtpRaw, freeSpinsTriggered: 1, baseSpins: 1000 };
+  };
+  const { diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 1000, trialsPerPoint: 4, maxIterations: 3, runTrial,
+  });
+  const { trialRtpMin, trialRtpMax, rtp } = diagnostics.rtpPhase;
+  assert.ok(trialRtpMin < rtp && rtp < trialRtpMax,
+    `expected the averaged rtp (${rtp}) to sit strictly between trialRtpMin (${trialRtpMin}) and trialRtpMax (${trialRtpMax})`);
+  assert.ok(Math.abs(trialRtpMin - 10) < 0.01, `expected trialRtpMin near 10%, got ${trialRtpMin}`);
+  assert.ok(Math.abs(trialRtpMax - 190) < 0.01, `expected trialRtpMax near 190%, got ${trialRtpMax}`);
+});
+
+test('tuneFrequencies diagnostics.rtpPhase.trialRtpStdDev/trialRtpStdError are computed correctly and 0 when trialsPerPoint is 1', async () => {
+  // A synthetic runTrial with a KNOWN, exact per-trial RTP sequence (0%, 20%, 40%, 60% - not
+  // alternating, so the sample std dev has a hand-checkable closed form) isolates the actual
+  // arithmetic from real Monte Carlo noise entirely.
+  let callCount = 0;
+  const fixedRtps = [0, 0.20, 0.40, 0.60];
+  const runTrial = async () => {
+    const rtpRaw = fixedRtps[callCount % fixedRtps.length];
+    callCount++;
+    return { rtpRaw, freeSpinsTriggered: 1, baseSpins: 1000 };
+  };
+  const { diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 1000, trialsPerPoint: 4, maxIterations: 1, runTrial,
+  });
+  // Mean = 30, sample variance (n-1) = ((30)^2+(10)^2+(10)^2+(30)^2)/3 = 2000/3, stdDev = sqrt(2000/3).
+  const expectedStdDev = Math.sqrt(2000 / 3);
+  const expectedStdError = expectedStdDev / Math.sqrt(4);
+  assert.ok(Math.abs(diagnostics.rtpPhase.trialRtpStdDev - expectedStdDev) < 0.01,
+    `expected trialRtpStdDev ~${expectedStdDev.toFixed(4)}, got ${diagnostics.rtpPhase.trialRtpStdDev}`);
+  assert.ok(Math.abs(diagnostics.rtpPhase.trialRtpStdError - expectedStdError) < 0.01,
+    `expected trialRtpStdError ~${expectedStdError.toFixed(4)}, got ${diagnostics.rtpPhase.trialRtpStdError}`);
+
+  const single = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 6000, trialsPerPoint: 1, maxIterations: 10,
+  });
+  assert.equal(single.diagnostics.rtpPhase.trialRtpStdDev, 0, 'expected 0 (not NaN) std dev with only one trial per point');
+  assert.equal(single.diagnostics.rtpPhase.trialRtpStdError, 0, 'expected 0 (not NaN) std error with only one trial per point');
+});
+
+test('tuneFrequencies options.maxRtpStdError refuses to call an unreliable candidate "converged" even though its average RTP hit target', async () => {
+  // A synthetic runTrial that alternates between two very different RTPs whose AVERAGE lands
+  // almost exactly on target (96%) - without a std-error gate, this would report 'converged' on
+  // a measurement that's really just noise (a real high-variance mechanic's exact failure mode -
+  // see the design doc/session that motivated this option). trialSpins/maxIterations are tiny
+  // for test speed - this only needs to prove the gate fires, not perform a real search.
+  let callCount = 0;
+  const runTrial = async () => {
+    callCount++;
+    const rtpRaw = (callCount % 2 === 0) ? 1.90 : 0.02; // average ~96%, wildly disagreeing trials
+    return { rtpRaw, freeSpinsTriggered: 1, baseSpins: 1000 };
+  };
+  const commonOptions = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 1000, trialsPerPoint: 4, maxIterations: 3, runTrial,
+  };
+
+  const gated = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...commonOptions, maxRtpStdError: 1 });
+  assert.ok(Math.abs(gated.diagnostics.rtpPhase.error) < 3, 'sanity check: the average RTP really is within rtpTolerancePct of target');
+  assert.notEqual(gated.diagnostics.rtpPhase.reason, 'converged',
+    'expected a high-std-error "hit" to NOT be classified as converged when maxRtpStdError gates it');
+  assert.equal(gated.diagnostics.rtpPhase.converged, false, 'expected the top-level converged flag to also reflect the gate');
+
+  // Same exact noisy measurements, but the gate left at its Infinity default - the old
+  // behavior (a lucky-looking average is accepted at face value) must still be reachable for
+  // every caller that never opts into maxRtpStdError. Reason may land on either
+  // 'converged' or 'converged-with-violations' depending on whether this fixture's baseline
+  // reel tables already satisfy the ordering/limit penalties too - either way, rtpOk itself
+  // (the thing maxRtpStdError actually gates) must have been satisfied, unlike the gated run above.
+  const ungated = await tuneFrequencies(PAYTABLE, REEL_TABLES, commonOptions);
+  assert.ok(['converged', 'converged-with-violations'].includes(ungated.diagnostics.rtpPhase.reason),
+    `expected the exact same measurements to still count as an accepted RTP hit when maxRtpStdError is left at its default (off), got ${ungated.diagnostics.rtpPhase.reason}`);
 });
 
 test('tuneFrequencies leaves a symbol untouched on a reel where its own entry sets fixed: true, even if not wild-typed', async () => {
@@ -711,4 +816,109 @@ test('tuneFrequencies fires a "restart" onProgress event when a round stalls, be
       `expected stepSize to grow with each restart, got ${restartEvents.map(e => e.stepSize)}`);
   }
   assert.equal(restartEvents.at(-1).willStopNow, true, 'expected the final restart event to flag that the search is giving up');
+});
+
+// ---- Parallel dispatch (Worker-pool-friendly evaluate/measure/runTrial) ----
+// These prove the actual point of accepting an async evaluate/measure/runTrial - real
+// concurrency, not just "doesn't crash when given a Promise" - by using delayed fake work
+// (setTimeout) as a stand-in for a Worker pool's postMessage round trip, and asserting wall
+// time looks like everything ran together rather than one after another.
+
+test('nelderMead evaluates the initial simplex concurrently when evaluate is async', async () => {
+  const delayMs = 40;
+  const delayedEvaluate = (point) => new Promise(resolve => {
+    setTimeout(() => resolve({ loss: (point[0] - 3) ** 2 + (point[1] + 2) ** 2 }), delayMs);
+  });
+  const startedAt = Date.now();
+  await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: delayedEvaluate,
+    maxIterations: 0, // only the initial 3-vertex simplex gets built - no iterations run
+    onProgress: null,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  const elapsed = Date.now() - startedAt;
+  // Sequential would take ~3 * delayMs (120ms); concurrent should land close to 1 * delayMs.
+  // Generous upper bound (2 * delayMs) to absorb scheduler jitter without weakening the
+  // assertion into meaninglessness.
+  assert.ok(elapsed < delayMs * 2, `expected the 3-vertex initial simplex to evaluate concurrently (~${delayMs}ms), took ${elapsed}ms`);
+});
+
+test('nelderMead evaluates a simplex shrink concurrently when evaluate is async', async () => {
+  const delayMs = 40;
+  // Same flat-plateau setup used by the onBusy shrink tests above - forces every iteration to
+  // fall through to a shrink (reflection/expansion/contraction never land exactly on the origin).
+  const delayedEvaluate = (point) => new Promise(resolve => {
+    setTimeout(() => resolve({ loss: point.every(v => Math.abs(v) < 1e-9) ? 0 : 1000 }), delayMs);
+  });
+  const startedAt = Date.now();
+  await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: delayedEvaluate,
+    maxIterations: 1,
+    convergenceTolerance: 1e-9,
+    onProgress: null,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  const elapsed = Date.now() - startedAt;
+  // One iteration touches: initial simplex (3 concurrent) -> reflect (1) -> contract (1) ->
+  // shrink (3 concurrent) = 4 sequential delayed steps if none of the concurrent batches were
+  // actually parallel, but only ~4 * delayMs even so; the point is each *batch* is well under
+  // its own count * delayMs. Bound generously on the total to avoid coupling this test to the
+  // algorithm's exact step count while still catching a regression back to serial shrink
+  // evaluation (which would cost 3 extra delayMs on top, i.e. ~7 * delayMs total). Bound at 6x
+  // rather than 5x - under system load a handful of extra ms of scheduler jitter shouldn't flip
+  // this test, since the case it actually needs to catch (fully serial, ~7x) is well beyond it.
+  assert.ok(elapsed < delayMs * 6, `expected concurrent vertex evaluation to keep total wall time well under the fully-serial case, took ${elapsed}ms`);
+});
+
+test('tuneFrequencies dispatches a candidate\'s trialsPerPoint trials concurrently via options.runTrial', async () => {
+  const delayMs = 30;
+  let concurrent = 0, maxConcurrent = 0;
+  const runTrial = async (config, numSpins, betPerLine, linesCount, rngSeed) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+    concurrent--;
+    // A trivial deterministic stand-in for a real simulateSpins() trial - this test only cares
+    // about dispatch/aggregation, not simulation accuracy.
+    return { rtpRaw: 0.96, freeSpinsTriggered: 1, baseSpins: 1000 };
+  };
+  await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 1000, trialsPerPoint: 4, maxIterations: 1, runTrial,
+  });
+  // At least the 4 trials of a single candidate should overlap - in practice this is usually
+  // far higher, since nelderMead's initial simplex evaluates every one of its (many, for a
+  // real reel table) vertices concurrently too, each contributing its own 4 concurrent trials -
+  // this only asserts the floor tuneFrequencies' own doc promises, not the exact ceiling,
+  // since the latter is an implementation detail of how many dimensions this fixture happens
+  // to have.
+  assert.ok(maxConcurrent >= 4, `expected at least trialsPerPoint (4) trials in flight at once, saw max ${maxConcurrent}`);
+});
+
+test('tuneFrequencies with options.runTrial produces identical results to its in-process default', async () => {
+  // runTrial here does exactly what measure()'s own in-process fallback does (call
+  // simulateSpins with a seeded rng), just wrapped as an async hop - proving the dispatch
+  // machinery (Promise.all batching, trial-index-ordered summation) doesn't change the answer,
+  // only how it gets computed.
+  const runTrial = async (config, numSpins, betPerLine, linesCount, rngSeed) => {
+    const { createSeededRng } = await import('../core/SlotMath.js');
+    const rng = rngSeed != null ? createSeededRng(rngSeed) : Math.random;
+    const results = simulateSpins(config, numSpins, betPerLine, linesCount, rng);
+    return { rtpRaw: results.rtpRaw, freeSpinsTriggered: results.freeSpinsTriggered, baseSpins: results.baseSpins };
+  };
+  const sharedOptions = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 2, maxIterations: 6, searchSeed: 999,
+  };
+  const withoutPool = await tuneFrequencies(PAYTABLE, REEL_TABLES, sharedOptions);
+  const withPool = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOptions, runTrial });
+  assert.equal(withPool.rtp, withoutPool.rtp, 'expected identical achieved RTP with and without the runTrial pool hook');
+  assert.equal(withPool.triggerRatePct, withoutPool.triggerRatePct);
+  assert.deepEqual(withPool.reelFrequencyTables, withoutPool.reelFrequencyTables);
 });

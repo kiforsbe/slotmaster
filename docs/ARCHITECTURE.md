@@ -448,13 +448,48 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   (trigger-rate scaling, then a joint Nelder-Mead search over per-symbol weights) and every
   tuning knob (`orderingBiasByReel`, `limitPenaltyWeight`, `uniformityPenaltyWeight`,
   `initialWeightStrategy`, `minFrequency`/`maxFrequency`, `fixed`, ...) — that doc is
-  deliberately the canonical reference, not duplicated here.
+  deliberately the canonical reference, not duplicated here. `diagnostics.rtpPhase` also
+  reports `trialRtpMin`/`trialRtpMax` — the final candidate's own RTP spread across its
+  `trialsPerPoint` repeats, distinct from `rtpRange` (the spread across every *different*
+  candidate the search tried). A wide `trialRtpMin`/`trialRtpMax` gap means the reported RTP
+  may just be a lucky sample rather than a trustworthy measurement — a real risk for a
+  high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly, as Candy
+  Frenzy's does) where `trialSpins`/`trialsPerPoint` weren't large enough to average out rare
+  huge wins. `core/SimulationPanel.js`'s tuning panel surfaces this as a warning banner when the
+  spread exceeds twice `rtpTolerancePct`.
 - **`gradientDescent1D`**, **`nelderMead`**, **`computeValueRanks`**, **`renormalizeWeights`**
   — the generic numerical-search machinery `tuneFrequencies` is built from (log-space 1D
   search, an N-dimensional simplex search, symbol-value ranking given a `payoutOf`, and
   budget-preserving reweighting, respectively). None of these are mechanic-specific — this is
   what let cascade tuning reuse the exact same search engine as line-pay tuning, with no
   cascade-aware changes needed to any of the four.
+
+### Parallel tuning (`options.runTrial`)
+
+`tuneFrequencies` used to run every Monte Carlo measurement in-process, one at a time — a
+high-dimensional search (Candy Frenzy: 7 reels × 12 tunable value symbols ≈ 84 dimensions)
+could sit at 100% of a single CPU core for a very long time while every other core idled.
+`measure()`, `gradientDescent1D`, and `nelderMead` now all treat their measurement callback as
+possibly-async (plain synchronous callbacks keep working unchanged — `await` on a non-Promise
+value just resolves it), which unlocks two independent levels of concurrency whenever a caller
+supplies `options.runTrial`:
+
+- **Per candidate**: the `trialsPerPoint` independent repeats `measure()` averages for one
+  candidate (same reel tables, different seeds) are dispatched together via `Promise.all`
+  instead of one at a time.
+- **Per search step**: `nelderMead`'s initial n+1-vertex simplex, and every simplex shrink
+  (also n+1 vertices — the single most expensive step in a high-dimensional search), evaluate
+  all of their vertices concurrently too.
+
+`core/SimulationWorkerPool.js` is the browser-side caller that supplies `runTrial`: it keeps a
+pool of persistent Worker threads (`navigator.hardwareConcurrency - 1`, one core left for the
+UI), each running `core/simulationTrialWorker.js` — a small script that resolves one
+`simulateSpins()` trial per message and replies with just the three numbers `measure()` needs
+(`rtpRaw`/`freeSpinsTriggered`/`baseSpins`), not the full result. `config.mechanic`/
+`winEvaluator`/`freeSpinsMode` cross into a pool Worker by name (`core/mechanicRegistry.js`
+resolves them back to the real objects/functions), the same convention every other
+postMessage-crossing config in this codebase uses. Omitting `runTrial` (the default) runs
+exactly the original in-process sequential loop — every existing caller/test is unaffected.
 
 ## `core/SimulationPanel.js` — browser UI for the simulator
 
@@ -470,17 +505,19 @@ UI — it calls these instead:
   Wins"/"Hits"); omitted, it defaults to the line-pay wording.
 - **`openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneConfig, domRefs })`** —
   opens the tuner UI (target RTP/trigger-rate inputs, per-reel ordering-bias dropdowns,
-  live iteration progress), runs `tuneFrequencies` in a dedicated Worker
-  (`tuneFrequenciesWorker.js`), and renders a diff plus a copy-pasteable result via
+  live iteration progress), runs `tuneFrequencies` on this thread (its own control flow is
+  cheap — see `runTuneFrequenciesWithPool`'s own doc) backed by a pool of Worker threads
+  (`core/SimulationWorkerPool.js`, each running `core/simulationTrialWorker.js`) that every
+  individual Monte Carlo trial is dispatched to via `tuneFrequencies`' `options.runTrial` hook —
+  see "Parallel tuning" below — and renders a diff plus a copy-pasteable result via
   `formatReelFrequencyTablesForCopy`. Never mutates the game's live reel tables itself —
   applying a tuned result means pasting it back into `game.js` and reloading, a deliberate,
   explicit source change rather than a silent runtime patch. `tuneConfig.mechanic`/
   `.freeSpinsMode` (cascade-only) and `.winEvaluatorName` (needed because a cascade
   `winEvaluator` is a per-game closure, not a reusable bare function its own `.name` can
-  identify) cross into the Worker by name, resolved back to real objects on that side of
-  `postMessage` — see `tuneFrequenciesWorker.js`'s own doc for the full "recipe" a cascade game
-  passes (`winEvaluatorName: 'checkClusterWins'` alongside `minClusterSize`/
-  `scatterTriggerCount`).
+  identify) cross into each pool Worker by name, resolved back to real objects via
+  `core/mechanicRegistry.js` on that side of `postMessage` (`winEvaluatorName:
+  'checkClusterWins'` alongside `minClusterSize`/`scatterTriggerCount` for a cascade game).
 - **`formatReelFrequencyTablesForCopy(reelFrequencyTables)`** — renders an array of
   `{ defaults, symbols }` tables back into pasteable `export const FREQUENCY_REELn = {...}`
   source text (4-significant-figure frequencies, so values under 1 don't collapse into each
@@ -646,4 +683,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `97dc0d6`._
+_Docs last synced with the codebase: 2026-07-26, commit `96d27bc`._

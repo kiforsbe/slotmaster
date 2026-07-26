@@ -249,7 +249,10 @@ export function renormalizeWeights(raw, valueBudget) {
  * @param {number} args.tolerance - Stop early once |metric - target| <= tolerance.
  * @param {(param: number) => Object} args.buildTrial - Builds a trial from a parameter value.
  * @param {(measureResult: Object) => number} args.metricOf - Extracts the scalar metric from a measure() result.
- * @param {(trial: Object, rngSeed: number) => Object} args.measure - Measures a trial (seeded, for CRN).
+ * @param {(trial: Object, rngSeed: number) => (Object|Promise<Object>)} args.measure - Measures a
+ *   trial (seeded, for CRN). May return a plain object or a Promise - always awaited, so a
+ *   caller whose measurements run on a Worker pool (real parallelism) and one whose measurements
+ *   run in-process (today's default) both work unchanged.
  * @param {number} args.maxIterations - Number of gradient steps.
  * @param {number} args.seedBase - Base seed for this phase's steps (offset per phase/mode to avoid correlated noise between phases).
  * @param {(i: number, param: number, result: Object & {error: number}, best: Object) => (void|Promise<void>)} [args.onProgress]
@@ -291,7 +294,7 @@ export async function gradientDescent1D({
     const stepSeed = seedBase + i * 7919;
     const param = Math.exp(x);
     const trial = buildTrial(param);
-    const result = measure(trial, stepSeed);
+    const result = await measure(trial, stepSeed);
     const metric = metricOf(result);
     const error = Math.abs(metric - target);
     const resultWithError = { ...result, error };
@@ -331,7 +334,7 @@ export async function gradientDescent1D({
         const xProbe = Math.min(maxX, Math.max(minX, x + sign * epsilon * widen));
         const dx = xProbe - x;
         if (dx === 0) continue;
-        const probeResult = measure(buildTrial(Math.exp(xProbe)), stepSeed);
+        const probeResult = await measure(buildTrial(Math.exp(xProbe)), stepSeed);
         slope = (metricOf(probeResult) - metric) / dx;
         if (slope !== 0) { usedDx = dx; break outer; }
       }
@@ -367,17 +370,35 @@ export async function gradientDescent1D({
  * whole call, so every point (old or new) is evaluated under directly comparable
  * conditions and vertices never need re-evaluating just because time passed.
  *
+ * Every vertex evaluation is awaited, so `evaluate` may be sync or async - a plain in-process
+ * evaluate() works exactly as before, but one backed by a Worker pool (see
+ * core/SimulationWorkerPool.js) gets genuine parallelism for free: the initial n+1-vertex
+ * simplex and every simplex shrink (also n+1 vertices, and the one operation here that
+ * re-evaluates the whole simplex at once) are dispatched together via Promise.all rather than
+ * one at a time, so a pool-backed evaluate() measures every vertex concurrently instead of
+ * queuing them on a single thread. Reflect/expand/contract stay sequential (each depends on
+ * the previous result), but still benefit from whatever parallelism `evaluate` itself does
+ * internally (e.g. averaging several trials per candidate across the pool).
+ *
  * @param {Object} args
  * @param {number[]} args.initialPoint - Starting parameter vector.
  * @param {number} args.initialStepSize - Perturbation used to build the initial simplex
  *   (vertex i = initialPoint with dimension i-1 offset by this amount).
- * @param {(point: number[]) => ({ loss: number, [key: string]: any })} args.evaluate -
- *   Evaluates one point; must return at least `{ loss }` (lower is better). Any extra
- *   fields are carried through onto the vertex object returned via onProgress/result.
+ * @param {(point: number[]) => ({ loss: number, [key: string]: any } | Promise<{ loss: number, [key: string]: any }>)} args.evaluate -
+ *   Evaluates one point; must return (or resolve to) at least `{ loss }` (lower is better).
+ *   Any extra fields are carried through onto the vertex object returned via onProgress/result.
  * @param {number} args.maxIterations
  * @param {number} [args.convergenceTolerance=1e-4] - Stop early once the spread between the
  *   simplex's best and worst loss is at or below this.
- * @param {(iteration: number, point: number[], result: Object, best: Object) => (void|Promise<void>)} [args.onProgress]
+ * @param {(iteration: number, point: number[], result: Object, best: Object, attempted: Object|null) => (void|Promise<void>)} [args.onProgress] -
+ *   `result`/`point` are the simplex's own best vertex (`vertices[0]`) *entering* this
+ *   iteration - since only the worst vertex is normally replaced, this can be unchanged for
+ *   several iterations in a row even though each one genuinely tried something new. `attempted`
+ *   is that new thing: the actual vertex this iteration's reflect/expand/contract produced (or
+ *   the best of a shrink's whole re-evaluated batch), regardless of whether it improved on
+ *   `result`/`best` - `null` only when this iteration had nothing to try (already converged).
+ *   Use `attempted` to show "what was just tried" distinct from "the best found so far", so a
+ *   run of no-improvement iterations reads as active search rather than a frozen repeat.
  * @param {(info: { iteration: number, operation: 'shrink', verticesToEvaluate: number, verticesEvaluated?: number }) => (void|Promise<void>)} [args.onBusy] -
  *   Fired once per iteration, only when reflection, expansion, AND contraction all failed to
  *   improve and the whole simplex is about to shrink - the one operation here that re-evaluates
@@ -405,16 +426,26 @@ export async function nelderMead({
   const n = initialPoint.length;
   const ALPHA = 1, GAMMA = 2, RHO = 0.5, SIGMA = 0.5;
 
-  const evalPoint = (point) => ({ point, ...evaluate(point) });
+  // `evaluate` may be sync or async (see its own caller's doc) - always awaited here so both
+  // work unchanged. Awaiting a plain (non-Promise) value just resolves it on the next
+  // microtask, so this is a no-op behavior change for every existing in-process caller; it's
+  // what lets a caller whose `evaluate` dispatches to a Worker pool get genuine concurrency
+  // out of the Promise.all batches below (initial simplex, shrink) without this function
+  // needing to know or care whether that's happening.
+  const evalPoint = async (point) => ({ point, ...(await evaluate(point)) });
 
   // Initial simplex: vertex 0 = initialPoint, vertex i (1..n) = initialPoint with dimension
-  // i-1 perturbed by initialStepSize - the standard right-angled starting simplex.
-  let vertices = [evalPoint(initialPoint.slice())];
+  // i-1 perturbed by initialStepSize - the standard right-angled starting simplex. All n+1
+  // vertices are independent of each other, so they're dispatched together via Promise.all
+  // rather than one at a time - when `evaluate` is backed by a Worker pool, this lets every
+  // vertex measure concurrently on its own thread instead of queuing behind the others.
+  const initialVertexPoints = [initialPoint.slice()];
   for (let i = 0; i < n; i++) {
     const p = initialPoint.slice();
     p[i] += initialStepSize;
-    vertices.push(evalPoint(p));
+    initialVertexPoints.push(p);
   }
+  let vertices = await Promise.all(initialVertexPoints.map(p => evalPoint(p)));
 
   let best = vertices.reduce((a, b) => (b.loss < a.loss ? b : a));
   let iterations = 0;
@@ -425,60 +456,98 @@ export async function nelderMead({
     vertices.sort((a, b) => a.loss - b.loss);
     if (vertices[0].loss < best.loss) best = vertices[0];
 
-    if (onProgress) await onProgress(iter, vertices[0].point, vertices[0], best);
-    await yieldToEventLoop();
+    // Checked here (before this iteration's own reflect/expand/contract/shrink work), same as
+    // before - but the actual `break` is deferred to after onProgress fires below, so a
+    // converged iteration still gets exactly one onProgress call reporting `attempted: null`
+    // (nothing needed trying) rather than silently skipping it.
+    const alreadyConverged = vertices[n].loss - vertices[0].loss <= convergenceTolerance;
 
-    if (vertices[n].loss - vertices[0].loss <= convergenceTolerance) { converged = true; break; }
+    // The vertex this iteration's own work actually produced (reflected/expanded/contracted, or
+    // the best of a shrink's batch) - distinct from `vertices[0]`/`best` above, which only ever
+    // reflect a *previous* iteration's outcome until the *next* iteration's sort catches up.
+    // Without this, a run of iterations that each try something new but fail to beat the
+    // existing best all log the exact same "best so far" value, indistinguishable from a search
+    // that's doing nothing at all - reporting the raw attempt too (even when it wasn't an
+    // improvement) is what lets a caller show "this is what was just tried" alongside "this is
+    // the best found so far". `null` when this iteration had nothing to try (already converged).
+    let attempted = null;
 
-    const worst = vertices[n];
-    const centroid = new Array(n).fill(0);
-    for (let i = 0; i < n; i++) {
-      vertices[i].point.forEach((x, d) => { centroid[d] += x / n; });
-    }
+    if (!alreadyConverged) {
+      const worst = vertices[n];
+      const centroid = new Array(n).fill(0);
+      for (let i = 0; i < n; i++) {
+        vertices[i].point.forEach((x, d) => { centroid[d] += x / n; });
+      }
 
-    const reflectedPoint = centroid.map((c, d) => c + ALPHA * (c - worst.point[d]));
-    const reflected = evalPoint(reflectedPoint);
+      const reflectedPoint = centroid.map((c, d) => c + ALPHA * (c - worst.point[d]));
+      const reflected = await evalPoint(reflectedPoint);
 
-    if (reflected.loss < vertices[0].loss) {
-      // Better than the current best - try pushing further in the same direction.
-      const expandedPoint = centroid.map((c, d) => c + GAMMA * (reflectedPoint[d] - c));
-      const expanded = evalPoint(expandedPoint);
-      vertices[n] = expanded.loss < reflected.loss ? expanded : reflected;
-    } else if (reflected.loss < vertices[n - 1].loss) {
-      // Better than the second-worst - accept the plain reflection.
-      vertices[n] = reflected;
-    } else {
-      // Reflection didn't help enough - contract toward whichever of {reflected, worst} is
-      // better ("outside" vs "inside" contraction), or shrink the whole simplex toward the
-      // best vertex if even that fails.
-      const useOutside = reflected.loss < worst.loss;
-      const basePoint = useOutside ? reflectedPoint : worst.point;
-      const contractedPoint = centroid.map((c, d) => c + RHO * (basePoint[d] - c));
-      const contracted = evalPoint(contractedPoint);
-      const contractedBetter = useOutside ? contracted.loss <= reflected.loss : contracted.loss < worst.loss;
-      if (contractedBetter) {
-        vertices[n] = contracted;
+      if (reflected.loss < vertices[0].loss) {
+        // Better than the current best - try pushing further in the same direction.
+        const expandedPoint = centroid.map((c, d) => c + GAMMA * (reflectedPoint[d] - c));
+        const expanded = await evalPoint(expandedPoint);
+        attempted = expanded.loss < reflected.loss ? expanded : reflected;
+        vertices[n] = attempted;
+      } else if (reflected.loss < vertices[n - 1].loss) {
+        // Better than the second-worst - accept the plain reflection.
+        attempted = reflected;
+        vertices[n] = reflected;
       } else {
-        if (onBusy) await onBusy({ iteration: iter, operation: 'shrink', verticesToEvaluate: n + 1 });
-        const bestPoint = vertices[0].point;
-        // An explicit loop (not a single .map()) so a shrink that takes a while can report
-        // progress partway through - gated to at most once every `busyReportIntervalMs` of
-        // real time, so a fast shrink (the common case) never gets more than the one "starting"
-        // call above, while a slow one gets an occasional heartbeat instead of silence.
-        const shrunkVertices = new Array(vertices.length);
-        let lastBusyReportTime = Date.now();
-        for (let vi = 0; vi < vertices.length; vi++) {
-          shrunkVertices[vi] = evalPoint(bestPoint.map((b, d) => b + SIGMA * (vertices[vi].point[d] - b)));
-          const isLast = vi === vertices.length - 1;
-          const now = Date.now();
-          if (onBusy && !isLast && now - lastBusyReportTime >= busyReportIntervalMs) {
-            lastBusyReportTime = now;
-            await onBusy({ iteration: iter, operation: 'shrink', verticesToEvaluate: n + 1, verticesEvaluated: vi + 1 });
-          }
+        // Reflection didn't help enough - contract toward whichever of {reflected, worst} is
+        // better ("outside" vs "inside" contraction), or shrink the whole simplex toward the
+        // best vertex if even that fails.
+        const useOutside = reflected.loss < worst.loss;
+        const basePoint = useOutside ? reflectedPoint : worst.point;
+        const contractedPoint = centroid.map((c, d) => c + RHO * (basePoint[d] - c));
+        const contracted = await evalPoint(contractedPoint);
+        const contractedBetter = useOutside ? contracted.loss <= reflected.loss : contracted.loss < worst.loss;
+        if (contractedBetter) {
+          attempted = contracted;
+          vertices[n] = contracted;
+        } else {
+          if (onBusy) await onBusy({ iteration: iter, operation: 'shrink', verticesToEvaluate: n + 1 });
+          const bestPoint = vertices[0].point;
+          // Every shrunk vertex is independent of the others, so all n+1 are dispatched together
+          // via Promise.all rather than one at a time - when `evaluate` is backed by a Worker
+          // pool, this is the single biggest win for a high-dimensional search (e.g. Candy
+          // Frenzy's ~84 tunable dims: an 85-vertex shrink that used to run 85 measurements
+          // back to back on one core now spreads across every available core at once).
+          // Progress is still reported the same way (an occasional heartbeat, gated by
+          // `busyReportIntervalMs`, never one call per vertex) - `completed` counts actual
+          // resolutions as they arrive, not loop position, since vertices can now finish out of
+          // order. The throttle check-and-stamp (`lastBusyReportTime = now`) happens synchronously,
+          // before this vertex's own `await onBusy(...)` - JS never runs two callbacks' synchronous
+          // bodies interleaved, so a second vertex resolving while the first's onBusy call is still
+          // pending sees the already-updated timestamp rather than racing it (deliberately no
+          // "in flight" flag - one was tried and gated a legitimate second report behind the
+          // first's own await, silently dropping it under a zero/near-zero interval).
+          let completed = 0;
+          let lastBusyReportTime = Date.now();
+          const shrinkPromises = vertices.map((v) => {
+            const point = bestPoint.map((b, d) => b + SIGMA * (v.point[d] - b));
+            return evalPoint(point).then(async (result) => {
+              completed++;
+              const isLast = completed === vertices.length;
+              const now = Date.now();
+              if (onBusy && !isLast && now - lastBusyReportTime >= busyReportIntervalMs) {
+                lastBusyReportTime = now;
+                await onBusy({ iteration: iter, operation: 'shrink', verticesToEvaluate: n + 1, verticesEvaluated: completed });
+              }
+              return result;
+            });
+          });
+          vertices = await Promise.all(shrinkPromises);
+          // Representative "what this iteration's work produced" for a shrink, since it
+          // replaces the whole simplex at once rather than a single vertex.
+          attempted = vertices.reduce((a, b) => (b.loss < a.loss ? b : a));
         }
-        vertices = shrunkVertices;
       }
     }
+
+    if (onProgress) await onProgress(iter, vertices[0].point, vertices[0], best, attempted);
+    await yieldToEventLoop();
+
+    if (alreadyConverged) { converged = true; break; }
   }
 
   vertices.sort((a, b) => a.loss - b.loss);
@@ -550,6 +619,24 @@ export async function nelderMead({
  * @param {number} [options.linesCount=10]
  * @param {number} [options.targetRtp=96] - Target RTP as a percent (e.g. 96 for 96%).
  * @param {number} [options.rtpTolerancePct=1.5] - Acceptable +/- band around targetRtp.
+ * @param {number} [options.maxRtpStdError=Infinity] - How large a candidate's own measurement
+ *   uncertainty (its `trialRtpStdError` - the standard error of the mean across its
+ *   `trialsPerPoint` repeats, see measure()'s own comment) is allowed to be before it can count
+ *   as having genuinely hit `rtpTolerancePct`. Landing within tolerance on average means little
+ *   if the individual trials that average was built from disagreed wildly with each other (a
+ *   real risk for a high-variance mechanic, e.g. a cascade bonus whose multiplier can stack
+ *   repeatedly) - such a candidate might just have gotten lucky this run, not actually pay out
+ *   near target over a much larger sample. Gates both the early-accept check
+ *   (`earlyAcceptErrorPct`) and the final 'converged'/'converged-with-violations' reason - a
+ *   candidate whose RTP error is within tolerance but whose `trialRtpStdError` exceeds this is
+ *   treated the same as one that missed the target outright (reason `'stalled'` or
+ *   `'exhausted'`, same as any other unreached target), so the search keeps running (or reports
+ *   honestly that it couldn't get a trustworthy fix) rather than settling on a number that
+ *   looks right by chance. Defaults to `Infinity` (off) - every existing caller/test measures
+ *   with settings where this was never the actual failure mode, so enabling it unconditionally
+ *   would change what "converged" means for them without their asking; raise `trialsPerPoint`/
+ *   `trialSpins` and set this explicitly for a mechanic/game where a Worker-pool-backed
+ *   `runTrial` (see below) makes larger sample sizes cheap enough to afford.
  * @param {number} [options.targetTriggerRatePct=0.6] - Target % of spins that trigger free spins.
  * @param {number} [options.triggerRateTolerancePct=0.15] - Acceptable +/- band around that.
  * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
@@ -656,10 +743,20 @@ export async function nelderMead({
  *   - `'initial'`: fired exactly once, before Phase 1 runs, with `result.trial` set to Phase
  *     2's actual starting reel tables (reflecting `initialWeightStrategy`) - `multiplier` and
  *     `best` are both `null` here, nothing has been measured yet.
- *   - `'scatter'`: one call per Phase 1 iteration, `result` is `{rtp, triggerRate, error}`.
+ *   - `'scatter'`: one call per Phase 1 iteration, `result` is `{rtp, triggerRate, error,
+ *     trialRtpMin, trialRtpMax}` - the last two are that candidate's own RTP spread across its
+ *     `trialsPerPoint` repeats (equal to `rtp` when `trialsPerPoint` is 1), letting a caller
+ *     flag a wide spread as "this number is noisy" rather than presenting it as precise.
  *   - `'shape'`: one call per Phase 2 iteration, after each candidate is measured. `multiplier`
  *     is always `null` here (Phase 2 moves every dimension together each iteration, so there's
- *     no longer one scalar to report per step).
+ *     no longer one scalar to report per step). `result` (the simplex's own best vertex
+ *     entering this iteration) additionally carries `result.attempted` - the vertex this
+ *     specific iteration's own reflect/expand/contract/shrink actually produced (same shape as
+ *     `result`/`best` themselves, or `null` if this iteration had nothing to try because the
+ *     simplex had already converged) - see `nelderMead`'s own `onProgress` doc for why this
+ *     matters: without it, several iterations in a row that each genuinely try something new
+ *     but fail to beat the existing best all report the identical unchanged `result`/`best`,
+ *     indistinguishable from a search doing nothing at all.
  *   - `'restart'`: fired whenever a stalled round triggers a restart, with `result` set to
  *     `{stepSize, restarts, stallStreak, maxStallRestarts, willStopNow}` - `multiplier` is
  *     `null`; `best` is the best vertex found so far. Without this, a stall/restart is
@@ -684,6 +781,20 @@ export async function nelderMead({
  * @param {number} [options.busyReportIntervalMs=300] - Minimum real time between successive
  *   'busy' progress updates within the same shrink/widen-probe - see above. Passed straight
  *   through to `gradientDescent1D`/`nelderMead`.
+ * @param {(config: Object, numSpins: number, betPerLine: number, linesCount: number, rngSeed: number|null) => Promise<{ rtpRaw: number, freeSpinsTriggered: number, baseSpins: number }>} [options.runTrial] -
+ *   Optional hook letting each Monte Carlo trial run on a separate thread (e.g. a pool of
+ *   Workers - see core/SimulationWorkerPool.js) instead of in-process on whichever thread
+ *   `tuneFrequencies` itself is running on. `config` is the same shape `measure()` would
+ *   otherwise pass straight to `simulateSpins` (reelStrips already built, mechanic/winEvaluator/
+ *   freeSpinsMode included as real objects - a caller crossing a postMessage boundary needs to
+ *   convert those to names itself, the same way the existing tuning UI already does for its
+ *   other options). When supplied: (1) the `trialsPerPoint` independent repeats `measure()`
+ *   averages per candidate are dispatched together via Promise.all instead of one at a time,
+ *   and (2) `nelderMead`'s initial simplex and every simplex shrink evaluate all of their
+ *   vertices concurrently too (see its own doc) - together, the two biggest sources of "many
+ *   sequential measurements on one CPU core" for a high-dimensional search (e.g. Candy Frenzy's
+ *   ~84 tunable dims). Omitted (the default), every existing caller/test keeps running exactly
+ *   today's in-process sequential loop - fully backward compatible.
  * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
 export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
@@ -710,6 +821,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     scatterSymbol = null,
     targetRtp = 96,
     rtpTolerancePct = 1.5,
+    maxRtpStdError = Infinity,
     targetTriggerRatePct = 0.6,
     triggerRateTolerancePct = 0.15,
     trialSpins = 800000,
@@ -735,6 +847,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     initialWeightStrategy = 'provided',
     busyReportIntervalMs = 300,
     onProgress = null,
+    runTrial = null,
   } = options;
 
   const orderingBiasFor = (r) => (orderingBiasByReel && orderingBiasByReel[r] != null) ? orderingBiasByReel[r] : -1;
@@ -765,21 +878,74 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // derived seed, but that derived seed is identical across different candidate measurements
   // for the same trial index and rngSeed - the common-random-numbers property gradientDescent1D's
   // finite difference relies on.
-  function measure(reelTables, rngSeed) {
+  //
+  // The `trialsPerPoint` repeats measured for one candidate are fully independent of each
+  // other (same reel tables, different seeds) - when `runTrial` is supplied (see its own doc
+  // above `tuneFrequencies`), they're dispatched together via Promise.all instead of one at a
+  // time, so a Worker-pool-backed `runTrial` measures all of them concurrently. Without
+  // `runTrial` (the default - every existing caller/test), this falls back to today's exact
+  // in-process sequential loop; summation always proceeds in trial-index order regardless of
+  // which trial's promise settles first (Promise.all preserves input order), so the result is
+  // bit-for-bit identical to the sequential loop either way.
+  // Also tracks each individual trial's own RTP (trialRtpMin/trialRtpMax), not just their
+  // average - a high-variance mechanic (e.g. a cascade bonus whose multiplier stacks
+  // repeatedly, producing a fat-tailed win distribution) can average out to a plausible-looking
+  // number while individual trials still swing wildly - one lucky trialsPerPoint sample can
+  // report a "converged" RTP that's really just noise, not a reliable measurement of what the
+  // frequencies actually pay out over a much larger run. Surfacing the per-trial spread (not
+  // just the mean) is what lets a caller (see SimulationPanel.js's live log/summary) tell "this
+  // number is trustworthy" apart from "this number got lucky" - trialsPerPoint: 1 collapses
+  // trialRtpMin/trialRtpMax to the same single value, which correctly signals "no repeat
+  // measurement was taken, so no variance information is available."
+  async function measure(reelTables, rngSeed) {
     const reelStrips = buildReelStrips(reelTables);
     const config = {
       reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
       freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
       mechanic, freeSpinsMode,
     };
-    let rtpSum = 0, triggerSum = 0;
-    for (let i = 0; i < trialsPerPoint; i++) {
-      const rng = rngSeed != null ? createSeededRng(rngSeed + i * 104729) : Math.random;
-      const results = simulateSpins(config, trialSpins, betPerLine, linesCount, rng);
-      rtpSum += results.rtpRaw * 100;
-      triggerSum += (results.freeSpinsTriggered / results.baseSpins) * 100;
+    let triggerSum = 0;
+    const trialRtps = [];
+    if (runTrial) {
+      const trialResults = await Promise.all(Array.from({ length: trialsPerPoint }, (_, i) => {
+        const seed = rngSeed != null ? rngSeed + i * 104729 : null;
+        return runTrial(config, trialSpins, betPerLine, linesCount, seed);
+      }));
+      trialResults.forEach(r => {
+        triggerSum += (r.freeSpinsTriggered / r.baseSpins) * 100;
+        trialRtps.push(r.rtpRaw * 100);
+      });
+    } else {
+      for (let i = 0; i < trialsPerPoint; i++) {
+        const rng = rngSeed != null ? createSeededRng(rngSeed + i * 104729) : Math.random;
+        const results = simulateSpins(config, trialSpins, betPerLine, linesCount, rng);
+        triggerSum += (results.freeSpinsTriggered / results.baseSpins) * 100;
+        trialRtps.push(results.rtpRaw * 100);
+      }
     }
-    return { rtp: rtpSum / trialsPerPoint, triggerRate: triggerSum / trialsPerPoint };
+    const rtp = trialRtps.reduce((a, b) => a + b, 0) / trialsPerPoint;
+    // Sample standard deviation (n-1 denominator) of the individual trials' own RTP - only
+    // meaningful with more than one trial; a single trial has no variance to observe from, so
+    // it's reported as 0 (not NaN) - same "no variance information available" signal as
+    // trialRtpMin === trialRtpMax already gives.
+    const trialRtpStdDev = trialRtps.length > 1
+      ? Math.sqrt(trialRtps.reduce((sum, v) => sum + (v - rtp) ** 2, 0) / (trialRtps.length - 1))
+      : 0;
+    // Standard error of the MEAN (stdDev / sqrt(n)) - how much the reported `rtp` above (an
+    // average, not a single trial) is expected to vary from the true underlying RTP if this
+    // exact measurement were repeated. Unlike trialRtpStdDev itself, this shrinks as
+    // trialsPerPoint grows - the whole point of averaging more trials - so it's what
+    // `maxRtpStdError` (see tuneFrequencies' own doc) actually gates acceptability on, not the
+    // raw per-trial spread.
+    const trialRtpStdError = trialRtpStdDev / Math.sqrt(trialsPerPoint);
+    return {
+      rtp,
+      triggerRate: triggerSum / trialsPerPoint,
+      trialRtpMin: Math.min(...trialRtps),
+      trialRtpMax: Math.max(...trialRtps),
+      trialRtpStdDev,
+      trialRtpStdError,
+    };
   }
 
   // ---- Early preview: report Phase 2's chosen starting point immediately, before Phase 1 runs ----
@@ -1108,9 +1274,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     let rtpMin = Infinity, rtpMax = -Infinity;
 
     function makeEvaluate(nmSeed) {
-      return function evaluate(x) {
+      return async function evaluate(x) {
         const reelTables = projectPoint(x);
-        const measured = measure(reelTables, nmSeed);
+        const measured = await measure(reelTables, nmSeed);
         const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
         const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
         const uniformityPenalty = uniformityPenaltyOf(reelTables);
@@ -1121,6 +1287,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
           loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty,
           rtp: measured.rtp,
           triggerRate: measured.triggerRate,
+          trialRtpMin: measured.trialRtpMin,
+          trialRtpMax: measured.trialRtpMax,
+          trialRtpStdDev: measured.trialRtpStdDev,
+          trialRtpStdError: measured.trialRtpStdError,
           error,
           orderingPenalty: orderPenalty,
           limitPenalty: boundsPenalty,
@@ -1138,6 +1308,14 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     function improved(newValue, prevBest) {
       if (prevBest <= 0) return false; // already at zero - nothing left to improve
       return (prevBest - newValue) > prevBest * 0.02;
+    }
+
+    // A candidate's RTP only counts as trustworthy if its own measurement uncertainty
+    // (trialRtpStdError - see measure()'s own comment) is small enough per maxRtpStdError -
+    // see that option's own doc for why landing within rtpTolerancePct on average isn't enough
+    // on its own. Always true when maxRtpStdError is left at its Infinity default.
+    function reliable(candidate) {
+      return (candidate.trialRtpStdError ?? 0) <= maxRtpStdError;
     }
 
     // Phase 2 runs nelderMead() in rounds of `stallWindowIterations` iterations rather than
@@ -1171,8 +1349,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         initialStepSize: stepSize,
         evaluate: makeEvaluate(nmSeed),
         maxIterations: roundIterations,
+        // `attempted` (nelderMead's own doc) is folded into `result` rather than added as a 6th
+        // positional argument here, so tuneFrequencies' own onProgress signature stays the
+        // fixed `(phase, iteration, multiplier, result, best)` shape documented above for every
+        // phase - a caller that doesn't know about `attempted` yet just never looks at it.
         onProgress: onProgress
-          ? (i, pt, result, roundBest) => onProgress('shape', roundStartIterations + i, null, result, roundBest)
+          ? (i, pt, result, roundBest, attempted) => onProgress('shape', roundStartIterations + i, null, { ...result, attempted }, roundBest)
           : null,
         onBusy: onProgress
           ? (info) => onProgress('busy', roundStartIterations + info.iteration, null, { ...info, sourcePhase: 'shape' }, null)
@@ -1199,7 +1381,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         uniformity: improved(bestUniformityPenalty, prevBestUniformity),
       };
 
-      const fullyResolved = best.error <= earlyAcceptErrorPct && bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
+      const fullyResolved = best.error <= earlyAcceptErrorPct && bestOrderingPenalty <= 0 && bestLimitPenalty <= 0 && reliable(best);
       if (fullyResolved) break;
 
       if (stillImproving.rtp || stillImproving.ordering || stillImproving.limits || stillImproving.uniformity) {
@@ -1227,7 +1409,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
     currentReelTables = best.trial;
     const reason = (() => {
-      const rtpOk = best.error <= rtpTolerancePct;
+      const rtpOk = best.error <= rtpTolerancePct && reliable(best);
       const violationsOk = bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
       if (rtpOk && violationsOk) return 'converged';
       if (rtpOk) return 'converged-with-violations';
@@ -1251,8 +1433,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
   const finalReelTables = currentReelTables;
   const finalResult = rtpPhaseResult
-    ? { rtp: rtpPhaseResult.rtp, triggerRate: rtpPhaseResult.triggerRate }
-    : measure(finalReelTables);
+    ? {
+        rtp: rtpPhaseResult.rtp, triggerRate: rtpPhaseResult.triggerRate,
+        trialRtpMin: rtpPhaseResult.trialRtpMin, trialRtpMax: rtpPhaseResult.trialRtpMax,
+        trialRtpStdDev: rtpPhaseResult.trialRtpStdDev, trialRtpStdError: rtpPhaseResult.trialRtpStdError,
+      }
+    : await measure(finalReelTables);
 
   return {
     reelFrequencyTables: finalReelTables,
@@ -1262,13 +1448,29 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
       rtpPhase: rtpPhaseResult ? {
         error: rtpPhaseResult.error,
-        converged: rtpPhaseResult.error <= rtpTolerancePct,
+        converged: rtpPhaseResult.error <= rtpTolerancePct && (rtpPhaseResult.trialRtpStdError ?? 0) <= maxRtpStdError,
         reason: rtpPhaseResult.reason,
         rtp: rtpPhaseResult.rtp,
         triggerRate: rtpPhaseResult.triggerRate,
+        // The final/best candidate's own trialsPerPoint spread (NOT the same thing as
+        // rtpRange below) - how much its individual repeat measurements disagreed with each
+        // other. A wide spread here means the reported `rtp` above may just be a lucky sample
+        // for a high-variance mechanic, not a trustworthy estimate - see trialsPerPoint's own
+        // doc and measure()'s own comment for why this matters. Collapses to a single value
+        // (trialRtpMin === trialRtpMax, trialRtpStdDev/trialRtpStdError both 0) when
+        // trialsPerPoint is 1 - no repeat was ever taken, so no variance information exists to
+        // report. `trialRtpStdError` (not the raw `trialRtpStdDev`) is what `maxRtpStdError`
+        // gates `converged` above on - see that option's own doc for why.
+        trialRtpMin: rtpPhaseResult.trialRtpMin,
+        trialRtpMax: rtpPhaseResult.trialRtpMax,
+        trialRtpStdDev: rtpPhaseResult.trialRtpStdDev,
+        trialRtpStdError: rtpPhaseResult.trialRtpStdError,
         iterationsRun: rtpPhaseResult.iterations,
         iterationsBudget: maxIterations,
         restarts: rtpPhaseResult.restarts,
+        // The spread of averaged-per-candidate RTP across every DIFFERENT candidate the search
+        // explored - shows how much ground the search covered, not measurement noise for any
+        // one candidate (that's trialRtpMin/trialRtpMax above).
         rtpRange: rtpPhaseResult.rtpRange,
         orderingViolations: rtpPhaseResult.orderingViolations,
         orderingPenaltyRemaining: rtpPhaseResult.orderingPenaltyRemaining,
