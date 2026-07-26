@@ -884,6 +884,69 @@ test('tuneFrequencies options.stdErrorPenaltyWeight defaults to 0 (off), matchin
   assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
 });
 
+// ---- Phase 0b: structural headroom, and the payout-value solve ----
+
+test('diagnostics.structuralHeadroom reports what an EVEN symbol distribution pays', async () => {
+  const { diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0,
+  });
+  const h = diagnostics.structuralHeadroom;
+  assert.ok(h, 'headroom must be reported by default - a dev who never asks is the one who needs it');
+  assert.ok(h.uniformRtp > 0, `expected a real uniform-frequency RTP, got ${h.uniformRtp}`);
+  assert.equal(h.targetRtp, 96);
+  // shortfallFactor is how many times short of target an even distribution falls - i.e. how much
+  // skew the frequency search is being asked to invent.
+  assert.ok(Math.abs(h.shortfallFactor - 96 / h.uniformRtp) < 1e-9);
+});
+
+test('measureHeadroom: false skips the extra measurement entirely', async () => {
+  const { diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0,
+    measureHeadroom: false,
+  });
+  assert.equal(diagnostics.structuralHeadroom, null);
+});
+
+test('solvePayoutScale returns a scaled paytable that lands on targetRtp, without mutating the input', async () => {
+  const before = JSON.parse(JSON.stringify(PAYTABLE));
+  const { scaledPaytable, diagnostics, rtp } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 20000, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0,
+    solvePayoutScale: true,
+  });
+  assert.deepEqual(PAYTABLE, before, 'the caller\'s paytable must never be mutated');
+  assert.ok(scaledPaytable, 'a scaled paytable must be returned when solvePayoutScale is on');
+
+  const ps = diagnostics.payoutScale;
+  assert.ok(Math.abs(ps.scale - 96 / ps.rtpBeforeScaling) < 1e-9, 'scale must be the closed-form targetRtp / measuredRtp');
+  // Every payout entry must be scaled by exactly that factor.
+  const sym = Object.keys(PAYTABLE).find(s => Array.isArray(PAYTABLE[s].payout) && PAYTABLE[s].payout.some(v => v > 0));
+  const i = PAYTABLE[sym].payout.findIndex(v => v > 0);
+  assert.ok(Math.abs(scaledPaytable[sym].payout[i] - PAYTABLE[sym].payout[i] * ps.scale) < 1e-9);
+  // RTP is exactly linear in payout scale, so the verification run must land on target. A loose
+  // band absorbs Monte Carlo noise only - a systematic miss here means linearity broke.
+  assert.equal(ps.verified, true,
+    `expected verification to succeed for a config-reading evaluator; note was: ${ps.verificationNote}`);
+  assert.ok(Math.abs(ps.verifiedRtp - 96) < 8,
+    `expected the scaled paytable to measure near 96%, got ${ps.verifiedRtp} (scale ${ps.scale}, from ${ps.rtpBeforeScaling})`);
+  assert.ok(rtp > 0);
+});
+
+test('solvePayoutScale is off by default - no scaled paytable, no extra measurement', async () => {
+  const { scaledPaytable, diagnostics } = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 0, initialStepSize: 0,
+  });
+  assert.equal(scaledPaytable, null);
+  assert.equal(diagnostics.payoutScale, null);
+});
+
 // ---- Phase 0: reel-constraint feasibility ----
 
 test('diagnostics.reelFeasibility flags a symbol whose minGap cannot be honored at this reel length', async () => {

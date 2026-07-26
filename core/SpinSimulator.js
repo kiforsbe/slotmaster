@@ -1116,6 +1116,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePenaltyWeight = 0,
     maxTriggerRefineSteps = 12,
     spacingPenaltyWeight = 0,
+    measureHeadroom = true,
+    solvePayoutScale = false,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
     searchAlgorithm = 'nelderMead',
@@ -1200,10 +1202,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // number is trustworthy" apart from "this number got lucky" - trialsPerPoint: 1 collapses
   // trialRtpMin/trialRtpMax to the same single value, which correctly signals "no repeat
   // measurement was taken, so no variance information is available."
-  async function measure(reelTables, rngSeed, lengthOverride) {
+  // `paytableOverride` exists for the payout-value solve, which needs to measure the SAME reels
+  // under a rescaled paytable to verify the scale actually landed on target. Omitted everywhere
+  // else, i.e. unchanged behavior.
+  async function measure(reelTables, rngSeed, lengthOverride, paytableOverride) {
     const reelStrips = buildReelStrips(reelTables, lengthOverride);
     const config = {
-      reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
+      reelsCount, rowsCount, paytable: paytableOverride ?? paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
       freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
       mechanic, freeSpinsMode,
     };
@@ -1368,7 +1373,64 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return infeasible;
   }
 
+  // Every tunable (non-trigger) symbol on a reel set to that reel's own equal share, preserving
+  // the reel's total weight exactly. This is the "no over-abundance at all" reference point, and
+  // it is what the structural checks below measure against - the question they answer is "can a
+  // PERFECTLY EVEN symbol distribution reach the RTP target?", which is precisely the question a
+  // dev is really asking when the tuner keeps producing lopsided reels.
+  function uniformizeTables(tables) {
+    return tables.map(rt => {
+      const clone = JSON.parse(JSON.stringify(rt));
+      const tunable = Object.keys(clone.symbols)
+        .filter(s => !triggerSymbols.includes(s) && clone.symbols[s].frequency > 0 && clone.symbols[s].fixed !== true);
+      if (tunable.length === 0) return clone;
+      const budget = tunable.reduce((sum, s) => sum + clone.symbols[s].frequency, 0);
+      const share = budget / tunable.length;
+      tunable.forEach(s => { clone.symbols[s].frequency = share; });
+      return clone;
+    });
+  }
+
+  // Overrides the reel-level `defaults` that govern how symbols are ARRANGED rather than how
+  // often they appear - the structural knobs (see structuralSearch's own doc).
+  function withStructuralDefaults(tables, params) {
+    return tables.map(rt => ({
+      ...JSON.parse(JSON.stringify(rt)),
+      defaults: { ...(rt.defaults ?? {}), ...params },
+    }));
+  }
+
   const reelFeasibility = checkReelFeasibility(baseReelTables);
+
+  // ---- Phase 0b: structural headroom ----
+  // Measures RTP once with every tunable symbol at its reel's equal share. The gap between that
+  // and `targetRtp` is the single most useful number a dev can have before a tune, because it
+  // says how much the search will be FORCED to skew frequencies to make the target.
+  //
+  // Frequencies are the only thing Phase 2 can move. If an even distribution pays far under
+  // target, the search's only route to the target is concentrating symbols - which is exactly the
+  // "some symbols get an over-abundance" complaint, and it is the optimizer behaving correctly
+  // rather than misbehaving. On a cluster mechanic the usual culprit is not the symbol
+  // frequencies at all but the ARRANGEMENT knobs: measured on Candy Frenzy at uniform
+  // frequencies, `stackChance` 0.10 (shipped) pays 9.7% while 0.50 pays 94.5%, because clusters
+  // form when a vertical run in one column overlaps a run in the next (63-75% of its clusters
+  // span exactly 2 columns), and at 0.10 those runs barely exist.
+  //
+  // One extra measurement, always taken when there is anything to tune, because a dev who never
+  // asks the question is exactly the one who needs the answer.
+  let structuralHeadroom = null;
+  if (measureHeadroom) {
+    const uniformRtp = (await measure(uniformizeTables(baseReelTables), searchSeed + 990001)).rtp;
+    structuralHeadroom = {
+      uniformRtp,
+      targetRtp,
+      // How many times over the target an even distribution falls short (or overshoots). Near 1
+      // means the target is comfortably reachable without skewing anything.
+      shortfallFactor: uniformRtp > 0 ? targetRtp / uniformRtp : Infinity,
+      reachableWithEvenFrequencies: Math.abs(uniformRtp - targetRtp) <= rtpTolerancePct,
+    };
+    if (onProgress) await onProgress('headroom', 0, null, structuralHeadroom, null);
+  }
   if (onProgress && reelFeasibility.length > 0) {
     await onProgress('feasibility', 0, null, { infeasible: reelFeasibility, reelLength }, null);
   }
@@ -2069,6 +2131,58 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       }
     : await measure(finalReelTables);
 
+  // ---- Payout-value solve ----
+  // The one RTP lever that needs no search at all. RTP is EXACTLY proportional to a global scale
+  // on every payout multiplier - verified on Candy Frenzy to 5 significant figures at both
+  // uniform and heavily skewed frequencies (RTP/k constant at 9.791 and 21.754 respectively).
+  // So the scale that lands exactly on target is closed-form: k = targetRtp / measuredRtp.
+  //
+  // This matters architecturally, not just as a shortcut. Frequencies are a poor RTP lever -
+  // they are what the search must torture to hit a target, which is what drives symbols to the
+  // over-abundance that breaks reel spacing and cluster behavior. Payout values ARE an exact RTP
+  // lever. Solving RTP here frees the frequency search to serve what it is actually good at:
+  // ordering, uniformity, spacing and trigger rate.
+  //
+  // Off by default: it rewrites the game's paytable, which is a design artifact a caller must opt
+  // into changing. Returns a scaled COPY as `scaledPaytable` and never mutates the input.
+  let payoutScale = null;
+  if (solvePayoutScale && finalResult.rtp > 0) {
+    const scale = targetRtp / finalResult.rtp;
+    const scaledPaytable = {};
+    Object.keys(paytable).forEach(sym => {
+      const entry = paytable[sym];
+      const scaled = { ...entry };
+      if (Array.isArray(entry.clusterPayout)) {
+        scaled.clusterPayout = entry.clusterPayout.map(tier => ({ ...tier, multiplier: tier.multiplier * scale }));
+      }
+      if (Array.isArray(entry.payout)) {
+        scaled.payout = entry.payout.map(v => (typeof v === 'number' ? v * scale : v));
+      }
+      scaledPaytable[sym] = scaled;
+    });
+    // Verified rather than asserted: linearity held everywhere it was measured, but a mechanic
+    // with any non-multiplicative payout component would break it, and silently shipping a
+    // paytable that misses the target would be worse than reporting the discrepancy.
+    const verified = await measure(finalReelTables, searchSeed + 990002, undefined, scaledPaytable);
+    // The verification run is only meaningful if the win evaluator actually READS the paytable it
+    // was handed. A cascade game's `winEvaluator` is typically a per-game closure that captured
+    // its own paytable (e.g. `(grid) => checkClusterWins(grid, PAYTABLE, ...)`), so overriding
+    // `config.paytable` has no effect on it and the run measures the ORIGINAL payouts. Detected
+    // rather than assumed: if the measurement didn't move to where exact linearity says it must,
+    // the scale is still correct arithmetic but nothing here has confirmed it, and saying so is
+    // the only honest option. Caller's fix is to rebuild the evaluator around `scaledPaytable`.
+    const verificationLandedOnTarget = Math.abs(verified.rtp - targetRtp) <= Math.max(rtpTolerancePct * 3, targetRtp * 0.1);
+    payoutScale = {
+      scale,
+      rtpBeforeScaling: finalResult.rtp,
+      verifiedRtp: verified.rtp,
+      verified: verificationLandedOnTarget,
+      verificationNote: verificationLandedOnTarget ? null
+        : 'Could not verify the scaled paytable: this game\'s winEvaluator captured its own paytable, so the verification run still measured the ORIGINAL payouts. The scale itself is exact (RTP is strictly proportional to payout multipliers) - rebuild the evaluator around `scaledPaytable` to confirm it.',
+      scaledPaytable,
+    };
+  }
+
   // Snapshot of the actually-*resolved* tuning knobs (defaults applied, not just whatever the
   // caller happened to pass explicitly) - lets anything serializing `diagnostics` as JSON (the
   // TUNE FREQUENCIES panel's own `console.log('Frequency tuner diagnostics:', ...)`, a test, a
@@ -2086,15 +2200,28 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
-    initialWeightStrategy, freeSpinsCount, hasExpandingWild,
+    initialWeightStrategy, freeSpinsCount, hasExpandingWild, spacingPenaltyWeight, solvePayoutScale,
   };
 
   return {
     reelFrequencyTables: finalReelTables,
     rtp: finalResult.rtp,
     triggerRatePct: finalResult.triggerRate,
+    // A rescaled COPY of the caller's paytable that lands exactly on targetRtp, present only when
+    // `solvePayoutScale` was requested. The input paytable is never mutated.
+    scaledPaytable: payoutScale?.scaledPaytable ?? null,
     diagnostics: {
       inputParameters,
+      // What an even, no-over-abundance symbol distribution actually pays. `shortfallFactor` is
+      // how many times short of target that is - the amount of skew the frequency search is being
+      // asked to invent. Well above 1 means the over-abundance a tune produces is the optimizer
+      // correctly compensating for a structural setting, not a search defect.
+      structuralHeadroom,
+      // Closed-form payout-value solve, when requested: the exact multiplier applied to every
+      // payout to hit targetRtp, plus a verification measurement under the scaled paytable.
+      payoutScale: payoutScale
+        ? { scale: payoutScale.scale, rtpBeforeScaling: payoutScale.rtpBeforeScaling, verifiedRtp: payoutScale.verifiedRtp, verified: payoutScale.verified, verificationNote: payoutScale.verificationNote }
+        : null,
       // Symbols whose own spacing constraints CANNOT be satisfied at this reel length, checked
       // against the untuned baseline before any search runs. Empty is the healthy case. A
       // non-empty entry means generateReel silently gave up spacing that symbol out (it enforces
