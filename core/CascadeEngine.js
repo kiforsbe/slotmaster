@@ -13,6 +13,10 @@ import { audio } from './SlotAudio.js';
 
 const SPIN_LOG_MAX_ENTRIES = 20000;
 
+// A cleared symbol randomly picks one of these vanish styles (see _applyClearTransform) so a
+// whole cluster popping doesn't look like one uniform stamp repeated across every cell.
+const CLEAR_VARIANTS = ['scaleFade', 'stretch', 'jump', 'spin'];
+
 export class CascadeEngine {
   constructor(canvas, config = {}) {
     this.canvas = canvas;
@@ -70,7 +74,13 @@ export class CascadeEngine {
     this.clearStartTime = 0;
     this.stepStartTime = 0;
     this.currentClearPositions = [];
+    this.currentClearVariants = new Map();
     this._forceScatterNextSpin = false;
+
+    // Floating per-cluster win-amount popups. Kept on their own timeline (not tied to
+    // clearDuration/the state machine) so they can outlive a fast "clearing" phase and
+    // still be readable, even overlapping across rapid-fire cascade steps.
+    this.activePopups = [];
 
     this.particleSystem = new ParticleSystem();
     this.audio = audio;
@@ -141,6 +151,7 @@ export class CascadeEngine {
   update() {
     const now = Date.now();
     this.particleSystem.update();
+    this.activePopups = this.activePopups.filter(p => now - p.startTime < p.duration);
 
     if (this.state === 'dropping_in' || this.state === 'falling') {
       const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
@@ -177,12 +188,41 @@ export class CascadeEngine {
       this.state = 'clearing';
       this.clearStartTime = Date.now();
       this.currentClearPositions = step.clusterWins.flatMap(w => w.winningPositions);
+      // Each cleared symbol gets its own random vanish style, so a whole cluster popping
+      // doesn't look like one uniform stamp - variety over identical repetition.
+      this.currentClearVariants = new Map();
+      this.currentClearPositions.forEach(([col, row]) => {
+        this.currentClearVariants.set(`${col},${row}`, {
+          variant: CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
+          spinDirection: Math.random() < 0.5 ? -1 : 1,
+        });
+      });
       this._spawnClearParticles(this.currentClearPositions);
+      this._spawnClusterWinPopups(step.clusterWins);
       audio.playWin(step.payout);
       this.config.onStateChange(this.state);
     } else {
       this._finishSpin();
     }
+  }
+
+  _spawnClusterWinPopups(clusterWins) {
+    const freeSpinsMultiplier = this.inFreeSpins ? 2 : 1;
+    const now = Date.now();
+    const duration = this.turboMode ? 500 : 1100;
+    clusterWins.forEach(w => {
+      const centroidCol = w.winningPositions.reduce((sum, [c]) => sum + c, 0) / w.winningPositions.length;
+      const centroidRow = w.winningPositions.reduce((sum, [, r]) => sum + r, 0) / w.winningPositions.length;
+      this.activePopups.push({
+        symbol: w.symbol,
+        count: w.count,
+        amount: w.payout * this.betAmount * freeSpinsMultiplier,
+        x: this.reelsX + (centroidCol + 0.5) * this.symbolWidth,
+        y: this.reelsY + (centroidRow + 0.5) * this.symbolHeight,
+        startTime: now,
+        duration,
+      });
+    });
   }
 
   _advanceToNextStep() {
@@ -406,6 +446,7 @@ export class CascadeEngine {
 
     this._renderGridBorders();
     this.renderParticles();
+    this._renderClusterWinPopups();
   }
 
   _renderLoading() {
