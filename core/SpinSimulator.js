@@ -2228,8 +2228,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
-    initialWeightStrategy, freeSpinsCount, hasExpandingWild, spacingPenaltyWeight, solvePayoutScale,
-    rotateSeedPerGeneration,
+    initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
+    rotateSeedPerGeneration, measureHeadroom,
   };
 
   return {

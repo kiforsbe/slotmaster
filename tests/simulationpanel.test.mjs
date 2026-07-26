@@ -22,6 +22,64 @@ test('formatReelFrequencyTablesForCopy preserves distinct small frequencies inst
   assert.match(output, /tut:\s*\{ frequency: 0\.157 \}/);
 });
 
+test('formatReelFrequencyTablesForCopy round-trips stackChance instead of silently dropping it', () => {
+  // stackChance was omitted from the output entirely, so pasting a tuned result back DELETED it.
+  // generateReel then falls back to 1, which takes a different placement path
+  // (_computeClusterSizes rather than _computeStackedPlacements) - measured on Candy Frenzy as
+  // the difference between 9.7% and 94.5% RTP. Same class of silent corruption as the frequency
+  // rounding bug above: the output looked plausible and quietly described a different game.
+  const table = {
+    defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.1, minFrequency: 0.005, maxFrequency: 0.5 },
+    symbols: {
+      candy: { frequency: 0.0961 },
+      bonus: { frequency: 0.0064, minGap: 8, maxStack: 1, minStack: 1, stackChance: 1 },
+    },
+  };
+  const output = formatReelFrequencyTablesForCopy([table]);
+  assert.match(output, /defaults:.*stackChance: 0\.1/, 'reel-level stackChance must survive the round trip');
+  assert.match(output, /bonus:\s*\{[^}]*stackChance: 1/, 'a per-symbol stackChance override must survive too');
+  // Every other field generateReel or the tuner reads must still be there.
+  for (const field of ['minGap: 4', 'maxStack: 4', 'minStack: 2', 'minFrequency: 0.005', 'maxFrequency: 0.5']) {
+    assert.ok(output.includes(field), `expected '${field}' in the output`);
+  }
+});
+
+test('formatReelFrequencyTablesForCopy emits REEL_LENGTH and the settings needed to reproduce the run', () => {
+  // Frequencies alone are not a reproducible artifact - the same numbers against a different reel
+  // length or seed set generate different strips and a different RTP. The copyable output has to
+  // carry the geometry and the seeds, not just the tuned values.
+  const table = { defaults: {}, symbols: { bar: { frequency: 2 } } };
+  const output = formatReelFrequencyTablesForCopy([table], {
+    rtp: 96.02,
+    triggerRatePct: 0.583,
+    inputParameters: {
+      searchSeed: 12345, reelSeeds: [101, 202, 303], reelLength: 750, reelsCount: 3, rowsCount: 3,
+      targetRtp: 96, rtpTolerancePct: 1.5, targetTriggerRatePct: 0.6, triggerRateTolerancePct: 0.15,
+      trialSpins: 300000, trialsPerPoint: 2, searchAlgorithm: 'cmaes', maxIterations: 150,
+      initialWeightStrategy: 'provided', maxRtpStdError: 1,
+      orderingPenaltyWeight: 0.5, limitPenaltyWeight: 0.5, uniformityPenaltyWeight: 0,
+      stdErrorPenaltyWeight: 0, triggerRatePenaltyWeight: 2, spacingPenaltyWeight: 0.25,
+    },
+  });
+  assert.match(output, /export const REEL_LENGTH = 750;/, 'reel length is part of the result and must be emitted as code');
+  assert.match(output, /searchSeed 12345/);
+  assert.match(output, /reelSeeds \[101, 202, 303\]/);
+  assert.match(output, /RTP 96\.02%/);
+  assert.match(output, /trigger 0\.583%/);
+  assert.match(output, /cmaes, max 150 iterations/);
+  assert.match(output, /triggerRate 2/, 'loss weights must be recorded - they change what the result even means');
+  assert.match(output, /spacing 0\.25/);
+  // The tables themselves must still follow the header.
+  assert.match(output, /export const FREQUENCY_REEL1 = \{/);
+});
+
+test('formatReelFrequencyTablesForCopy omits the header entirely when given no context', () => {
+  const table = { defaults: {}, symbols: { bar: { frequency: 2 } } };
+  const output = formatReelFrequencyTablesForCopy([table]);
+  assert.ok(!output.includes('REEL_LENGTH'), 'no reproducibility header without context');
+  assert.ok(output.startsWith('export const FREQUENCY_REEL1'));
+});
+
 test('formatReelFrequencyTablesForCopy still reads cleanly for larger fruitmachine-scale frequencies', () => {
   const table = { defaults: {}, symbols: { bar: { frequency: 25.3 }, clover: { frequency: 8 } } };
   const output = formatReelFrequencyTablesForCopy([table]);

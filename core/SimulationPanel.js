@@ -305,8 +305,8 @@ function formatFrequencyForCopy(freq) {
   return Number(freq.toPrecision(4)).toString();
 }
 
-export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
-  return reelFrequencyTables.map((table, i) => {
+export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = null) {
+  const tables = reelFrequencyTables.map((table, i) => {
     const defaults = table.defaults || {};
     const symbolsTable = table.symbols || table;
     const symbols = Object.keys(symbolsTable);
@@ -316,6 +316,13 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
     if (defaults.minGap != null) defaultsParts.push(`minGap: ${defaults.minGap}`);
     if (defaults.maxStack != null) defaultsParts.push(`maxStack: ${defaults.maxStack}`);
     if (defaults.minStack != null) defaultsParts.push(`minStack: ${defaults.minStack}`);
+    // stackChance was previously omitted here, which silently DELETED it on paste-back.
+    // generateReel reads it (resolveStackChance) and falls back to 1 when absent - and 1 takes a
+    // different code path entirely (_computeClusterSizes rather than _computeStackedPlacements).
+    // On a cluster game that is not a subtle difference: Candy Frenzy measures 9.7% RTP at
+    // stackChance 0.10 and 94.5% at 0.50, so losing the field turned a tuned result into a
+    // completely different game the moment it was pasted back.
+    if (defaults.stackChance != null) defaultsParts.push(`stackChance: ${defaults.stackChance}`);
     if (defaults.minFrequency != null) defaultsParts.push(`minFrequency: ${defaults.minFrequency}`);
     if (defaults.maxFrequency != null) defaultsParts.push(`maxFrequency: ${defaults.maxFrequency}`);
     const defaultsLine = `  defaults: { ${defaultsParts.join(', ')} },`;
@@ -327,13 +334,52 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
       const minGapPart = entry.minGap != null ? `, minGap: ${entry.minGap}` : '';
       const maxStackPart = entry.maxStack != null ? `, maxStack: ${entry.maxStack}` : '';
       const minStackPart = entry.minStack != null ? `, minStack: ${entry.minStack}` : '';
+      const stackChancePart = entry.stackChance != null ? `, stackChance: ${entry.stackChance}` : '';
       const fixedPart = entry.fixed ? ', fixed: true' : '';
       const minPart = entry.minFrequency != null ? `, minFrequency: ${entry.minFrequency}` : '';
       const maxPart = entry.maxFrequency != null ? `, maxFrequency: ${entry.maxFrequency}` : '';
-      return `    ${keyPart} { frequency: ${formatFrequencyForCopy(entry.frequency)}${minGapPart}${maxStackPart}${minStackPart}${fixedPart}${minPart}${maxPart} },`;
+      return `    ${keyPart} { frequency: ${formatFrequencyForCopy(entry.frequency)}${minGapPart}${maxStackPart}${minStackPart}${stackChancePart}${fixedPart}${minPart}${maxPart} },`;
     });
     return `export const FREQUENCY_REEL${i + 1} = {\n${defaultsLine}\n  symbols: {\n${lines.join('\n')}\n  },\n};`;
   }).join('\n\n');
+
+  if (!context) return tables;
+
+  // Everything needed to REPRODUCE this result on a later run, not just the frequencies it
+  // produced. Frequencies alone are not a reproducible artifact: the same numbers pasted back
+  // against a different reel length, seed set, or paytable build a different set of strips and
+  // therefore a different game. REEL_LENGTH in particular is emitted as real code because the
+  // panel lets it be changed per run, so a result tuned at one length silently misreports itself
+  // if pasted into a game still declaring another.
+  const p = context.inputParameters ?? {};
+  const num = (v, d = 4) => (typeof v === 'number' ? Number(v.toFixed(d)) : v);
+  const weights = [
+    ['ordering', p.orderingPenaltyWeight], ['limit', p.limitPenaltyWeight],
+    ['uniformity', p.uniformityPenaltyWeight], ['stdError', p.stdErrorPenaltyWeight],
+    ['triggerRate', p.triggerRatePenaltyWeight], ['spacing', p.spacingPenaltyWeight],
+  ].filter(([, v]) => v != null).map(([k, v]) => `${k} ${v}`).join(', ');
+
+  const header = [
+    `// ---- Tuned ${new Date().toISOString().slice(0, 10)} ----`,
+    `// Achieved: RTP ${num(context.rtp, 2)}%  |  free-spin trigger ${num(context.triggerRatePct, 3)}%`,
+    `//`,
+    `// To reproduce this exact run, the tuner needs all of the following - same searchSeed AND`,
+    `// same reel geometry, since strips are generated from them:`,
+    `//   searchSeed ${p.searchSeed}   reelSeeds [${(p.reelSeeds ?? []).join(', ')}]`,
+    `//   reelLength ${p.reelLength}   reels ${p.reelsCount} x ${p.rowsCount} rows`,
+    `//   target RTP ${p.targetRtp}% +/-${p.rtpTolerancePct}   target trigger ${p.targetTriggerRatePct}% +/-${p.triggerRateTolerancePct}`,
+    `//   ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`,
+    `//   initial weights: ${p.initialWeightStrategy}   max RTP std error ${p.maxRtpStdError}`,
+    weights ? `//   loss weights: ${weights}` : null,
+    p.orderingBiasByReel ? `//   ordering bias by reel: [${p.orderingBiasByReel.join(', ')}]` : null,
+    `//`,
+    `// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned`,
+    `// against this length and do not reproduce the RTP above at any other.`,
+    `export const REEL_LENGTH = ${p.reelLength};`,
+    ``,
+  ].filter(l => l !== null).join('\n');
+
+  return `${header}\n${tables}`;
 }
 
 /**
@@ -1561,7 +1607,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     }
 
     const paytableOutput = resultsEl.querySelector('#tune-paytable-output');
-    paytableOutput.value = formatReelFrequencyTablesForCopy(tunedReelTables);
+    paytableOutput.value = formatReelFrequencyTablesForCopy(tunedReelTables, {
+      inputParameters: diagnostics.inputParameters,
+      rtp,
+      triggerRatePct,
+    });
 
     const copyBtn = resultsEl.querySelector('#tune-copy-btn');
     copyBtn.addEventListener('click', async () => {
