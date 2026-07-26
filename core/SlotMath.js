@@ -600,6 +600,48 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
     if (reelDefaults.minStack != null) return reelDefaults.minStack;
     return 1;
   }
+  // Chance that a given occurrence of a minStack>1 symbol becomes the start of a stack
+  // (sized randomly between minStack and maxStack) rather than a lone single. Defaults to 1 -
+  // "always stack" - so any existing reel using minStack without this field keeps its exact
+  // previous behavior (every occurrence clustered, via _computeClusterSizes below).
+  function resolveStackChance(symbol) {
+    const override = symbolsTable[symbol].stackChance;
+    if (override != null) return override;
+    if (reelDefaults.stackChance != null) return reelDefaults.stackChance;
+    return 1;
+  }
+
+  // Splits `count` occurrences into a probabilistic mix of stacks (random size, minStack to
+  // maxStack) and lone singles: each placement independently rolls against stackChance to
+  // decide whether it starts a stack or is just one single occurrence. Only used when
+  // stackChance < 1 - at the default (1, "always stack"), _computeClusterSizes's even-split
+  // is used instead, unchanged from before this existed.
+  function _computeStackedPlacements(count, minStack, maxStack, stackChance, rng) {
+    if (count <= 0) return [];
+    if (count < minStack) return [count]; // best effort, same fallback as _computeClusterSizes
+    const cap = Math.max(minStack, Math.min(maxStack, count)); // maxStack defaults to Infinity - clamp it
+    const sizes = [];
+    let remaining = count;
+    while (remaining > 0) {
+      if (remaining >= minStack && rng() < stackChance) {
+        const span = cap - minStack + 1;
+        const size = Math.min(remaining, minStack + Math.floor(rng() * span));
+        sizes.push(size);
+        remaining -= size;
+      } else {
+        sizes.push(1);
+        remaining -= 1;
+      }
+    }
+    return sizes;
+  }
+
+  // Step 3 needs the seeded rng only when stackChance < 1 (_computeStackedPlacements below) -
+  // created here instead of at the old Step 4 so it's available either way. This doesn't
+  // change anything for reels that never touch it before the shuffle (every existing reel:
+  // minStack:1, or minStack>1 at the stackChance default of 1) - only stackChance<1 (new)
+  // consumes any draws before the shuffle.
+  const rng = createSeededRng(seed);
 
   // Step 3: Build a pre-shuffle array. A symbol with minStack > 1 is represented as one
   // placeholder per *cluster*, not one per occurrence - so the shuffle, minGap, and (for
@@ -616,7 +658,10 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
     const minStack = resolveMinStack(symbol);
     if (minStack > 1) {
       const cap = resolveMaxStack(symbol); // repurposed as this symbol's per-cluster size cap once clustered
-      const sizes = _computeClusterSizes(count, minStack, cap);
+      const stackChance = resolveStackChance(symbol);
+      const sizes = stackChance >= 1
+        ? _computeClusterSizes(count, minStack, cap)
+        : _computeStackedPlacements(count, minStack, cap, stackChance, rng);
       clusterSizesBySymbol[symbol] = sizes;
       for (let i = 0; i < sizes.length; i++) preShuffle.push(symbol);
     } else {
@@ -625,7 +670,6 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
   }
 
   // Step 4: Shuffle with seed
-  const rng = createSeededRng(seed);
   _shuffle(preShuffle, rng);
 
   // Step 5: Apply each present symbol's own minGap/maxStack - resolved as symbol override ->

@@ -59,7 +59,16 @@ const BASE_FREQUENCIES = {
   bonus: 1.5,
 };
 function buildFrequencyReel() {
-  return { symbols: { ...Object.fromEntries(Object.entries(BASE_FREQUENCIES).map(([sym, f]) => [sym, { frequency: f }])) } };
+  const symbols = Object.fromEntries(Object.entries(BASE_FREQUENCIES).map(([sym, f]) => [sym, { frequency: f }]));
+  // bonus is the scatter - it stays spaced out (minGap already handles that via
+  // triggerFreeSpins) rather than ever clumping into a stack like the candy symbols do.
+  symbols.bonus.minStack = 1;
+  return {
+    // 10% chance a given candy occurrence starts a 2-4 stack instead of landing as a lone
+    // single - occasional clumps of the same candy, not a reel that's always/never stacked.
+    defaults: { minStack: 2, maxStack: 4, stackChance: 0.10 },
+    symbols,
+  };
 }
 export const FREQUENCY_REEL1 = buildFrequencyReel();
 export const FREQUENCY_REEL2 = buildFrequencyReel();

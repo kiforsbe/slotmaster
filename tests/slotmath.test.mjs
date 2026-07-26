@@ -239,6 +239,98 @@ test('generateReel with every symbol at minStack: 1 (the default) is byte-identi
   assert.deepEqual(withDefaultMinStack, explicitlyOne);
 });
 
+test('generateReel with stackChance: 0 never lets a minStack>1 symbol form a run - every occurrence is a lone single', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      stacked: { frequency: 1, minStack: 2, maxStack: 4, stackChance: 0 },
+      filler:  { frequency: 3 },
+    },
+  };
+  const reel = generateReel(reelWeights, 200, 7);
+  assert.ok(reel.includes('stacked'), 'expected "stacked" to actually appear on the built reel');
+  const n = reel.length;
+  let seam = -1;
+  for (let i = 0; i < n; i++) { if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; } }
+  let i = 0;
+  while (i < n) {
+    const idx = (seam + i) % n;
+    if (reel[idx] === 'stacked') {
+      let runLen = 1;
+      while (runLen < n && reel[(seam + i + runLen) % n] === 'stacked') runLen++;
+      assert.equal(runLen, 1, `expected every "stacked" occurrence isolated at stackChance: 0, found a run of ${runLen} at position ${idx}`);
+      i += runLen;
+    } else {
+      i++;
+    }
+  }
+});
+
+test('generateReel with a fractional stackChance mixes lone singles and valid min-max stacks, never anything in between', () => {
+  const reelWeights = {
+    defaults: {},
+    symbols: {
+      stacked: { frequency: 1, minStack: 2, maxStack: 4, stackChance: 0.5 },
+      filler:  { frequency: 3 },
+    },
+  };
+  const reel = generateReel(reelWeights, 300, 42);
+  const n = reel.length;
+  let seam = -1;
+  for (let i = 0; i < n; i++) { if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; } }
+  const runs = [];
+  let i = 0;
+  while (i < n) {
+    const idx = (seam + i) % n;
+    if (reel[idx] === 'stacked') {
+      let runLen = 1;
+      while (runLen < n && reel[(seam + i + runLen) % n] === 'stacked') runLen++;
+      runs.push(runLen);
+      i += runLen;
+    } else {
+      i++;
+    }
+  }
+  assert.ok(runs.some(r => r === 1), 'expected at least one lone single at stackChance: 0.5');
+  assert.ok(runs.some(r => r > 1), 'expected at least one stack at stackChance: 0.5');
+  assert.ok(runs.every(r => r === 1 || (r >= 2 && r <= 4)), `expected every run to be a lone single or a 2-4 stack, got runs: ${runs.join(',')}`);
+});
+
+test('generateReel resolves stackChance as symbol override -> reel defaults -> built-in default of 1 (always stack)', () => {
+  const reelWeights = {
+    defaults: { stackChance: 0 },
+    symbols: {
+      stacked:      { frequency: 1, minStack: 2, maxStack: 3 }, // inherits the reel default of 0
+      alwaysStack:  { frequency: 1, minStack: 2, maxStack: 3, stackChance: 1 }, // overrides back to 1
+      filler:       { frequency: 3 },
+    },
+  };
+  const reel = generateReel(reelWeights, 300, 3);
+  const n = reel.length;
+
+  function maxRunLength(symbol) {
+    let seam = -1;
+    for (let i = 0; i < n; i++) { if (reel[i] !== reel[(i - 1 + n) % n]) { seam = i; break; } }
+    let max = 0;
+    let i = 0;
+    while (i < n) {
+      const idx = (seam + i) % n;
+      if (reel[idx] === symbol) {
+        let runLen = 1;
+        while (runLen < n && reel[(seam + i + runLen) % n] === symbol) runLen++;
+        max = Math.max(max, runLen);
+        i += runLen;
+      } else {
+        i++;
+      }
+    }
+    return max;
+  }
+
+  assert.equal(maxRunLength('stacked'), 1, 'reel-level stackChance: 0 default should keep "stacked" from ever forming a run');
+  assert.ok(maxRunLength('alwaysStack') >= 2, '"alwaysStack"\'s own stackChance: 1 should override the reel default back to always-stack');
+});
+
 test('generateReel degrades gracefully (best effort) when a symbol has fewer occurrences than its own minStack', () => {
   const reelWeights = {
     defaults: {},

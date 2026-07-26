@@ -105,8 +105,20 @@ the start). Resolved the same way: per-symbol `maxStack` → this reel's `defaul
 built-in fallback of `Infinity` (unconstrained). There's no free-spins-aware default for this
 one — a game opts in explicitly per symbol or per reel.
 
-Both constraints are best-effort: if a reel is too dense to fully satisfy one (e.g. asking for
-`minGap: 10` when a symbol appears 50 times on a 100-long strip), `generateReel` gets as close
+**`minStack`** — opts a symbol into clustering: instead of appearing as isolated single stops,
+its occurrences are grouped into runs at least `minStack` long (capped by `maxStack`, if set).
+Resolved per-symbol `minStack` → this reel's `defaults.minStack` → built-in fallback of `1`
+(unclustered — every reel that doesn't opt in behaves exactly as before this field existed).
+
+**`stackChance`** — only meaningful when `minStack > 1`: the probability (`0`–`1`) that a given
+occurrence starts an actual stack (a run randomly sized between `minStack` and `maxStack`)
+rather than landing as a lone single. Resolved the same way, with a built-in fallback of `1`
+("always stack" — every occurrence clusters, the original `minStack` behavior). At `0`, a
+`minStack`-configured symbol never clusters at all; anywhere in between mixes lone singles and
+valid `minStack`–`maxStack` stacks, never a run outside those two shapes.
+
+Both `minGap`/`maxStack` are best-effort: if a reel is too dense to fully satisfy one (e.g. asking
+for `minGap: 10` when a symbol appears 50 times on a 100-long strip), `generateReel` gets as close
 as it can rather than throwing or looping forever.
 
 **`fixed: true`** on a symbol excludes it from `tuneFrequencies`' automatic search on that
