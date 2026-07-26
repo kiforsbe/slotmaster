@@ -366,6 +366,156 @@ export async function gradientDescent1D({
 }
 
 /**
+ * Monotone 1-D bisection root-finder: finds the `param` whose measured metric lands within
+ * `tolerance` of `target`, assuming the metric is monotone NON-DECREASING in `param`.
+ *
+ * This exists because gradientDescent1D is the wrong algorithm class for Phase 1's actual
+ * objective. Trigger rate is not a smooth function of the scatter-frequency multiplier - it's
+ * a coarse STEP function, because generateReel() converts each symbol's share into a whole
+ * number of strip positions (`Math.max(1, Math.round(share * targetLength))`, see
+ * core/SlotMath.js). Every multiplier inside one rounding bucket produces a byte-identical reel
+ * strip and therefore an *exactly* identical measurement. Measured on games/bookbookbook at its
+ * real REEL_LENGTH of 500, the multiplier range 0.70..1.36 contains only 13 distinct reachable
+ * trigger rates, on plateaus 5-10% wide in multiplier.
+ *
+ * That breaks slope-based search in three compounding ways: (1) the finite-difference probe
+ * (epsilon 0.05 log units = 5.1%) is usually NARROWER than a plateau, so the measured slope is
+ * exactly zero and the widen-probe fallback burns up to 8 extra measurements hunting for one;
+ * (2) when widening finally crosses a step edge, the "slope" is a secant across a
+ * discontinuity, and the resulting Newton step (capped at 4x the probe distance, i.e. up to
+ * ~49% in multiplier) overshoots the target window by several whole plateaus - the search
+ * visibly flings between extremes on either side of the target; (3) `trust` decays every
+ * iteration including the wasted plateau ones, so the step budget is exhausted before the
+ * search settles anywhere.
+ *
+ * Bisection has none of those failure modes: it never estimates a slope, so a plateau is not a
+ * special case and cannot stall it; it can never overshoot, since the answer stays bracketed by
+ * construction; and it converges in ~log2(range/precision) iterations at ONE measurement each,
+ * against gradientDescent1D's up-to-nine.
+ *
+ * Bisection also makes the genuinely-unreachable case detectable rather than silent. Because
+ * the reachable metric values form a coarse lattice, a target can fall in the GAP between two
+ * adjacent achievable values, in which case no multiplier satisfies `tolerance` and no search
+ * of any kind can succeed. `reason: 'lattice-gap'` reports exactly that (with the closest
+ * achievable value either side in `bracket`), instead of burning the whole iteration budget and
+ * reporting a bare "did not converge" that reads like a tuning failure. The fix for that case
+ * is a longer reel strip (a finer lattice) or a wider tolerance - not more search.
+ *
+ * Uses ONE fixed measurement seed for every evaluation, deliberately: the strips themselves are
+ * already deterministic (generateReel is seeded per reel from `reelSeeds`, not from the
+ * measurement seed), so holding the measurement seed fixed makes the whole objective a
+ * deterministic monotone step function. That is what keeps the bracket invariant sound - a
+ * per-iteration seed would let Monte Carlo noise flip a comparison and discard the half of the
+ * range actually containing the answer, which bisection cannot recover from.
+ *
+ * @param {Object} args
+ * @param {number} args.initialParam - Starting parameter (> 0). Measured FIRST, so a baseline
+ *   already within tolerance costs exactly one measurement and returns unchanged - preserving
+ *   the "trigger symbol's frequency doesn't need to change at all" fast path.
+ * @param {number} args.minParam - Lower clamp (> 0).
+ * @param {number} args.maxParam - Upper clamp (>= minParam).
+ * @param {number} args.target - Target value for the metric.
+ * @param {number} args.tolerance - Success means |metric - target| <= this.
+ * @param {(param: number) => Object} args.buildTrial - Builds a trial from a parameter value.
+ * @param {(measureResult: Object) => number} args.metricOf - Extracts the scalar metric.
+ * @param {(trial: Object, rngSeed: number) => (Object|Promise<Object>)} args.measure
+ * @param {number} args.maxIterations - Hard cap on total measurements.
+ * @param {number} args.seedBase - The single measurement seed used for every evaluation.
+ * @param {number} [args.latticeTolerance=0.002] - Bracket width in log-space below which the
+ *   reachable lattice is considered exhausted (0.002 log units = 0.2% in param, far finer than
+ *   any real rounding plateau). Reaching it means the target sits in a gap between two
+ *   achievable values.
+ * @param {(i: number, param: number, result: Object & {error: number}, best: Object) => (void|Promise<void>)} [args.onProgress]
+ * @param {(info: { iteration: number, operation: 'bracket', endpoint: 'min'|'max' }) => (void|Promise<void>)} [args.onBusy] -
+ *   Fired before each of the up-to-two range-endpoint measurements taken to establish the
+ *   initial bracket - the only step here that isn't a plain halving, and the one a caller would
+ *   otherwise see as an unexplained pause.
+ * @param {() => Promise<void>} args.yieldToEventLoop
+ * @param {AbortSignal} [args.signal] - Checked between measurements, after `best` is set.
+ * @returns {Promise<{ mult: number, error: number, result: Object, trial: Object, converged: boolean, reason: string, bracket: Object }>} -
+ *   `reason` is one of 'converged' | 'unreachable-low' (even `maxParam` measures below the
+ *   target band) | 'unreachable-high' (even `minParam` measures above it) | 'lattice-gap' |
+ *   'exhausted' | 'stopped'. `converged` is true iff `reason === 'converged'`.
+ */
+export async function bisect1D({
+  initialParam, minParam, maxParam, target, tolerance,
+  buildTrial, metricOf, measure, maxIterations, seedBase,
+  latticeTolerance = 0.002,
+  onProgress, onBusy, yieldToEventLoop,
+  signal = null,
+}) {
+  const minX = Math.log(minParam);
+  const maxX = Math.log(maxParam);
+  const clampX = (x) => Math.min(maxX, Math.max(minX, x));
+
+  let best = null;
+  let evaluations = 0;
+
+  async function evalAt(x) {
+    const param = Math.exp(x);
+    const trial = buildTrial(param);
+    const result = await measure(trial, seedBase);
+    const metric = metricOf(result);
+    const error = Math.abs(metric - target);
+    if (!best || error < best.error) best = { mult: param, error, result, trial, metric };
+    if (onProgress) await onProgress(evaluations, param, { ...result, error }, best);
+    evaluations++;
+    await yieldToEventLoop();
+    return metric;
+  }
+
+  let bracketInfo = null;
+  const finish = (reason) => ({
+    ...best,
+    converged: reason === 'converged',
+    reason,
+    bracket: bracketInfo,
+  });
+
+  // The starting point is measured before anything else, so the common "baseline already sits
+  // inside the target band" case costs exactly one measurement and leaves the parameter alone.
+  const startX = clampX(Math.log(initialParam));
+  const startMetric = await evalAt(startX);
+  if (best.error <= tolerance) return finish('converged');
+  if (signal?.aborted) return finish('stopped');
+
+  // Establish a bracket by measuring whichever range endpoint lies on the far side of the
+  // target from the starting point - monotonicity is what makes one endpoint sufficient.
+  let loX, hiX, loMetric, hiMetric;
+  if (startMetric < target) {
+    loX = startX; loMetric = startMetric;
+    if (onBusy) await onBusy({ iteration: evaluations, operation: 'bracket', endpoint: 'max' });
+    hiX = maxX; hiMetric = await evalAt(maxX);
+  } else {
+    hiX = startX; hiMetric = startMetric;
+    if (onBusy) await onBusy({ iteration: evaluations, operation: 'bracket', endpoint: 'min' });
+    loX = minX; loMetric = await evalAt(minX);
+  }
+  bracketInfo = { loParam: Math.exp(loX), hiParam: Math.exp(hiX), loMetric, hiMetric };
+
+  if (best.error <= tolerance) return finish('converged');
+  if (signal?.aborted) return finish('stopped');
+  // The whole reachable range sits on one side of the target band - no multiplier can work.
+  if (hiMetric < target) return finish('unreachable-low');
+  if (loMetric > target) return finish('unreachable-high');
+
+  while (evaluations < maxIterations) {
+    if (signal?.aborted) return finish('stopped');
+    // The bracket has collapsed to a span far narrower than any rounding plateau, yet neither
+    // side is in band: the target genuinely falls between two adjacent achievable values.
+    if (hiX - loX < latticeTolerance) return finish('lattice-gap');
+
+    const midX = (loX + hiX) / 2;
+    const midMetric = await evalAt(midX);
+    if (best.error <= tolerance) return finish('converged');
+    if (midMetric < target) { loX = midX; loMetric = midMetric; }
+    else { hiX = midX; hiMetric = midMetric; }
+    bracketInfo = { loParam: Math.exp(loX), hiParam: Math.exp(hiX), loMetric, hiMetric };
+  }
+  return finish('exhausted');
+}
+
+/**
  * Generic Nelder-Mead simplex minimizer over an n-dimensional parameter vector.
  * Derivative-free - compares function values across n+1 simplex vertices (reflect, expand,
  * contract, shrink) rather than estimating a gradient - the standard choice (same algorithm
@@ -1093,18 +1243,27 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // of nonScatterSymbols before valueSymbols/fixedShapeSymbols are even computed), so a
   // trigger symbol untouched here stays untouched for the rest of the run.
   //
-  // It's expected - not a bug - for this phase to converge with mult staying at its
-  // gradientDescent1D starting value of 1 (i.e. the trigger symbol's frequency doesn't
-  // change at all): the search starts there and stops as soon as the measured trigger rate
-  // is within `triggerRateTolerancePct` of `targetTriggerRatePct`, so if the *baseline*
-  // frequency already lands inside that band, there's simply nothing to correct. Confirmed
-  // for games/bookbookbook/game.js's real data: baseline trigger rate ~0.57% already sits
-  // inside the default 0.6% +/- 0.15 target band, so `diagnostics.scatterPhase.multiplier`
-  // comes back exactly 1 and `book`'s frequency is unchanged on every reel.
+  // It's expected - not a bug - for this phase to converge with mult staying at its starting
+  // value of 1 (i.e. the trigger symbol's frequency doesn't change at all): bisect1D measures
+  // the starting point first and stops immediately if the measured trigger rate is already
+  // within `triggerRateTolerancePct` of `targetTriggerRatePct`, so if the *baseline* frequency
+  // already lands inside that band, there's simply nothing to correct. Confirmed for
+  // games/bookbookbook/game.js's real data: baseline trigger rate ~0.57% already sits inside
+  // the default 0.6% +/- 0.15 target band, so `diagnostics.scatterPhase.multiplier` comes back
+  // exactly 1 and `book`'s frequency is unchanged on every reel.
+  //
+  // Searched by bisection rather than by slope, because the trigger rate is a coarse STEP
+  // function of this multiplier, not a smooth one - generateReel() rounds each symbol's share
+  // to a whole number of strip positions, so the reachable trigger rates form a sparse lattice
+  // and every multiplier in between measures identically. See bisect1D's own doc for the
+  // measured numbers and for why a finite-difference search cannot work against that shape.
+  // A consequence worth surfacing to callers: the target can land in a GAP between two
+  // achievable values, in which case `scatterPhase.reason` is 'lattice-gap' and no amount of
+  // searching will help - the reel strip needs to be longer, or the tolerance wider.
   let currentReelTables = baseReelTables;
   let scatterPhase = null;
   if (triggerSymbols.length > 0) {
-    scatterPhase = await gradientDescent1D({
+    scatterPhase = await bisect1D({
       initialParam: 1,
       minParam: 0.05,
       maxParam: 8,
@@ -1616,7 +1775,24 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePct: finalResult.triggerRate,
     diagnostics: {
       inputParameters,
-      scatterPhase: scatterPhase ? { multiplier: scatterPhase.mult, error: scatterPhase.error, converged: !!scatterPhase.converged, ...scatterPhase.result } : null,
+      scatterPhase: scatterPhase ? {
+        multiplier: scatterPhase.mult,
+        error: scatterPhase.error,
+        converged: !!scatterPhase.converged,
+        // Why this phase stopped - 'converged' | 'unreachable-low' | 'unreachable-high' |
+        // 'lattice-gap' | 'exhausted' | 'stopped' (see bisect1D's own doc). The three
+        // non-'exhausted' failure reasons all mean "no multiplier can satisfy this target",
+        // which is a fundamentally different situation from "ran out of iterations" and wants a
+        // different fix (longer reel strip / wider tolerance / different target, not more
+        // search). Reported rather than collapsed into a bare converged:false.
+        reason: scatterPhase.reason,
+        // The final bracket the search closed on: the two multipliers either side of the
+        // target and what each actually measured. When `reason` is 'lattice-gap' these are the
+        // closest achievable trigger rates above and below the target - i.e. exactly what IS
+        // reachable, which is the information needed to pick a feasible target.
+        bracket: scatterPhase.bracket,
+        ...scatterPhase.result,
+      } : null,
       rtpPhase: rtpPhaseResult ? {
         // The actual scalar every accept/reject decision (beatsIncumbent, Nelder-Mead/CMA-ES's
         // own vertex comparisons) is made on - error + weighted ordering/limit/uniformity

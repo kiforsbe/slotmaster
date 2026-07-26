@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, nelderMead, tuneFrequencies, simulateSpins, beatsIncumbent } from '../core/SpinSimulator.js';
+import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, simulateSpins, beatsIncumbent } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -29,6 +29,153 @@ test('gradientDescent1D converges to a target metric on a synthetic deterministi
   assert.ok(best.error <= 0.5, `expected error <= 0.5, got ${best.error}`);
   // target 70 = 20*ln(param)+50 => ln(param) = 1 => param = e
   assert.ok(Math.abs(best.mult - Math.E) < 0.1, `expected mult near e (${Math.E}), got ${best.mult}`);
+});
+
+// ---- bisect1D ----
+// The staircase these tests model is the real shape of Phase 1's objective, and the reason
+// gradientDescent1D was the wrong tool for it: generateReel rounds each symbol's share to a
+// whole number of strip positions, so trigger rate moves in coarse jumps with wide dead
+// plateaus in between. Every pre-existing gradientDescent1D test above uses a SMOOTH synthetic
+// function, which is exactly why they all passed while the real search flailed.
+
+// Mirrors games/bookbookbook at REEL_LENGTH 500: scatter count = round(share * 500), which over
+// multiplier 0.70..1.36 yields only ~13 distinct reachable trigger rates on plateaus 5-10% wide.
+const staircase = (param) => {
+  const count = Math.max(1, Math.round(14.488 * param)); // 14.488 = book's real baseline share * 500
+  return 0.6341 * Math.pow(count / 15, 3); // trigger rate scales ~cubically (needs 3 scatters)
+};
+
+test('bisect1D terminates early on an unreachable target instead of burning the whole budget oscillating', async () => {
+  // This is the actual, reproducible failure - narrower than "slope search cannot do
+  // staircases", which is NOT true: gradientDescent1D handles a REACHABLE staircase target
+  // perfectly well, because its finite-difference probe usually does cross a step edge.
+  //
+  // What it has no concept of is a target that no parameter can reach. Trigger rate moves in
+  // coarse jumps, so a target can fall in the gap between two adjacent achievable values - on
+  // real bookbookbook data only 2 of the 13 reachable rates in the useful multiplier range land
+  // inside the default tolerance band. With nothing to find, gradientDescent1D keeps stepping
+  // toward the target from alternating sides forever and spends its entire iteration budget at
+  // roughly 2.3 measurements per iteration. Each of those is trialsPerPoint * trialSpins spins
+  // (2.4 million at the defaults), so this is the difference between a tune that ends in
+  // seconds with an actionable answer and one that grinds through hundreds of millions of
+  // simulated spins to report a bare "did not converge".
+  const countAt = (param) => Math.max(1, Math.round(14.488 * param));
+  const trueMetric = (param) => 0.6341 * Math.pow(countAt(param) / 15, 3);
+  // 0.85 falls between count=16 (0.7696) and count=17 (0.9231). Nothing can reach it.
+  const argsFor = (measure) => ({
+    initialParam: 1, minParam: 0.05, maxParam: 8,
+    target: 0.85, tolerance: 0.02,
+    buildTrial: (param) => ({ param }),
+    metricOf: (r) => r.value,
+    measure,
+    maxIterations: 150, seedBase: 1,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+
+  const descentVisits = [];
+  const descent = await gradientDescent1D({
+    ...argsFor((t) => { descentVisits.push(t.param); return { value: trueMetric(t.param) }; }),
+    onProgress: null,
+  });
+  const bisectVisits = [];
+  const bisected = await bisect1D(argsFor((t) => { bisectVisits.push(t.param); return { value: trueMetric(t.param) }; }));
+
+  assert.equal(descent.converged, false, 'sanity: the target really is unreachable');
+  assert.equal(bisected.converged, false, 'bisection cannot reach it either - but it must say WHY');
+  assert.equal(bisected.reason, 'lattice-gap');
+
+  assert.ok(bisectVisits.length < descentVisits.length / 10,
+    `expected bisection to give up an order of magnitude sooner; bisection took ${bisectVisits.length} measurements, gradient descent took ${descentVisits.length}`);
+  // The oscillation itself: descent keeps re-measuring around the gap it can never close.
+  assert.ok(descentVisits.length > 100,
+    `expected the slope search to burn its whole budget oscillating, took only ${descentVisits.length} measurements`);
+});
+
+test('bisect1D reports reason "lattice-gap" when the target falls between two achievable values', async () => {
+  // 0.58 sits in the dead gap between the count=14 (0.5154) and count=15 (0.6341) plateaus,
+  // with a tolerance too tight to reach either. No multiplier can satisfy this - the correct
+  // outcome is to say so, not to burn the budget and report a bare "did not converge".
+  const result = await bisect1D({
+    initialParam: 1, minParam: 0.05, maxParam: 8,
+    target: 0.58, tolerance: 0.01,
+    buildTrial: (param) => ({ param }),
+    metricOf: (r) => r.value,
+    measure: (trial) => ({ value: staircase(trial.param) }),
+    maxIterations: 60, seedBase: 1,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(result.reason, 'lattice-gap');
+  assert.equal(result.converged, false);
+  // The bracket must report what IS reachable either side, so a caller can pick a real target.
+  assert.ok(result.bracket.loMetric < 0.58 && result.bracket.hiMetric > 0.58,
+    `expected the bracket to straddle the target, got ${result.bracket.loMetric}..${result.bracket.hiMetric}`);
+});
+
+test('bisect1D measures the starting point first and stops immediately when it is already in band', async () => {
+  let measurements = 0;
+  const result = await bisect1D({
+    initialParam: 1, minParam: 0.05, maxParam: 8,
+    // staircase(1) rounds to a count of 14, i.e. 0.5154 - the real baseline, already in band.
+    target: 0.5154, tolerance: 0.05,
+    buildTrial: (param) => ({ param }),
+    metricOf: (r) => r.value,
+    measure: (trial) => { measurements++; return { value: staircase(trial.param) }; },
+    maxIterations: 30, seedBase: 1,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(measurements, 1, `expected exactly one measurement for an already-in-band baseline, took ${measurements}`);
+  assert.equal(result.mult, 1, 'expected the multiplier to be left exactly at 1');
+  assert.equal(result.reason, 'converged');
+});
+
+test('bisect1D reports unreachable-low / unreachable-high rather than pretending to converge', async () => {
+  const base = {
+    initialParam: 1, minParam: 1, maxParam: 10,
+    tolerance: 0.5,
+    buildTrial: (param) => ({ param }),
+    metricOf: (r) => r.value,
+    maxIterations: 20, seedBase: 1,
+    yieldToEventLoop: () => Promise.resolve(),
+  };
+  const tooLow = await bisect1D({ ...base, target: 1000, measure: (t) => ({ value: 5 * t.param }) });
+  assert.equal(tooLow.reason, 'unreachable-low', 'even maxParam only reaches 50, far below 1000');
+  assert.ok(tooLow.mult <= 10.0001, `expected mult clamped to <= 10, got ${tooLow.mult}`);
+
+  const tooHigh = await bisect1D({ ...base, target: 1, measure: (t) => ({ value: 5 * t.param }) });
+  assert.equal(tooHigh.reason, 'unreachable-high', 'even minParam measures 5, above the 1 target band');
+});
+
+test('bisect1D stops cooperatively on signal.aborted with a usable best', async () => {
+  const controller = new AbortController();
+  let n = 0;
+  const result = await bisect1D({
+    initialParam: 1, minParam: 0.05, maxParam: 8,
+    target: 0.42, tolerance: 1e-9, // unreachable tolerance, so only the abort can end it
+    buildTrial: (param) => ({ param }),
+    metricOf: (r) => r.value,
+    measure: (trial) => { if (++n === 3) controller.abort(); return { value: staircase(trial.param) }; },
+    maxIterations: 100, seedBase: 1,
+    signal: controller.signal,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(result.reason, 'stopped');
+  assert.equal(result.converged, false);
+  assert.ok(Number.isFinite(result.mult) && Number.isFinite(result.error), 'expected a real, usable result');
+});
+
+test('bisect1D uses one fixed seed for every measurement so the bracket invariant cannot be broken by noise', async () => {
+  const seeds = new Set();
+  await bisect1D({
+    initialParam: 1, minParam: 0.05, maxParam: 8,
+    target: 0.42, tolerance: 0.02,
+    buildTrial: (param) => ({ param }),
+    metricOf: (r) => r.value,
+    measure: (trial, rngSeed) => { seeds.add(rngSeed); return { value: staircase(trial.param) }; },
+    maxIterations: 30, seedBase: 4242,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.deepEqual([...seeds], [4242],
+    'every measurement must share one seed - a per-iteration seed would let noise flip a comparison and discard the half of the range containing the answer');
 });
 
 test('gradientDescent1D clamps to maxParam when the target is unreachable within bounds', async () => {

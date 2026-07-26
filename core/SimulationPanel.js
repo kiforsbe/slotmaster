@@ -969,6 +969,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             ? (r.verticesEvaluated != null
               ? `still working - evaluating this generation's population (${r.verticesEvaluated}/${r.verticesToEvaluate} candidates evaluated)...`
               : `still working - evaluating this generation's population (${r.verticesToEvaluate} candidates)...`)
+            : r.operation === 'bracket'
+            ? `still working - measuring the ${r.endpoint === 'max' ? 'highest' : 'lowest'} allowed multiplier to bracket the target...`
             : (r.probeAttempt != null
               ? `still working - widening probe to find a measurable slope (attempt ${r.probeAttempt}/8)...`
               : `still working - widening probe to find a measurable slope...`);
@@ -1206,6 +1208,31 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // everywhere it's shown, not just in one dedicated spot a reader might skip past.
     const varianceColor = options.trialsPerPoint <= 1 ? '#888' : (isUnreliable ? '#ff8080' : '#7fd97f');
     let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong><span style="color: ${varianceColor};">${varianceText}</span> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+
+    // A trigger-rate target that no multiplier can reach is a fundamentally different problem
+    // from one the search merely ran out of budget on, and it has a different fix - the trigger
+    // rate moves in coarse jumps because generateReel rounds each symbol's share to a whole
+    // number of strip positions (see bisect1D's own doc in core/SpinSimulator.js), so the
+    // reachable rates form a sparse lattice and the target can simply fall between two of them.
+    // Spelling out the closest achievable rates either side turns an otherwise baffling
+    // "did not converge" into an actionable choice: widen the tolerance, move the target onto a
+    // value that exists, or lengthen the reel strip to make the lattice finer.
+    const sp = diagnostics.scatterPhase;
+    if (sp && !sp.converged && sp.reason !== 'stopped') {
+      const b = sp.bracket;
+      const detail = sp.reason === 'lattice-gap' && b
+        ? `The closest achievable rates are <strong>${b.loMetric.toFixed(3)}%</strong> (at multiplier ${b.loParam.toFixed(3)}) and <strong>${b.hiMetric.toFixed(3)}%</strong> (at ${b.hiParam.toFixed(3)}) - nothing in between exists, because scatter counts are whole positions on the reel strip.`
+        : sp.reason === 'unreachable-low'
+        ? `Even the highest allowed multiplier only reaches <strong>${b?.hiMetric?.toFixed(3) ?? '?'}%</strong>.`
+        : sp.reason === 'unreachable-high'
+        ? `Even the lowest allowed multiplier still measures <strong>${b?.loMetric?.toFixed(3) ?? '?'}%</strong>.`
+        : `The search used its whole iteration budget without landing in the target band.`;
+      const fixable = sp.reason === 'exhausted';
+      html += `<p style="font-size: 0.8em; color: ${fixable ? '#e6b800' : '#ff8080'}; margin: 8px 0; padding: 8px; background: #2a2a2a; border-left: 3px solid ${fixable ? '#e6b800' : '#ff8080'};">`
+        + `<strong>Trigger rate target not met</strong> (${sp.reason}) - closest reachable was ${sp.triggerRate != null ? sp.triggerRate.toFixed(3) : '?'}%, off by ${sp.error.toFixed(3)}pp. ${detail}`
+        + (fixable ? '' : ` <em>More tuning iterations cannot fix this</em> - raise the reel strip length for a finer lattice, widen the trigger rate tolerance, or pick a target that is actually reachable.`)
+        + `</p>`;
+    }
 
     // Flags a measurement that's plausible-looking but not actually trustworthy - a
     // high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly,

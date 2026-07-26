@@ -460,12 +460,38 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   RTP figure, and shows a dedicated warning banner whenever the candidate's standard error
   exceeds `options.maxRtpStdError` (which also gates whether `tuneFrequencies` itself considers
   that result `'converged'` at all — see `maxRtpStdError`'s own doc).
-- **`gradientDescent1D`**, **`nelderMead`**, **`computeValueRanks`**, **`renormalizeWeights`**
-  — the generic numerical-search machinery `tuneFrequencies` is built from (log-space 1D
-  search, an N-dimensional simplex search, symbol-value ranking given a `payoutOf`, and
-  budget-preserving reweighting, respectively). None of these are mechanic-specific — this is
-  what let cascade tuning reuse the exact same search engine as line-pay tuning, with no
-  cascade-aware changes needed to any of the four.
+- **`bisect1D`**, **`gradientDescent1D`**, **`nelderMead`**, **`computeValueRanks`**,
+  **`renormalizeWeights`** — the generic numerical-search machinery `tuneFrequencies` is built
+  from (monotone log-space 1D bisection, a slope-based log-space 1D search, an N-dimensional
+  simplex search, symbol-value ranking given a `payoutOf`, and budget-preserving reweighting,
+  respectively). None of these are mechanic-specific — this is what let cascade tuning reuse the
+  exact same search engine as line-pay tuning, with no cascade-aware changes needed to any of them.
+
+  Phase 1 (trigger-rate tuning) uses **`bisect1D`**, not `gradientDescent1D`, because its
+  objective is a coarse **step function** rather than a smooth one: `generateReel` converts each
+  symbol's share into a whole number of strip positions (`Math.max(1, Math.round(share *
+  targetLength))`), so every multiplier inside one rounding bucket produces a byte-identical reel
+  strip and therefore an identical measurement. On real bookbookbook data at `REEL_LENGTH` 500,
+  the multiplier range 0.70–1.36 contains only **13 distinct reachable trigger rates**, on
+  plateaus 5–10% wide, and only 2 of them land inside the default ±0.15pp tolerance band.
+
+  The practical consequence is that a trigger-rate target can be **genuinely unreachable** —
+  falling in the gap between two adjacent achievable values — and no search of any kind can
+  succeed. `gradientDescent1D` had no way to represent that: it would step toward the target from
+  alternating sides for its entire iteration budget (measured: 353 measurements vs `bisect1D`'s
+  13 on the same unreachable target, at ~2.4M simulated spins each) and report a bare
+  "did not converge". `bisect1D` closes a bracket instead, so it terminates as soon as the
+  reachable lattice is exhausted and reports `reason: 'lattice-gap'` (or `'unreachable-low'` /
+  `'unreachable-high'`) plus the closest achievable rate either side, in
+  `diagnostics.scatterPhase.bracket`. That distinction matters because the fix for an unreachable
+  target is a longer reel strip, a wider tolerance, or a different target — never more search.
+
+  `bisect1D` also deliberately holds **one fixed measurement seed** for the whole search, where
+  `gradientDescent1D` re-seeds every iteration. Bisection discards half the range on each
+  comparison and cannot recover from a wrong one, so the objective has to stay a single
+  self-consistent function; the reel strips are already deterministic (`generateReel` is seeded
+  per reel from `reelSeeds`, independently of the measurement seed), so fixing the measurement
+  seed makes the whole objective a deterministic monotone step function.
 
 ### Parallel tuning (`options.runTrial`)
 
@@ -711,4 +737,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `a6d717b`._
+_Docs last synced with the codebase: 2026-07-26, commit `7ba3a2b`._
