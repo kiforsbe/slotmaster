@@ -1,16 +1,18 @@
 # Slot Master
 
+![Slot Master screenshot](games/bookbookbook/screenshot.png)
+
 Browser-based slot machine games. Plain ES modules, no build step, no bundler —
 open `index.html` (via a local server, see below) and play.
 
 ## Games
 
-| Game | Grid | Bonus | README |
-|---|---|---|---|
-| Book of Book Book | 5x3, 10 lines | Book scatter → free spins with an expanding symbol | [games/bookbookbook](games/bookbookbook/README.md) |
-| Lucky Fruits | 3x3, 1-5 lines | None — wilds only | [games/fruitmachine](games/fruitmachine/README.md) |
-| Bar Fruits | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
-| Candy Frenzy | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
+| Game | Screenshot | Grid | Bonus | README |
+|---|---|---|---|---|
+| Book of Book Book | <img src="games/bookbookbook/screenshot.png" width="160"> | 5x3, 10 lines | Book scatter → free spins with an expanding symbol | [games/bookbookbook](games/bookbookbook/README.md) |
+| Lucky Fruits | <img src="games/fruitmachine/screenshot.png" width="160"> | 3x3, 1-5 lines | None — wilds only | [games/fruitmachine](games/fruitmachine/README.md) |
+| Bar Fruits | <img src="games/barfruits/screenshot.png" width="160"> | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
+| Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
 
 The first three share the same `core/` engine and debug tooling; Candy Frenzy shares the
 same `core/` foundation (GridLayout/SpriteDrawer/ParticleSystem/SpinLog) plus its own
@@ -193,4 +195,4 @@ Portions of this project (code, docs, and image assets) were developed with the 
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `a684a06`._
+_Docs last synced with the codebase: 2026-07-26, commit `298fadf`._

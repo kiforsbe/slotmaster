@@ -1,5 +1,7 @@
 # Bar Fruits (barfruits)
 
+![Bar Fruits screenshot](screenshot.png)
+
 A classic bar-and-fruit slot, built as a fresh game on top of fruitmachine's asset pack and
 conventions: 5 reels, 3 rows, 10 fixed paylines, no wild, and a star scatter that pays
 anywhere and triggers free spins.

@@ -1,5 +1,7 @@
 # Lucky Fruits (fruitmachine)
 
+![Lucky Fruits screenshot](screenshot.png)
+
 A classic 3-reel, 3-row fruit machine, adjustable 1-5 paylines. No free spins or bonus
 round — a straightforward line-pay machine, wilds and all.
 

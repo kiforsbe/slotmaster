@@ -1,5 +1,7 @@
 # Book of Book Book (bookbookbook)
 
+![Book of Book Book screenshot](screenshot.png)
+
 A classic Book of Ra/Book of Dead-style 5-reel, 3-row machine, adjustable 1-10 paylines, with
 a book-scatter-triggered free spins bonus and an expanding symbol.
 

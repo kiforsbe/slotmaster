@@ -1,5 +1,7 @@
 # Candy Frenzy
 
+![Candy Frenzy screenshot](screenshot.png)
+
 7×7 cluster-pays cascading slot, inspired by Sugar Rush-style games. Uses the shared
 `core/` engine's cascade mechanic (`core/CascadeEngine.js` + `core/CascadeMath.js`) with
 this game's own cluster win evaluator (`core/ClusterMath.js`) and free-spins payout mode
