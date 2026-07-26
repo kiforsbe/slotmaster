@@ -14,11 +14,13 @@ open `index.html` (via a local server, see below) and play.
 | Bar Fruits | <img src="games/barfruits/screenshot.png" width="160"> | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
 | Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
 
-The first three share the same `core/` engine and debug tooling; Candy Frenzy shares the
-same `core/` foundation (GridLayout/SpriteDrawer/ParticleSystem/SpinLog) plus its own
-cascade engine (`core/CascadeEngine.js` + `core/CascadeMath.js` + `core/ClusterMath.js` +
-`core/FreeSpinsModes.js` for its pluggable free-spins payout modes).
-Each README covers only what's specific to that game.
+All four games share the same `core/` foundation, debug tooling (SPIN LOG, RUN SIMULATION,
+TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic actually runs
+is pluggable per game via `core/LineMechanic.js` (the first three) or `core/CascadeSpinMechanic.js`
+(Candy Frenzy's cluster-pays cascade engine: `core/CascadeEngine.js` + `core/CascadeMath.js` +
+`core/ClusterMath.js` + `core/FreeSpinsModes.js` for its pluggable free-spins payout modes) -
+see `docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section for how the two share one
+architecture instead of two. Each README covers only what's specific to that game.
 
 ## Running it
 
@@ -195,4 +197,4 @@ Portions of this project (code, docs, and image assets) were developed with the 
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `298fadf`._
+_Docs last synced with the codebase: 2026-07-26, commit `97dc0d6`._

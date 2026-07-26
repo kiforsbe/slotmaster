@@ -18,7 +18,10 @@ flowchart TB
     ClusterMath["core/ClusterMath.js<br/>cluster win evaluator"]
     FreeSpinsModes["core/FreeSpinsModes.js<br/>pluggable free-spins payout modes"]
 
-    SpinSimulator["core/SpinSimulator.js<br/>headless sim + auto-tune (line-pays only)"]
+    LineMechanic["core/LineMechanic.js<br/>getTargetGrid + evaluateWin component pair"]
+    CascadeSpinMechanic["core/CascadeSpinMechanic.js<br/>resolveSequence component pair"]
+
+    SpinSimulator["core/SpinSimulator.js<br/>headless sim + auto-tune, mechanic-agnostic"]
     SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION / TUNE FREQUENCIES UI"]
     SlotAudio["core/SlotAudio.js<br/>synthesized sound effects"]
 
@@ -29,17 +32,22 @@ flowchart TB
     Game --> SlotEngine
     Game --> CascadeEngine
 
-    SlotEngine --> SlotMath
+    SlotEngine -. "config.mechanic, default" .-> LineMechanic
+    LineMechanic --> SlotMath
     SlotEngine --> SlotAudio
     SlotEngine --> SpinLog
     SlotEngine --> SpinSimulator
 
-    CascadeEngine --> CascadeMath
+    CascadeEngine -. "config.mechanic, default" .-> CascadeSpinMechanic
+    CascadeSpinMechanic --> CascadeMath
     CascadeEngine -. "config.winEvaluator" .-> ClusterMath
     CascadeEngine -. "config.freeSpinsMode, free spins only" .-> FreeSpinsModes
     CascadeEngine --> SlotAudio
     CascadeEngine --> SpinLog
+    CascadeEngine --> SpinSimulator
 
+    SpinSimulator -. "config.mechanic" .-> LineMechanic
+    SpinSimulator -. "config.mechanic" .-> CascadeSpinMechanic
     SimulationPanel --> SpinSimulator
     SpinLogPanel --> SpinLog
     SpinLog --> FileIO
@@ -49,10 +57,19 @@ Nothing in `core/` imports from `games/`. A game only ever flows data *into* `co
 paytable, paylines, reel strips, DOM element references) — `core/` never hardcodes a symbol
 name, payout shape, or grid size. This is what lets `SlotMath.js` and `SpinSimulator.js` run
 identically inside the live browser game, inside the in-browser debug tools, and inside
-`node --test` with no DOM at all. `CascadeEngine.js`'s own math (`CascadeMath.js`/
-`ClusterMath.js`) follows the same rule, though `SpinSimulator.js`/`SimulationPanel.js`
-themselves are built around `SlotEngine.js`'s line-pays shape specifically and aren't used by
-cascade games (see their own sections below).
+`node --test` with no DOM at all.
+
+**Gameplay mechanics** (`LineMechanic.js`/`CascadeSpinMechanic.js`) are the one layer both
+engine families and the simulator share: each mechanic is a plain object exposing "get the
+symbols for the playfield" (`getTargetGrid`/`resolveSequence`) and "calculate wins"
+(`evaluateWin`/the wrapped `winEvaluator`) as named methods, plus a `resolveSpin` entry point
+composed from those same methods for batch simulation. `SlotEngine.js`/`CascadeEngine.js` call
+the component methods directly for live, animated play; `SpinSimulator.js` calls `resolveSpin`
+for a synchronous batch run — same components, same results, no duplicated win logic between
+live play and simulation. `config.mechanic` defaults to `LineMechanic`/`CascadeSpinMechanic`
+respectively, so no existing game had to change anything to keep working. A future gameplay
+mechanic (e.g. a line-win-based cascade game) is a new module implementing the same shape,
+pluggable into either its engine or the simulator without changing either.
 
 ## `core/SlotMath.js` — pure math, no side effects
 
@@ -283,9 +300,13 @@ per-symbol vanish variant, particles, floating win popup, and ding - not all bur
   after the current one settles.
 
 Also exposes `engine.spinLog`/`engine.lastSpinSeed` as plain properties, same as `SlotEngine`.
-No `runSimulation()`/RUN SIMULATION/TUNE FREQUENCIES support - `SpinSimulator.js` is built
-around `SlotEngine`'s line-pays shape specifically; a cascade-aware equivalent would be a
-separate future project (see Candy Frenzy's own README).
+- `runSimulation(numBaseSpins, betAmount?, linesCount?, options?)` — same shape as
+  `SlotEngine.runSimulation` (so `SimulationPanel.js` can call either engine identically);
+  `linesCount` exists only for that parity and is always forced to 1 internally. Delegates to
+  `SpinSimulator.js`'s `simulateSpins` with `config.mechanic` (`CascadeSpinMechanic`) and this
+  instance's own `freeSpinsMode`, so a simulated free-spins round measures the real carried-over
+  economics (e.g. Candy Frenzy's persistent multiplier tiles), not a flat approximation. Candy
+  Frenzy's own RUN SIMULATION/TUNE FREQUENCIES buttons use this (see its README).
 
 One spin, end to end - resolving the whole outcome synchronously, then animating playback of
 it (`freeSpinsMode` only enters the picture while `inFreeSpins`):
@@ -363,33 +384,77 @@ Two modes ship today:
   marked tile's multiplier is drawn; see Candy Frenzy's own README for which it currently uses
   and why.
 
+## `core/LineMechanic.js` / `core/CascadeSpinMechanic.js` — pluggable gameplay mechanics
+
+A **mechanic** is a plain object exposing the two components every spin actually needs: "get
+the symbols for the playfield" and "calculate wins." `SlotEngine.js`/`CascadeEngine.js` call
+these directly for live, animated play; `core/SpinSimulator.js` calls the same objects'
+`resolveSpin` (composed from those same components) for a synchronous batch run — one shared
+architecture, not a simulator-only copy of the live engine's logic.
+
+**`LineMechanic`** (the default for `SlotEngine`/`simulateSpins` alike — no existing game passes
+it explicitly):
+- **`getTargetGrid(reelStrips, rowsCount, rng)`** — wraps `SlotMath.js`'s `generateTargetGrid`.
+- **`evaluateWin(grid, config, linesCount)`** — wraps `config.winEvaluator` (defaulting to
+  `checkWins`), reading `paytable`/`paylines`/`wildSymbol`/`scatterSymbol` off `config`.
+- **`evaluateExpandingWin(grid, expandingSymbol, config, linesCount)`** — wraps
+  `checkExpandingWins`, for the Book-of-Dead-style bonus (bookbookbook only).
+- **`createFreeSpinsState(simConfig, rng)`** — picks this free-spins round's expanding symbol
+  once, at the round's start (only if `hasExpandingWild`).
+- **`resolveSpin(...)`** / **`defaultPayoutOf(paytable, symbol)`** / **`statsLabels`** — the
+  batch-simulation entry point (composed from the components above), the ranking function
+  `tuneFrequencies`' Phase 2 uses to compare "value" symbols (highest N-of-a-kind payout), and
+  the RUN SIMULATION panel's win-breakdown header/column wording ("Normal Wins"/"Hits").
+
+**`CascadeSpinMechanic`** (the default for `CascadeEngine`/cascade `simulateSpins` calls) is
+the cluster-pays sibling. It can't cleanly separate "get symbols" from "calculate wins" the way
+`LineMechanic` can — a cascade's refill depends on which cells the *previous* step's win check
+cleared — so **`resolveSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps)`**
+(wrapping `CascadeMath.js`'s `resolveCascadeSequence`) is both components at once, by nature.
+It also exposes **`wrapWinEvaluatorForFreeSpins`**/**`createFreeSpinsState`** (builds the active
+`FreeSpinsModes.js` mode's state once per round) so a simulated free-spins round measures the
+real carried-over economics (e.g. Candy Frenzy's persistent multiplier tiles), not a flat
+approximation — `resolveSpin` replays every cascade step's cluster wins through
+`onClusterCleared`, in order, exactly like `CascadeEngine`'s animated playback does per cluster,
+just without the animation frames. Its own `defaultPayoutOf` ranks by the highest
+`clusterPayout` tier instead of a line-pay array. Never imports `ClusterMath.js` directly —
+`config.winEvaluator` is a closure the game supplies, so a future line-win-based cascade game
+reuses this mechanic unmodified, just with its own evaluator/`payoutOf`.
+
 ## `core/SpinSimulator.js` — headless simulation and auto-tuning
 
-Also pure/side-effect-free (no DOM), built on top of `SlotMath.js`'s same evaluators — a
-simulated RTP is never a separate model of the game, it's the same `checkWins`/
-`checkWildLineWins`/`generateReel` a live spin uses, just run in a loop.
+Also pure/side-effect-free (no DOM). Mechanic-agnostic: how a spin actually resolves is entirely
+delegated to `config.mechanic` (see above) — this file only owns what's common to every
+mechanic: the base-spin loop, free-spins triggering/retriggering/award-table lookups, the
+global free-spins safety cap, and result aggregation (RTP, win distribution, spin log).
 
 - **`simulateSpins(config, numBaseSpins, betPerLine, linesCount, rng)`** — runs
-  `numBaseSpins` spins (plus any triggered free-spin rounds) through `config.winEvaluator`
-  (defaulting to `checkWins`) and returns aggregate stats: `rtp`, `maxWin`, win/hit
-  distributions, `freeSpinsTriggered`, etc. `config` is shaped like `SlotEngine`'s own config
-  (`reelStrips`, `paytable`, `paylines`, `winEvaluator`, ...) — in fact `SlotEngine.
-  runSimulation()` passes its own `this.config` straight through. Two config fields are opt-in,
-  both `false` by default so existing callers see no behavior change: `hasExpandingWild`
-  (simulate a Book-of-Dead-style expanding-wild bonus during free spins — only bookbookbook
-  actually has this mechanic) and `logSpins` (populate `results.spinLog`, one entry per
-  simulated spin, via `core/SpinLog.js` — see "Spin logging" below).
+  `numBaseSpins` spins (plus any triggered free-spin rounds) via `config.mechanic.resolveSpin`
+  (defaulting to `LineMechanic`) and returns aggregate stats: `rtp`, `maxWin`, win/hit
+  distributions, `freeSpinsTriggered`, etc. `config` is shaped like the live engine's own config
+  — in fact `SlotEngine.runSimulation()`/`CascadeEngine.runSimulation()` pass their own
+  `this.config` straight through. A cascade game passes `linesCount: 1` and its flat bet as
+  `betPerLine` (no per-line betting concept - see `CascadeSpinMechanic`'s own doc). Several
+  config fields are opt-in, off by default so existing callers see no behavior change:
+  `hasExpandingWild` (`LineMechanic`-only), `freeSpinsMode` (`CascadeSpinMechanic`-only), and
+  `logSpins` (populate `results.spinLog`, one entry per simulated spin, via `core/SpinLog.js` —
+  see "Spin logging" below).
 - **`tuneFrequencies(paytable, reelFrequencyTables, options)`** — the RUN SIMULATION/TUNE
-  FREQUENCIES panel's auto-balancer. Given a paytable and one frequency table per reel,
-  searches for reel frequencies that hit a target RTP and free-spins trigger rate, returning a
-  tuned clone (never mutates its input). See its own extensive JSDoc in the file for the full
-  two-phase strategy (trigger-rate scaling, then a joint Nelder-Mead search over per-symbol
-  weights) and every tuning knob (`orderingBiasByReel`, `limitPenaltyWeight`,
-  `uniformityPenaltyWeight`, `initialWeightStrategy`, `minFrequency`/`maxFrequency`, `fixed`,
-  ...) — that doc is deliberately the canonical reference, not duplicated here.
-- **`gradientDescent1D`**, **`nelderMead`** — generic numerical optimizers `tuneFrequencies`
-  is built from (log-space 1D search and an N-dimensional simplex search, respectively). Not
-  slot-specific; exported mainly because `tuneFrequencies`' own tests exercise them directly.
+  FREQUENCIES panel's auto-balancer, likewise mechanic-agnostic via `options.mechanic`/
+  `options.freeSpinsMode`/`options.payoutOf` (each defaulting the same way as `simulateSpins`'
+  own `config.mechanic`). Given a paytable and one frequency table per reel, searches for reel
+  frequencies that hit a target RTP and free-spins trigger rate, returning a tuned clone (never
+  mutates its input). See its own extensive JSDoc in the file for the full two-phase strategy
+  (trigger-rate scaling, then a joint Nelder-Mead search over per-symbol weights) and every
+  tuning knob (`orderingBiasByReel`, `limitPenaltyWeight`, `uniformityPenaltyWeight`,
+  `initialWeightStrategy`, `minFrequency`/`maxFrequency`, `fixed`, ...) — that doc is
+  deliberately the canonical reference, not duplicated here.
+- **`gradientDescent1D`**, **`nelderMead`**, **`computeValueRanks`**, **`renormalizeWeights`**
+  — the generic numerical-search machinery `tuneFrequencies` is built from (log-space 1D
+  search, an N-dimensional simplex search, symbol-value ranking given a `payoutOf`, and
+  budget-preserving reweighting, respectively). None of these are mechanic-specific — this is
+  what let cascade tuning reuse the exact same search engine as line-pay tuning, with no
+  cascade-aware changes needed to any of the four.
 
 ## `core/SimulationPanel.js` — browser UI for the simulator
 
@@ -397,15 +462,25 @@ The DOM/rendering glue between a game's RUN SIMULATION / TUNE FREQUENCIES button
 `SpinSimulator.js`'s pure functions. A game never talks to `SpinSimulator.js` directly for its
 UI — it calls these instead:
 
-- **`runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins, domRefs
-  })`** — runs `engine.runSimulation(...)` and renders RTP/win-distribution/per-symbol
-  breakdown tables into the given modal DOM elements.
+- **`runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins, labels,
+  domRefs })`** — runs `engine.runSimulation(...)` and renders RTP/win-distribution/per-symbol
+  breakdown tables into the given modal DOM elements. `labels` overrides the primary win
+  bucket's header/column wording for a non-line-pay mechanic (e.g. Candy Frenzy passes
+  `CascadeSpinMechanic.statsLabels` — "Cluster Wins"/"Cluster Size" instead of "Normal
+  Wins"/"Hits"); omitted, it defaults to the line-pay wording.
 - **`openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneConfig, domRefs })`** —
   opens the tuner UI (target RTP/trigger-rate inputs, per-reel ordering-bias dropdowns,
-  live iteration progress), runs `tuneFrequencies`, and renders a diff plus a
-  copy-pasteable result via `formatReelFrequencyTablesForCopy`. Never mutates the game's
-  live reel tables itself — applying a tuned result means pasting it back into `game.js` and
-  reloading, a deliberate, explicit source change rather than a silent runtime patch.
+  live iteration progress), runs `tuneFrequencies` in a dedicated Worker
+  (`tuneFrequenciesWorker.js`), and renders a diff plus a copy-pasteable result via
+  `formatReelFrequencyTablesForCopy`. Never mutates the game's live reel tables itself —
+  applying a tuned result means pasting it back into `game.js` and reloading, a deliberate,
+  explicit source change rather than a silent runtime patch. `tuneConfig.mechanic`/
+  `.freeSpinsMode` (cascade-only) and `.winEvaluatorName` (needed because a cascade
+  `winEvaluator` is a per-game closure, not a reusable bare function its own `.name` can
+  identify) cross into the Worker by name, resolved back to real objects on that side of
+  `postMessage` — see `tuneFrequenciesWorker.js`'s own doc for the full "recipe" a cascade game
+  passes (`winEvaluatorName: 'checkClusterWins'` alongside `minClusterSize`/
+  `scatterTriggerCount`).
 - **`formatReelFrequencyTablesForCopy(reelFrequencyTables)`** — renders an array of
   `{ defaults, symbols }` tables back into pasteable `export const FREQUENCY_REELn = {...}`
   source text (4-significant-figure frequencies, so values under 1 don't collapse into each
@@ -455,8 +530,10 @@ a plugin registry — there's no central list of games to update.
 
 This section covers a line-pays game (`SlotEngine`) specifically. A cascade-cluster game
 follows the same three-file convention but plugs into `CascadeEngine`/`CascadeMath.js`/
-`ClusterMath.js`/`FreeSpinsModes.js` instead (see their sections above) - Candy Frenzy's own
-README is the worked example, not duplicated here.
+`ClusterMath.js`/`FreeSpinsModes.js` instead (see their sections above), and wires RUN
+SIMULATION/TUNE FREQUENCIES the same way step 6 below describes just with `mechanic:
+CascadeSpinMechanic`/`linesCount: 1` in its own config - Candy Frenzy's own README is the
+worked example, not duplicated here.
 
 ### 1. `game.js` — data + engine instantiation
 
@@ -569,4 +646,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `59d9969`._
+_Docs last synced with the codebase: 2026-07-26, commit `97dc0d6`._

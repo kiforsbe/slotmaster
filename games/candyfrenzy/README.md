@@ -43,11 +43,16 @@ this game's own cluster win evaluator (`core/ClusterMath.js`) and free-spins pay
 
 ## Dev tooling
 
-SPIN LOG is available (per-spin history + CSV export, same as every other game). RUN
-SIMULATION / TUNE FREQUENCIES are **not** included — those tools are built around
-line/scatter win evaluation and fixed-length reel-strip scrolling, neither of which this
-game's cascading cluster mechanic uses; a cascade-aware equivalent is a separate future
-project. The paytable multipliers here are a starting point, not a tuned RTP.
+SPIN LOG, RUN SIMULATION, and TUNE FREQUENCIES are all available, same as every other game —
+built on `core/CascadeSpinMechanic.js`, the cascade sibling of the line-pay games'
+`core/LineMechanic.js` (see `docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section).
+RUN SIMULATION reuses the live engine's own `createMultiplierTilesMode()` instance, so a
+simulated free-spins round measures the real persistent-multiplier-tile economics, not a flat
+approximation. TUNE FREQUENCIES runs the same two-phase search (scatter-rate scaling, then a
+joint Nelder-Mead frequency search) every other game's tuner does, ranking symbols by their
+highest `clusterPayout` tier instead of a line-pay N-of-a-kind array. The paytable multipliers
+here are a starting point, not a tuned RTP yet — run TUNE FREQUENCIES in-browser before
+treating them as final.
 
 ## Debug cheat
 
@@ -56,4 +61,4 @@ next spin's final grid to contain 3 `bonus` symbols, for testing the free-spins 
 retrigger without waiting for a natural hit.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `59d9969`._
+_Docs last synced with the codebase: 2026-07-26, commit `97dc0d6`._

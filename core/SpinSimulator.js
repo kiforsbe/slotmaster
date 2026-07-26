@@ -2,12 +2,27 @@
  * A pure functional simulator for the SlotMachine game logic.
  * It models spins without any visual or audio side effects.
  */
-import { checkWins, checkExpandingWins, generateReel, generateTargetGrid, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
-import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
+import { generateReel, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
+import { LineMechanic } from './LineMechanic.js';
 
 /**
- * Simulates multiple spins and returns statistical analysis.
- * @param {Object} config - Slot machine configuration with reelStrips, paytable, etc.
+ * Simulates multiple spins and returns statistical analysis. Mechanic-agnostic: how one spin
+ * actually resolves (draw a target grid and evaluate paylines vs. resolve a full cascade
+ * sequence) is delegated to `config.mechanic` (core/LineMechanic.js's default, or
+ * core/CascadeSpinMechanic.js for cluster-pays games) - this function only owns what's common
+ * to both: the base-spin loop, free-spins triggering/retriggering/award-table lookups, the
+ * global free-spins safety cap, and result aggregation (RTP, win distribution, spin log).
+ * @param {Object} config - Game configuration with reelStrips, paytable, etc.
+ * @param {Object} [config.mechanic] - A spin-resolution mechanic (see core/LineMechanic.js's
+ *   `LineMechanic` export for the contract: `createFreeSpinsState(simConfig, rng)` and
+ *   `resolveSpin({ simConfig, betPerLine, linesCount, rng, isFreeSpin, freeSpinsState,
+ *   spinIndex, chargedBet, logSpins }) -> { spinWin, scatterWin, detailedWins, logEntry }`).
+ *   Defaults to `LineMechanic` - every existing line-pay caller keeps working unchanged without
+ *   ever passing this. Candy Frenzy (and any future cascade game) passes
+ *   `CascadeSpinMechanic` from core/CascadeSpinMechanic.js instead.
+ * @param {Object} [config.freeSpinsMode] - Cascade-mechanic-only: the pluggable free-spins
+ *   payout mode (core/FreeSpinsModes.js) to simulate, passed straight through to
+ *   `mechanic.createFreeSpinsState`. Ignored by LineMechanic.
  * @param {number} [config.freeSpinsCount=10] - Flat number of free spins awarded per trigger,
  *   used whenever the triggering scatter count isn't found in `freeSpinsAwardTable` (or that
  *   table is omitted entirely).
@@ -23,13 +38,13 @@ import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.j
  *   behavior exactly.
  * @param {boolean} [config.logSpins=false] - When true, records one entry per simulated spin
  *   (base and free alike) in the returned `spinLog` array - spin index, phase, bet, total win,
- *   and a breakdown of every scatter/line/expanding win that spin produced. Off by default since
- *   it holds one object per spin in memory for the whole run (relevant at the default 1,000,000+
- *   spin counts); turn it on for a dev-tooling export (see SimulationPanel.js's
- *   "EXPORT SPIN LOG" button), not for routine RTP measurement.
- * @param {boolean} [config.hasExpandingWild=false] - Whether free spins here include a
- *   Book-of-Dead-style expanding-wild bonus (a random non-scatter symbol picked fresh each
- *   free-spins session, expanding to fill any reel it lands on - see checkExpandingWins).
+ *   and a breakdown of every scatter/line/expanding/cluster win that spin produced. Off by
+ *   default since it holds one object per spin in memory for the whole run (relevant at the
+ *   default 1,000,000+ spin counts); turn it on for a dev-tooling export (see
+ *   SimulationPanel.js's "EXPORT SPIN LOG" button), not for routine RTP measurement.
+ * @param {boolean} [config.hasExpandingWild=false] - LineMechanic-only: whether free spins here
+ *   include a Book-of-Dead-style expanding-wild bonus (a random non-scatter symbol picked fresh
+ *   each free-spins session, expanding to fill any reel it lands on - see checkExpandingWins).
  *   Off by default - without this, free spins pay out exactly like the base game, just at no
  *   cost. Omitting it for a game that doesn't actually have this mechanic isn't just "leaving
  *   a feature off": this used to run unconditionally for ANY game with free spins regardless
@@ -37,8 +52,9 @@ import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.j
  *   fabricating extra "expanding win" payouts (against a real, randomly-chosen paytable
  *   symbol, so not even a harmless no-op) that inflated RTP for any such game.
  * @param {number} numBaseSpins - Number of base spins to simulate (default 100000)
- * @param {number} betPerLine - Bet per line (default 1)
- * @param {number} linesCount - Number of active paylines (default 10)
+ * @param {number} betPerLine - Bet per line (default 1). Cascade games (no per-line concept)
+ *   pass their flat bet amount here alongside `linesCount: 1`.
+ * @param {number} linesCount - Number of active paylines (default 10). Cascade games pass 1.
  * @param {() => number} [rng=Math.random] - Random source for spin outcomes. Pass a seeded
  *   rng (e.g. createSeededRng(seed) from SlotMath.js) for a reproducible run; defaults to
  *   Math.random for today's non-deterministic behavior.
@@ -52,7 +68,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   if (numBaseSpins <= 0 || betPerLine <= 0 || linesCount <= 0) {
     throw new Error('All numeric parameters must be positive');
   }
-  
+
   const results = {
     totalBets: 0,
     totalWins: 0,
@@ -71,7 +87,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   simConfig.betPerLine = betPerLine;
   simConfig.totalBet = betPerLine * linesCount;
 
-  const winEvaluator = simConfig.winEvaluator || checkWins;
+  const mechanic = simConfig.mechanic || LineMechanic;
 
   // Get configuration values with defaults
   const freeSpinsCount = simConfig.freeSpinsCount || 10;
@@ -97,41 +113,59 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   // configured frequencies are.
   const FREE_SPINS_GLOBAL_CAP = Math.max(numBaseSpins * 20, 50000);
   let totalFreeSpinsRun = 0;
-  const hasExpandingWild = !!simConfig.hasExpandingWild;
-  let expandingSymbol = null;
   const logSpins = !!simConfig.logSpins;
+
+  // Runs one spin (base or free) via the active mechanic, then folds its result into `results` -
+  // the one piece of bookkeeping every mechanic shares, regardless of how it resolved the grid.
+  function runOneSpin(isFreeSpin, freeSpinsState) {
+    const chargedBet = isFreeSpin ? 0 : simConfig.totalBet;
+    if (!isFreeSpin) results.totalBets += chargedBet;
+    results.totalSimulatedSpins++;
+
+    const { spinWin, scatterWin, detailedWins, logEntry } = mechanic.resolveSpin({
+      simConfig, betPerLine, linesCount, rng, isFreeSpin, freeSpinsState,
+      spinIndex: results.totalSimulatedSpins, chargedBet, logSpins,
+    });
+
+    if (scatterWin) {
+      results.scatterCounts += scatterWin.count;
+      if (scatterWin.triggerFreeSpins) results.freeSpinsTriggered++;
+    }
+
+    results.totalWins += spinWin;
+    if (spinWin > results.maxWin) results.maxWin = spinWin;
+    if (spinWin < results.minWin) results.minWin = spinWin;
+    results.winDistribution[spinWin] = (results.winDistribution[spinWin] || 0) + 1;
+    detailedWins.forEach(w => results.detailedWins.push(w));
+    if (logSpins && logEntry) results.spinLog.push(logEntry);
+
+    return { scatterWin };
+  }
 
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
-    const result = _runSingleSpin(false);
+    const result = runOneSpin(false, null);
 
     // If free spins were triggered by this base spin, simulate them (unless the global free
     // spins budget is already exhausted - base spins keep running either way, so the base-game
     // RTP/trigger-rate signal stays representative even once free-spin payouts are truncated).
-    if (result.winData.scatterWin && result.winData.scatterWin.triggerFreeSpins && totalFreeSpinsRun < FREE_SPINS_GLOBAL_CAP) {
-      // Randomize the expanding symbol for each new free spin session - only for games that
-      // actually have this mechanic (see hasExpandingWild's own doc). Scatter symbols (e.g.
-      // book) can never be the expanding symbol - derive eligibility from the paytable's own
-      // type rather than hardcoding a symbol name.
-      if (hasExpandingWild) {
-        const eligibleSymbols = Object.keys(simConfig.paytable || {})
-          .filter(s => simConfig.paytable[s].type !== 'scatter');
-        expandingSymbol = eligibleSymbols.length > 0
-          ? eligibleSymbols[Math.floor(rng() * eligibleSymbols.length)]
-          : expandingSymbol;
-      }
+    if (result.scatterWin && result.scatterWin.triggerFreeSpins && totalFreeSpinsRun < FREE_SPINS_GLOBAL_CAP) {
+      // Built once per round (e.g. LineMechanic randomizes an expanding symbol,
+      // CascadeSpinMechanic inits a free-spins-mode's persistent state) - never rebuilt by a
+      // retrigger extending this same round.
+      const freeSpinsState = mechanic.createFreeSpinsState(simConfig, rng);
 
       // A real free-spins round can retrigger itself (another qualifying scatter hit during
       // the bonus adds more spins on top, same as the live engine's retriggerFreeSpins) - the
       // remaining-spins count grows as the loop runs rather than being fixed up front.
-      let freeSpinsRemaining = awardFor(freeSpinsAwardTable, result.winData.scatterWin.count);
+      let freeSpinsRemaining = awardFor(freeSpinsAwardTable, result.scatterWin.count);
       let freeSpinsRun = 0;
       while (freeSpinsRun < freeSpinsRemaining && totalFreeSpinsRun < FREE_SPINS_GLOBAL_CAP) {
-        const fsResult = _runSingleSpin(true); // _runSingleSpin accumulates into results internally
+        const fsResult = runOneSpin(true, freeSpinsState);
         freeSpinsRun++;
         totalFreeSpinsRun++;
-        if (supportsRetrigger && fsResult.winData.scatterWin && fsResult.winData.scatterWin.triggerFreeSpins) {
-          freeSpinsRemaining += awardFor(retriggerFreeSpinsAwardTable, fsResult.winData.scatterWin.count);
+        if (supportsRetrigger && fsResult.scatterWin && fsResult.scatterWin.triggerFreeSpins) {
+          freeSpinsRemaining += awardFor(retriggerFreeSpinsAwardTable, fsResult.scatterWin.count);
         }
       }
     }
@@ -154,137 +188,20 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     detailedWins: results.detailedWins,
     spinLog: results.spinLog
   };
-
-  // Helper to simulate a single spin (base or free)
-  function _runSingleSpin(isFreeSpin = false) {
-    const totalSpinBet = isFreeSpin ? 0 : simConfig.betPerLine * linesCount;
-    if (!isFreeSpin) results.totalBets += totalSpinBet;
-    results.totalSimulatedSpins++;
-
-    // Target grid generation - pure/seeded via generateTargetGrid (SlotMath.js), so a
-    // caller can pass a seeded rng (e.g. tuneFrequencies' common-random-numbers gradient
-    // steps) for a reproducible run; defaults to Math.random for today's behavior.
-    const targetGrid = generateTargetGrid(simConfig.reelStrips, simConfig.rowsCount, rng);
-
-    // Evaluate wins using this config's win evaluator (defaults to checkWins above)
-    let winData = winEvaluator(
-      targetGrid,
-      simConfig.paytable,
-      simConfig.paylines,
-      linesCount,
-      simConfig.wildSymbol ?? null,
-      simConfig.scatterSymbol ?? null
-    );
-
-    let spinWin = 0;
-    if (winData.scatterWin) {
-      // Scatter payouts are always totalBet-scaled, matching the engine behavior.
-      spinWin += winData.scatterWin.payout * simConfig.totalBet;
-      results.scatterCounts += winData.scatterWin.count;
-      if (winData.scatterWin.triggerFreeSpins) {
-        results.freeSpinsTriggered++;
-      }
-
-      // Track scatter wins in detailed stats
-      results.detailedWins.push({
-        type: 'scatter',
-        symbol: 'book',
-        count: winData.scatterWin.count,
-        isFreeSpin: false, // Scatters trigger FS but are usually counted as base spin wins
-        winAmount: winData.scatterWin.payout * simConfig.totalBet
-      });
-    }
-
-    // Line wins use betPerLine (each line's payout is multiplied by betPerLine)
-    spinWin += winData.totalLinePayoutMultiplier * betPerLine;
-    
-    if (winData.lineWins && winData.lineWins.length > 0) {
-      winData.lineWins.forEach((lw, idx) => {
-        results.detailedWins.push({
-          type: lw.alone ? 'alone' : 'line',
-          symbol: lw.symbol,
-          count: lw.count,
-          wildUsed: !!lw.wildUsed,
-          isFreeSpin: isFreeSpin,
-          winAmount: lw.payout * betPerLine
-        });
-      });
-    }
-
-    // Check for expanding wins (relevant during free spins usually, but can happen anytime depending on rules)
-    // In this game's logic, expansion is triggered by symbols on reels during free spins.
-    // We check if the targetGrid contains any expanding symbols that should be active.
-    // For simplicity in simulation, we'll assume expansion happens if it's a free spin 
-    // and there are multiple of the same high-value symbol on a reel.
-    let expandingResults = null;
-    if (isFreeSpin && hasExpandingWild) {
-      // Check for expanding wins using the configured expanding symbol and paytable
-      expandingResults = checkExpandingWins(targetGrid, expandingSymbol, simConfig.paytable, simConfig.paylines, linesCount);
-    }
-
-    if (expandingResults) {
-      // totalPayoutMultiplier is per-line; multiply by betPerLine for actual payout.
-      // Matches SlotEngine.evaluateSpinResult(), which adds the normal line-win payout
-      // (already included in spinWin above) and the expanding-win payout independently,
-      // with no reconciliation between them - the simulator must mirror that exactly to
-      // produce an accurate RTP estimate, even if that double-credit is itself worth
-      // revisiting as a gameplay design question.
-      const expandingWinAmount = expandingResults.totalPayoutMultiplier * betPerLine;
-      spinWin += expandingWinAmount;
-
-      // Track expanding wins in detailed stats
-      results.detailedWins.push({
-        type: 'expanding',
-        symbol: expandingSymbol,
-        count: expandingResults.expandingReels.length, // Number of reels that expanded
-        isFreeSpin: true,
-        winAmount: expandingWinAmount
-      });
-    }
-
-    // Update stats
-    results.totalWins += spinWin;
-    if (spinWin > results.maxWin) results.maxWin = spinWin;
-    if (spinWin < results.minWin) results.minWin = spinWin;
-    results.winDistribution[spinWin] = (results.winDistribution[spinWin] || 0) + 1;
-
-    if (logSpins) {
-      const entry = createSpinLogEntry({
-        spinIndex: results.totalSimulatedSpins,
-        phase: isFreeSpin ? 'free' : 'base',
-        betPerLine: simConfig.betPerLine,
-        linesCount,
-        chargedBet: totalSpinBet,
-        scatterBetBase: simConfig.totalBet,
-        winData,
-        scatterSymbol: simConfig.scatterSymbol
-      });
-      if (expandingResults) {
-        applyExpandingWinToSpinLogEntry(entry, {
-          expandingSymbol,
-          expandingReels: expandingResults.expandingReels.length,
-          expandingWin: expandingResults.totalPayoutMultiplier * betPerLine
-        });
-      }
-      results.spinLog.push(entry);
-    }
-
-    return { spinWin, winData, expandingResults };
-  }
 }
 
 // Ranks symbols by descending payout (highest single-line payout = rank 0), tying symbols
 // with equal payout to the same rank so their relative weight is preserved as a group.
-function computeValueRanks(paytable, symbols) {
-  const payoutOf = (s) => {
-    const arr = paytable[s].payout;
-    return arr && arr.length ? arr[arr.length - 1] : 0;
-  };
-  const sorted = [...symbols].sort((a, b) => payoutOf(b) - payoutOf(a));
+// `payoutOf(paytable, symbol) -> number` is mechanic-specific (line-pay ranks by the highest
+// N-of-a-kind payout, cascade ranks by the highest cluster-payout tier - see LineMechanic.js/
+// CascadeSpinMechanic.js's own `defaultPayoutOf`) - defaults to the line-pay convention so
+// existing callers that don't pass one keep working unchanged.
+export function computeValueRanks(paytable, symbols, payoutOf = LineMechanic.defaultPayoutOf) {
+  const sorted = [...symbols].sort((a, b) => payoutOf(paytable, b) - payoutOf(paytable, a));
   const rankOf = {};
   let rank = -1, lastPayout = null;
   for (const s of sorted) {
-    const p = payoutOf(s);
+    const p = payoutOf(paytable, s);
     if (p !== lastPayout) { rank++; lastPayout = p; }
     rankOf[s] = rank;
   }
@@ -294,7 +211,7 @@ function computeValueRanks(paytable, symbols) {
 // Scales any positive per-symbol raw-weight map so it sums to valueBudget - used both to
 // project Phase 2's Nelder-Mead candidates back onto each reel's fixed budget, and (via
 // Phase 1) to keep the scatter-symbol scaling on the same footing.
-function renormalizeWeights(raw, valueBudget) {
+export function renormalizeWeights(raw, valueBudget) {
   const rawTotal = Object.values(raw).reduce((a, b) => a + b, 0);
   const scale = valueBudget / rawTotal;
   const out = {};
@@ -336,6 +253,16 @@ function renormalizeWeights(raw, valueBudget) {
  * @param {number} args.maxIterations - Number of gradient steps.
  * @param {number} args.seedBase - Base seed for this phase's steps (offset per phase/mode to avoid correlated noise between phases).
  * @param {(i: number, param: number, result: Object & {error: number}, best: Object) => (void|Promise<void>)} [args.onProgress]
+ * @param {(info: { iteration: number, operation: 'widen-probe', probeAttempt: number }) => (void|Promise<void>)} [args.onBusy] -
+ *   Fired once the first slope probe comes back exactly flat and this iteration is about to
+ *   spend several more (up to 7 further) measurements widening/flipping direction to find one -
+ *   without this, that extra work is invisible between one onProgress call and the next. Never
+ *   fired for the common case (a measurable slope on the first try). If widening drags on, it
+ *   fires again with an updated `probeAttempt`, throttled to at most once every
+ *   `busyReportIntervalMs` of real time - a plateau that resolves within a probe or two only
+ *   ever fires once.
+ * @param {number} [args.busyReportIntervalMs=300] - Minimum real time between successive
+ *   `onBusy` calls within the same widen-probe search (see above).
  * @param {() => Promise<void>} args.yieldToEventLoop
  * @param {number} [args.trustFactor=0.8] - Fraction of the suggested step actually taken each
  *   iteration (damping against noisy slope estimates); decays each step.
@@ -350,8 +277,9 @@ function renormalizeWeights(raw, valueBudget) {
 export async function gradientDescent1D({
   initialParam, minParam, maxParam, target, tolerance,
   buildTrial, metricOf, measure, maxIterations, seedBase,
-  onProgress, yieldToEventLoop,
+  onProgress, onBusy, yieldToEventLoop,
   trustFactor = 0.8, trustFactorDecay = 0.9, epsilon = 0.05,
+  busyReportIntervalMs = 300,
 }) {
   const minX = Math.log(minParam);
   const maxX = Math.log(maxParam);
@@ -379,8 +307,27 @@ export async function gradientDescent1D({
     // larger step. Without this, the search stalls permanently at the first such plateau
     // (trust decays every iteration regardless, but x itself never moves).
     let slope = 0, usedDx = epsilon;
+    let probeAttempt = 0;
+    let reportedBusy = false;
+    let lastBusyReportTime = 0;
     outer: for (const sign of [1, -1]) {
       for (let widen = 1; widen <= 8; widen *= 2) {
+        probeAttempt++;
+        // First fired once the FIRST probe has already come back flat and this iteration is
+        // about to spend several more measurements widening/flipping to escape the plateau -
+        // not per probe attempt (up to 8 total). After that, fired again at most once every
+        // `busyReportIntervalMs` of real time (not once per remaining probe) - a plateau that
+        // resolves within a couple of probes reports once; one that grinds through several
+        // gets an occasional "still on it" heartbeat with an updated attempt count, without a
+        // log line per measurement.
+        if (onBusy && probeAttempt >= 2) {
+          const now = Date.now();
+          if (!reportedBusy || now - lastBusyReportTime >= busyReportIntervalMs) {
+            reportedBusy = true;
+            lastBusyReportTime = now;
+            await onBusy({ iteration: i, operation: 'widen-probe', probeAttempt });
+          }
+        }
         const xProbe = Math.min(maxX, Math.max(minX, x + sign * epsilon * widen));
         const dx = xProbe - x;
         if (dx === 0) continue;
@@ -431,6 +378,20 @@ export async function gradientDescent1D({
  * @param {number} [args.convergenceTolerance=1e-4] - Stop early once the spread between the
  *   simplex's best and worst loss is at or below this.
  * @param {(iteration: number, point: number[], result: Object, best: Object) => (void|Promise<void>)} [args.onProgress]
+ * @param {(info: { iteration: number, operation: 'shrink', verticesToEvaluate: number, verticesEvaluated?: number }) => (void|Promise<void>)} [args.onBusy] -
+ *   Fired once per iteration, only when reflection, expansion, AND contraction all failed to
+ *   improve and the whole simplex is about to shrink - the one operation here that re-evaluates
+ *   every vertex (`verticesToEvaluate` = n+1) instead of just one or two, so it's the main
+ *   source of a "stuck" gap between one onProgress call and the next in a high-dimensional
+ *   search. Never fired for a plain reflection/expansion/contraction (1-2 evaluates - not
+ *   worth a separate notification). The first call (before any vertex in this shrink has been
+ *   re-evaluated) omits `verticesEvaluated`; while the shrink is actually running, it fires
+ *   again at most once every `busyReportIntervalMs` of real time, each time with
+ *   `verticesEvaluated` set - a shrink that finishes quickly never gets a second call, one that
+ *   takes a while gets an occasional progress update instead of one call per vertex.
+ * @param {number} [args.busyReportIntervalMs=300] - Minimum real time between successive
+ *   `onBusy` progress updates within the same shrink (see above). Lower only for tests that
+ *   need every vertex's update to fire deterministically.
  * @param {() => Promise<void>} args.yieldToEventLoop
  * @returns {Promise<{ point: number[], loss: number, result: Object, iterations: number, converged: boolean }>} -
  *   `converged` is true iff the search stopped because the simplex's spread collapsed below
@@ -438,7 +399,8 @@ export async function gradientDescent1D({
  */
 export async function nelderMead({
   initialPoint, initialStepSize, evaluate, maxIterations,
-  convergenceTolerance = 1e-4, onProgress, yieldToEventLoop,
+  convergenceTolerance = 1e-4, onProgress, onBusy, yieldToEventLoop,
+  busyReportIntervalMs = 300,
 }) {
   const n = initialPoint.length;
   const ALPHA = 1, GAMMA = 2, RHO = 0.5, SIGMA = 0.5;
@@ -497,8 +459,24 @@ export async function nelderMead({
       if (contractedBetter) {
         vertices[n] = contracted;
       } else {
+        if (onBusy) await onBusy({ iteration: iter, operation: 'shrink', verticesToEvaluate: n + 1 });
         const bestPoint = vertices[0].point;
-        vertices = vertices.map(v => evalPoint(bestPoint.map((b, d) => b + SIGMA * (v.point[d] - b))));
+        // An explicit loop (not a single .map()) so a shrink that takes a while can report
+        // progress partway through - gated to at most once every `busyReportIntervalMs` of
+        // real time, so a fast shrink (the common case) never gets more than the one "starting"
+        // call above, while a slow one gets an occasional heartbeat instead of silence.
+        const shrunkVertices = new Array(vertices.length);
+        let lastBusyReportTime = Date.now();
+        for (let vi = 0; vi < vertices.length; vi++) {
+          shrunkVertices[vi] = evalPoint(bestPoint.map((b, d) => b + SIGMA * (vertices[vi].point[d] - b)));
+          const isLast = vi === vertices.length - 1;
+          const now = Date.now();
+          if (onBusy && !isLast && now - lastBusyReportTime >= busyReportIntervalMs) {
+            lastBusyReportTime = now;
+            await onBusy({ iteration: iter, operation: 'shrink', verticesToEvaluate: n + 1, verticesEvaluated: vi + 1 });
+          }
+        }
+        vertices = shrunkVertices;
       }
     }
   }
@@ -585,17 +563,29 @@ export async function nelderMead({
  *   frequency penalty (see `reelFrequencyTables`' `min`/`max` above) added to Phase 2's loss
  *   alongside RTP error and the ordering penalty - same soft-preference semantics.
  * @param {number} [options.uniformityPenaltyWeight=0] - Weight of a soft per-reel penalty
- *   discouraging any one tunable symbol's frequency from landing drastically far from that
- *   reel's "equal share" (that reel's fixed value-symbol budget split evenly across every
- *   tunable symbol on it) - e.g. one symbol ending up at 1.45 while its reel-mates sit at
- *   0.02-0.065. Off by default (0) since it's an opt-in extra preference, not a default
- *   assumption about what a good distribution looks like; independent of orderingPenaltyWeight
- *   (a reel can be perfectly ordered by payout tier and still have one wildly disproportionate
- *   symbol) and of limitPenaltyWeight (which only fires for symbols with an explicit min/max
- *   configured, not every tunable symbol on the reel). Like the other two, always a soft
- *   preference - it steers the search but never blocks 'converged'/'converged-with-violations'
- *   classification (real payout-tiered reels are essentially never perfectly uniform, so
- *   requiring this to hit exactly 0 would make 'converged' unreachable whenever it's enabled).
+ *   discouraging any one tunable symbol's frequency from landing far from a straight-line
+ *   target across that reel's payout tiers - NOT a flat "every symbol should be equal" target.
+ *   The line's slope is set by that reel's own `orderingBiasByReel` entry (direction and
+ *   Strength together - see below): bias 0 (no ordering preference) collapses the line to
+ *   flat/equal, same as if every symbol truly should match the reel's equal share; a nonzero
+ *   bias tilts the line the same direction ordering already prefers (e.g. bias -1 tilts it so
+ *   lower-paying symbols sit above the reel's equal share and higher-paying ones below, matching
+ *   "high pay rarer"), so this penalty pulls toward the tilt ordering wants instead of fighting
+ *   it with a competing flat preference. `uniformityPenaltyWeight` itself only controls how hard
+ *   the search is pushed toward that line - it never changes the line's own slope, which is
+ *   entirely `orderingBiasByReel`'s (Strength's) job. Any symbol with
+ *   `paytable[symbol].type === 'scatter'` is excluded from this comparison entirely (neither
+ *   pulled toward a target nor counted toward computing one), even one that doesn't happen to
+ *   trigger free spins - a scatter's ideal frequency plays a fundamentally different role than
+ *   the value symbols this penalty compares. Off by default (0) since it's an opt-in extra
+ *   preference, not a default assumption about what a good distribution looks like; independent
+ *   of orderingPenaltyWeight itself (a reel can be perfectly ordered by payout tier and still
+ *   have one wildly disproportionate symbol relative to the ideal line) and of
+ *   limitPenaltyWeight (which only fires for symbols with an explicit min/max configured, not
+ *   every tunable symbol on the reel). Like the other two, always a soft preference - it steers
+ *   the search but never blocks 'converged'/'converged-with-violations' classification (real
+ *   payout-tiered reels essentially never land exactly on any target line, so requiring this to
+ *   hit exactly 0 would make 'converged' unreachable whenever it's enabled).
  * @param {number[]} [options.orderingBiasByReel] - Per-reel direction/strength for the
  *   ordering preference, indexed by reel. `-1` (the default for every reel, if omitted or if
  *   a specific reel's entry is missing) keeps today's behavior: a higher-paying symbol is
@@ -636,6 +626,17 @@ export async function nelderMead({
  * @param {boolean} [options.hasExpandingWild] - Passed straight through to simulateSpins as
  *   `config.hasExpandingWild` - see its own doc. Omitting this for a game that really does have
  *   an expanding-wild free-spins bonus understates its RTP.
+ * @param {Object} [options.mechanic] - Spin-resolution mechanic (see simulateSpins' own doc) -
+ *   defaults to LineMechanic. A cascade game passes CascadeSpinMechanic (core/
+ *   CascadeSpinMechanic.js) instead, alongside `winEvaluator`/`scatterSymbol`/`freeSpinsMode`
+ *   in place of `paylines`/`wildSymbol`/`hasExpandingWild`.
+ * @param {Object} [options.freeSpinsMode] - Cascade-mechanic-only: passed straight through to
+ *   simulateSpins as `config.freeSpinsMode` - see its own doc.
+ * @param {(paytable: Object, symbol: string) => number} [options.payoutOf] - How Phase 2 ranks
+ *   "value" symbols against each other for the soft ordering preference below - defaults to
+ *   `mechanic.defaultPayoutOf` (line-pay: highest N-of-a-kind payout; cascade: highest
+ *   cluster-payout tier). Override only for a mechanic whose payout shape doesn't fit either
+ *   convention.
  * @param {'provided'|'uniform'|'normal'} [options.initialWeightStrategy='provided'] - How Phase
  *   2's starting point is chosen for a dimension that has BOTH a minFrequency and a
  *   maxFrequency configured (via `resolveFrequencyBounds` - a symbol missing either bound has
@@ -664,6 +665,25 @@ export async function nelderMead({
  *     `null`; `best` is the best vertex found so far. Without this, a stall/restart is
  *     invisible to a caller: the per-iteration `'shape'` log looks identical whether or not a
  *     restart just happened underneath it.
+ *   - `'busy'`: fired at most once per iteration (`'scatter'` or `'shape'`), only when that
+ *     iteration is doing several times its usual amount of work before it has anything new to
+ *     report - a Phase 2 Nelder-Mead simplex shrink (re-evaluates every vertex, not just one or
+ *     two) or a Phase 1 gradient-descent plateau-widening retry (see `gradientDescent1D`'s/
+ *     `nelderMead`'s own `onBusy` doc for exactly when each fires). `result` is
+ *     `{iteration, operation: 'shrink'|'widen-probe', sourcePhase: 'scatter'|'shape',
+ *     verticesToEvaluate?, verticesEvaluated?, probeAttempt?}` - `sourcePhase` says which phase
+ *     this came from, since `i` alone doesn't (Phase 1 and Phase 2 both number from 0). Use it
+ *     to label a 'busy' line the same way as that phase's own progress lines (e.g. "Scatter
+ *     frequency N" vs "Step N"). `multiplier` and `best` are always `null`. Deliberately NOT
+ *     fired for the common case (a normal reflection, or a slope found on the first probe) - this is for
+ *     explaining an otherwise silent, unusually long gap between two ordinary progress lines,
+ *     not a per-measurement log. If the gap is long enough, a 'busy' event fires again -
+ *     `verticesEvaluated`/`probeAttempt` set on that second and later calls - but throttled to
+ *     at most once every `busyReportIntervalMs`, so a shrink/widen that resolves quickly still
+ *     only ever fires once.
+ * @param {number} [options.busyReportIntervalMs=300] - Minimum real time between successive
+ *   'busy' progress updates within the same shrink/widen-probe - see above. Passed straight
+ *   through to `gradientDescent1D`/`nelderMead`.
  * @returns {Promise<{ reelFrequencyTables: Object[], rtp: number, triggerRatePct: number, diagnostics: Object }>}
  */
 export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
@@ -709,7 +729,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     freeSpinsAwardTable,
     retriggerFreeSpinsAwardTable,
     hasExpandingWild,
+    mechanic = LineMechanic,
+    freeSpinsMode,
+    payoutOf = mechanic.defaultPayoutOf,
     initialWeightStrategy = 'provided',
+    busyReportIntervalMs = 300,
     onProgress = null,
   } = options;
 
@@ -746,6 +770,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const config = {
       reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
       freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
+      mechanic, freeSpinsMode,
     };
     let rtpSum = 0, triggerSum = 0;
     for (let i = 0; i < trialsPerPoint; i++) {
@@ -845,6 +870,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       maxIterations,
       seedBase: searchSeed,
       onProgress: onProgress ? (i, mult, result, best) => onProgress('scatter', i, mult, result, best) : null,
+      onBusy: onProgress ? (info) => onProgress('busy', info.iteration, null, { ...info, sourcePhase: 'scatter' }, null) : null,
+      busyReportIntervalMs,
       yieldToEventLoop,
     });
     currentReelTables = scatterPhase.trial;
@@ -875,7 +902,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const fixedShapeTotal = fixedShapeSymbols.reduce((sum, s) => sum + symbolsTable[s].frequency, 0);
     const valueBudget = nonScatterTotal - fixedShapeTotal;
     valueBudgetByReel[r] = valueBudget;
-    tierOfByReel[r] = computeValueRanks(paytable, valueSymbols);
+    tierOfByReel[r] = computeValueRanks(paytable, valueSymbols, payoutOf);
     fixedShapeSymbols.forEach(s => fixedSymbols.push({ reel: r, symbol: s }));
     if (valueSymbols.length > 0 && valueBudget > 0) {
       equalShareByReel[r] = valueBudget / valueSymbols.length;
@@ -884,6 +911,48 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         dims.push({ reelIndex: r, symbol: s, min: bounds.minFrequency, max: bounds.maxFrequency });
       });
     }
+  });
+
+  // uniformityPenaltyOf's own per-symbol targets - excluded from any symbol whose paytable
+  // `type` is 'scatter' - even one that doesn't happen to trigger free spins (the only thing
+  // that otherwise excludes a symbol from `dims` above). A scatter's ideal frequency plays a
+  // fundamentally different role (rare, spread out) than the "value" symbols this penalty
+  // compares, so it should neither be pulled toward a target nor count toward computing one.
+  // Ordering/limit penalties are untouched by this - a scatter still participates in those, and
+  // in the search itself (`dims`), same as before.
+  //
+  // The target ISN'T flat ("every symbol should equal the reel's equal share") - it's a
+  // straight line across tier rank, tilted the same direction and strength as that reel's own
+  // ordering preference (orderingBiasFor(r), already direction * Strength from the tune panel's
+  // per-reel dropdown/input). uniformityPenaltyWeight controls how hard the search is pushed
+  // toward this line; the bias controls the line's slope - two independent knobs, not one
+  // fighting the other the way a flat target vs. a genuine ordering preference otherwise would.
+  // bias === 0 (no ordering preference for that reel) collapses the line back to flat/equal,
+  // exactly the old behavior - `centered` term drops out entirely below.
+  const uniformityDimsByReel = Array.from({ length: reelsCount }, () => []);
+  dims.forEach(d => {
+    if (paytable[d.symbol]?.type !== 'scatter') uniformityDimsByReel[d.reelIndex].push(d);
+  });
+  const uniformityTargetsByReel = uniformityDimsByReel.map((reelDims, r) => {
+    if (reelDims.length === 0) return null;
+    const budget = reelDims.reduce((sum, d) => sum + currentReelTables[r].symbols[d.symbol].frequency, 0);
+    const equalShare = budget / reelDims.length;
+    const bias = orderingBiasFor(r);
+    const ranks = reelDims.map(d => tierOfByReel[r][d.symbol]);
+    const meanRank = ranks.reduce((a, b) => a + b, 0) / ranks.length;
+    // How far tier ranks spread from their own mean, on this reel - normalizes `centered` to
+    // roughly [-1, 1] regardless of how many tiers/symbols this specific reel has, so the same
+    // bias magnitude tilts every reel comparably.
+    const maxSpread = Math.max(...ranks.map(t => Math.abs(t - meanRank))) || 1;
+    const targets = {};
+    reelDims.forEach(d => {
+      // Sign matches orderingPenaltyOf's own convention exactly (see its doc): bias < 0
+      // ("high pay rarer") wants frequency to INCREASE with tier rank (worse-paying symbols
+      // more frequent); bias > 0 ("high pay more frequent") wants it to DECREASE.
+      const centered = (tierOfByReel[r][d.symbol] - meanRank) / maxSpread;
+      targets[d.symbol] = equalShare * (1 - bias * centered);
+    });
+    return targets;
   });
 
   let rtpPhaseResult = null;
@@ -1019,10 +1088,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     function uniformityPenaltyOf(reelTables) {
       let total = 0;
       dims.forEach(({ reelIndex: r, symbol: s }) => {
-        const equalShare = equalShareByReel[r];
-        if (!(equalShare > 0)) return;
+        if (paytable[s]?.type === 'scatter') return;
+        const target = uniformityTargetsByReel[r]?.[s];
+        if (!(target > 0)) return;
         const freq = reelTables[r].symbols[s].frequency;
-        total += Math.abs(freq - equalShare) / equalShare;
+        total += Math.abs(freq - target) / target;
       });
       return total;
     }
@@ -1104,6 +1174,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         onProgress: onProgress
           ? (i, pt, result, roundBest) => onProgress('shape', roundStartIterations + i, null, result, roundBest)
           : null,
+        onBusy: onProgress
+          ? (info) => onProgress('busy', roundStartIterations + info.iteration, null, { ...info, sourcePhase: 'shape' }, null)
+          : null,
+        busyReportIntervalMs,
         yieldToEventLoop,
       });
       iterationsUsed += nm.iterations;

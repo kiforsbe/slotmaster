@@ -1,7 +1,8 @@
 // Core Slot Game Engine Renderer & State Controller
-import { checkWins, checkExpandingWins, createSeededRng, generateTargetGrid } from './SlotMath.js';
+import { checkWins, createSeededRng } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
+import { LineMechanic } from './LineMechanic.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
 import { computeGridLayout } from './GridLayout.js';
 import { drawSpriteSymbol } from './SpriteDrawer.js';
@@ -26,6 +27,11 @@ export class SlotEngine {
       wildSymbol: null,
       scatterSymbol: null,
       winEvaluator: checkWins,
+      // The "get symbols for the playfield" / "calculate wins" component pair (core/
+      // LineMechanic.js) - shared with core/SpinSimulator.js's batch simulation/tuning, so a
+      // live spin and a simulated one resolve identically. A future gameplay mechanic (e.g. a
+      // cascading line-pay hybrid) plugs in here without any SlotEngine changes.
+      mechanic: LineMechanic,
       onStateChange: () => {},
       onFreeSpinsTriggered: () => {},
       onScatterTrigger: (scatterCount) => {},
@@ -531,7 +537,7 @@ export class SlotEngine {
     if (!this.forcedTargetGrid) {
       const spinSeed = seed !== undefined ? seed : ((Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0);
       this.lastSpinSeed = spinSeed;
-      this.targetGrid = generateTargetGrid(this.config.reelStrips, this.config.rowsCount, createSeededRng(spinSeed));
+      this.targetGrid = this.config.mechanic.getTargetGrid(this.config.reelStrips, this.config.rowsCount, createSeededRng(spinSeed));
       if (this.debugMode) console.log(`[SPIN] seed=${spinSeed}`);
     }
     this.forcedTargetGrid = false; // Reset flag
@@ -635,14 +641,7 @@ export class SlotEngine {
     this.state = 'evaluating';
     this.config.onStateChange(this.state);
 
-    const results = this.config.winEvaluator(
-      this.targetGrid,
-      this.config.paytable,
-      this.config.paylines,
-      this.linesCount,
-      this.config.wildSymbol,
-      this.config.scatterSymbol
-    );
+    const results = this.config.mechanic.evaluateWin(this.targetGrid, this.config, this.linesCount);
 
     this.winData = results;
 
@@ -685,13 +684,8 @@ export class SlotEngine {
 
     // Handle Expanding Symbol evaluation in Free Spins mode
     if (this.inFreeSpins && this.expandingSymbol) {
-      const expandingResults = checkExpandingWins(
-        this.targetGrid,
-        this.expandingSymbol,
-        this.config.paytable,
-        this.config.paylines,
-        this.linesCount,
-        this.config.paytable
+      const expandingResults = this.config.mechanic.evaluateExpandingWin(
+        this.targetGrid, this.expandingSymbol, this.config, this.linesCount
       );
 
       if (expandingResults) {

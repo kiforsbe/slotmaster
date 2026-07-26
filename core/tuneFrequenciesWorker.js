@@ -13,18 +13,50 @@
 // instead (options.winEvaluatorName) and this worker resolves it back to the real function
 // via WIN_EVALUATORS below - any winEvaluator not in this table falls through to
 // tuneFrequencies' own default (checkWins).
+//
+// A cascade game's winEvaluator is a single-argument closure baking in its own paytable/
+// minClusterSize/scatterSymbol (see CascadeMath.js's own doc) rather than a reusable bare
+// function like checkWins/checkWildLineWins - it can't be named/looked-up the same way. Its
+// "recipe" (evaluator name + the extra primitives it closes over) crosses postMessage instead
+// (options.minClusterSize/scatterTriggerCount, alongside the already-cloneable scatterSymbol/
+// paytable), and CLUSTER_WIN_EVALUATOR_BUILDERS rebuilds an equivalent closure here.
+//
+// config.mechanic/config.freeSpinsMode (SpinSimulator.js's pluggable gameplay components) are
+// likewise objects with function hooks, not cloneable - resolved here by name the same way.
 import { tuneFrequencies } from './SpinSimulator.js';
 import { checkWins, checkWildLineWins } from './SlotMath.js';
+import { checkClusterWins } from './ClusterMath.js';
+import { LineMechanic } from './LineMechanic.js';
+import { CascadeSpinMechanic } from './CascadeSpinMechanic.js';
+import { createFlatMultiplierMode, createMultiplierTilesMode } from './FreeSpinsModes.js';
 
 const WIN_EVALUATORS = { checkWins, checkWildLineWins };
+const CLUSTER_WIN_EVALUATOR_BUILDERS = {
+  checkClusterWins: (paytable, { scatterSymbol, minClusterSize, scatterTriggerCount }) =>
+    (grid) => checkClusterWins(grid, paytable, minClusterSize, scatterSymbol, scatterTriggerCount),
+};
+const MECHANICS = { line: LineMechanic, cascade: CascadeSpinMechanic };
+// Visual-only options (badgeStyle/renderOrder) never affect wrapWinEvaluator/onClusterCleared -
+// see FreeSpinsModes.js's own doc - so reconstructing with defaults here is exact, not lossy.
+const FREE_SPINS_MODE_BUILDERS = { flatMultiplier: () => createFlatMultiplierMode(), multiplierTiles: () => createMultiplierTilesMode() };
 
 self.onmessage = async (event) => {
   const { paytable, reelFrequencyTables, options } = event.data;
-  const { winEvaluatorName, ...restOptions } = options;
+  const { winEvaluatorName, mechanicName, freeSpinsModeName, minClusterSize, scatterTriggerCount, ...restOptions } = options;
+
+  let winEvaluator;
+  if (winEvaluatorName && CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName]) {
+    winEvaluator = CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName](paytable, { scatterSymbol: restOptions.scatterSymbol, minClusterSize, scatterTriggerCount });
+  } else if (winEvaluatorName) {
+    winEvaluator = WIN_EVALUATORS[winEvaluatorName];
+  }
+
   try {
     const result = await tuneFrequencies(paytable, reelFrequencyTables, {
       ...restOptions,
-      winEvaluator: winEvaluatorName ? WIN_EVALUATORS[winEvaluatorName] : undefined,
+      winEvaluator,
+      mechanic: mechanicName ? MECHANICS[mechanicName] : undefined,
+      freeSpinsMode: freeSpinsModeName ? FREE_SPINS_MODE_BUILDERS[freeSpinsModeName]() : undefined,
       onProgress: (phase, i, mult, r, best) => {
         self.postMessage({ type: 'progress', phase, i, mult, result: r, best });
       },

@@ -7,10 +7,13 @@
 import { computeGridLayout } from './GridLayout.js';
 import { drawSpriteSymbol } from './SpriteDrawer.js';
 import { ParticleSystem } from './ParticleSystem.js';
-import { resolveCascadeSequence, applyCascade } from './CascadeMath.js';
+import { applyCascade } from './CascadeMath.js';
 import { createCascadeSpinLogEntry } from './SpinLog.js';
+import { createSeededRng } from './SlotMath.js';
 import { audio } from './SlotAudio.js';
 import { createFlatMultiplierMode } from './FreeSpinsModes.js';
+import { CascadeSpinMechanic } from './CascadeSpinMechanic.js';
+import { simulateSpins } from './SpinSimulator.js';
 
 const SPIN_LOG_MAX_ENTRIES = 20000;
 
@@ -39,6 +42,11 @@ export class CascadeEngine {
       // mode instance (e.g. createMultiplierTilesMode()) to use something else instead. Only
       // ever consulted while inFreeSpins - the base game always uses winEvaluator unwrapped.
       freeSpinsMode: createFlatMultiplierMode(),
+      // The "get symbols for the playfield" component (core/CascadeSpinMechanic.js) - shared
+      // with core/SpinSimulator.js's batch simulation/tuning, so a live spin and a simulated
+      // one resolve identically. A future gameplay mechanic (e.g. a line-win cascade solver)
+      // plugs in here without any CascadeEngine changes.
+      mechanic: CascadeSpinMechanic,
       onStateChange: () => {},
       onScatterTrigger: (scatterCount, isInFreeSpins) => {},
       onWin: () => {},
@@ -453,6 +461,20 @@ export class CascadeEngine {
     return entry;
   }
 
+  // Batch-simulates numBaseSpins base spins (plus any free spins they trigger) via
+  // core/SpinSimulator.js's simulateSpins, reusing this instance's own reelStrips/paytable/
+  // winEvaluator/scatterSymbol/freeSpinsMode - the same free-spins mode a real bonus round
+  // uses, so a simulated free-spins round's economics (e.g. Candy Frenzy's persistent
+  // multiplier tiles) match live play exactly, not a flat approximation. Same 4-arg shape as
+  // SlotEngine.runSimulation (so core/SimulationPanel.js can call either engine identically) -
+  // `linesCount` is accepted only for that parity and always forced to 1 internally (cascade
+  // games have no per-line betting concept - see CascadeSpinMechanic's own doc).
+  runSimulation(numBaseSpins = 100000, betAmount = this.betAmount, linesCount = 1, options = {}) {
+    const { seed = null, logSpins = false } = options;
+    const rng = seed != null ? createSeededRng(seed) : Math.random;
+    return simulateSpins({ ...this.config, logSpins }, numBaseSpins, betAmount, 1, rng);
+  }
+
   // --- Spin controllers ---
 
   requestSpin() {
@@ -502,7 +524,7 @@ export class CascadeEngine {
 
     const spinSeed = seed !== undefined ? seed : ((Date.now() ^ (Math.random() * 0xFFFFFFFF)) >>> 0);
     this.lastSpinSeed = spinSeed;
-    this.cascadeSequence = resolveCascadeSequence(
+    this.cascadeSequence = this.config.mechanic.resolveSequence(
       this.config.reelStrips, this.config.rowsCount, spinSeed, this._buildWinEvaluatorForSpin()
     );
 

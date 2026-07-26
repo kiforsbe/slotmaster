@@ -127,6 +127,124 @@ test('nelderMead reports per-iteration progress via onProgress', async () => {
   assert.deepEqual(iterationsSeen, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
 });
 
+test('nelderMead fires onBusy with operation: "shrink" when reflection/expansion/contraction all fail to improve', async () => {
+  // A flat plateau (loss 1000) everywhere except the exact origin (loss 0, which is also
+  // initialPoint) - reflection/expansion/contraction essentially never land exactly on the
+  // origin, so every iteration falls through to a shrink.
+  const busyEvents = [];
+  await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: (point) => ({ loss: point.every(v => Math.abs(v) < 1e-9) ? 0 : 1000 }),
+    maxIterations: 5,
+    convergenceTolerance: 1e-9,
+    onProgress: null,
+    onBusy: (info) => { busyEvents.push(info); },
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.ok(busyEvents.length > 0, 'expected at least one shrink notification on a flat plateau');
+  busyEvents.forEach(e => {
+    assert.equal(e.operation, 'shrink');
+    assert.equal(e.verticesToEvaluate, 3, 'a 2D search has a 3-vertex simplex (n+1)');
+  });
+});
+
+test('nelderMead reports per-vertex shrink progress when busyReportIntervalMs is lowered', async () => {
+  // Same flat-plateau setup as above, but with busyReportIntervalMs: 0 so every non-last
+  // vertex's completion fires its own progress update (real usage throttles this to avoid
+  // exactly this - see the default-interval test above, which asserts the opposite).
+  const busyEvents = [];
+  await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: (point) => ({ loss: point.every(v => Math.abs(v) < 1e-9) ? 0 : 1000 }),
+    maxIterations: 1,
+    convergenceTolerance: 1e-9,
+    onProgress: null,
+    onBusy: (info) => { busyEvents.push(info); },
+    busyReportIntervalMs: 0,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  // 1 "starting" call (no verticesEvaluated) + one per non-last vertex of the 3-vertex simplex.
+  assert.equal(busyEvents.length, 3);
+  assert.equal(busyEvents[0].verticesEvaluated, undefined, 'the first call announces the shrink is starting, before any vertex is done');
+  assert.deepEqual(busyEvents.slice(1).map(e => e.verticesEvaluated), [1, 2]);
+});
+
+test('nelderMead never fires onBusy on a smooth loss surface where reflection alone keeps improving', async () => {
+  const busyEvents = [];
+  await nelderMead({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y]) => ({ loss: (x - 3) ** 2 + (y + 2) ** 2 }),
+    maxIterations: 20,
+    onProgress: null,
+    onBusy: (info) => { busyEvents.push(info); },
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(busyEvents.length, 0, 'a well-behaved quadratic bowl should never need to shrink');
+});
+
+test('gradientDescent1D fires onBusy with operation: "widen-probe" exactly once, only when the initial probe is flat', async () => {
+  // metric is a step function: flat (5) for param < 14, then 10 - initialParam=10 with the
+  // default epsilon(0.05) only crosses that threshold once the probe widens several times
+  // (widen=8), so this deterministically exercises the widen loop without needing maxIterations
+  // to reach the point where the loop would otherwise stop before probing at all.
+  const busyEvents = [];
+  await gradientDescent1D({
+    initialParam: 10, minParam: 1, maxParam: 100, target: 8, tolerance: 0.01,
+    buildTrial: (param) => ({ param }),
+    metricOf: (result) => result.value,
+    measure: (trial) => ({ value: trial.param < 14 ? 5 : 10 }),
+    maxIterations: 2,
+    seedBase: 1,
+    onProgress: null,
+    onBusy: (info) => { busyEvents.push(info); },
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(busyEvents.length, 1, 'expected exactly one widen-probe notification, not one per widen attempt');
+  assert.equal(busyEvents[0].operation, 'widen-probe');
+  assert.equal(busyEvents[0].iteration, 0);
+});
+
+test('gradientDescent1D reports per-probe widen progress when busyReportIntervalMs is lowered', async () => {
+  // Same step-function setup as above (flat below 14, resolves at widen=8), but with
+  // busyReportIntervalMs: 0 so every probe attempt from the 2nd onward fires its own update.
+  const busyEvents = [];
+  await gradientDescent1D({
+    initialParam: 10, minParam: 1, maxParam: 100, target: 8, tolerance: 0.01,
+    buildTrial: (param) => ({ param }),
+    metricOf: (result) => result.value,
+    measure: (trial) => ({ value: trial.param < 14 ? 5 : 10 }),
+    maxIterations: 2,
+    seedBase: 1,
+    onProgress: null,
+    onBusy: (info) => { busyEvents.push(info); },
+    busyReportIntervalMs: 0,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  // Resolves at probe attempt 4 (sign=+1, widen=8 - see the setup comment above) - attempts
+  // 2, 3, 4 each fire (attempt 1's flat result is what triggers the very first onBusy call).
+  assert.deepEqual(busyEvents.map(e => e.probeAttempt), [2, 3, 4]);
+  busyEvents.forEach(e => assert.equal(e.operation, 'widen-probe'));
+});
+
+test('gradientDescent1D never fires onBusy when the first slope probe already succeeds', async () => {
+  const busyEvents = [];
+  await gradientDescent1D({
+    initialParam: 1, minParam: 0.01, maxParam: 100, target: 70, tolerance: 0.5,
+    buildTrial: (param) => ({ param }),
+    metricOf: (result) => result.value,
+    measure: (trial) => ({ value: 20 * Math.log(trial.param) + 50 }),
+    maxIterations: 5,
+    seedBase: 1,
+    onProgress: null,
+    onBusy: (info) => { busyEvents.push(info); },
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  assert.equal(busyEvents.length, 0, 'a smooth, always-measurable slope should never need to widen');
+});
+
 const REEL_TABLES = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3];
 
 test('tuneFrequencies converges RTP close to target even when baseline data has a large ordering violation', async () => {
@@ -443,6 +561,30 @@ test('tuneFrequencies uniformityPenaltyWeight defaults to off and never blocks a
   const result = await tuneFrequencies(UNIFORMITY_PAYTABLE, UNIFORMITY_REEL_TABLES, UNIFORMITY_COMMON_OPTIONS);
   assert.equal(result.diagnostics.rtpPhase.reason, 'converged');
   assert.ok(typeof result.diagnostics.rtpPhase.uniformityPenaltyRemaining === 'number');
+});
+
+test('tuneFrequencies excludes a fixed: true symbol from uniformity\'s equal-share target entirely', async () => {
+  // fixedSym's frequency (100) is wildly larger than a/b/c's own budget (1+19+10=30) - if it
+  // leaked into uniformity's "equal share" computation at all, a/b/c would get pulled toward
+  // (30+100)/4=32.5 each instead of their own 30/3=10. Same "everyone pays the same" trick as
+  // UNIFORMITY_PAYTABLE isolates RTP pressure from this entirely.
+  const paytable = { a: { payout: [5] }, b: { payout: [5] }, c: { payout: [5] }, fixedSym: { payout: [5] } };
+  const reelTables = [{ symbols: {
+    a: { frequency: 1 }, b: { frequency: 19 }, c: { frequency: 10 },
+    fixedSym: { frequency: 100, fixed: true },
+  } }];
+  const result = await tuneFrequencies(paytable, reelTables, {
+    reelsCount: 1, rowsCount: 1, paylines: [[0]],
+    reelSeeds: [42], betPerLine: 1, linesCount: 1, reelLength: 200,
+    targetRtp: 500, rtpTolerancePct: 5, trialSpins: 4000, trialsPerPoint: 1, maxIterations: 40,
+    orderingBiasByReel: [0], uniformityPenaltyWeight: 5,
+  });
+  const symbols = result.reelFrequencyTables[0].symbols;
+  assert.equal(symbols.fixedSym.frequency, 100, 'fixed: true must leave the symbol\'s own frequency untouched');
+  ['a', 'b', 'c'].forEach(s => {
+    assert.ok(Math.abs(symbols[s].frequency - 10) < 2,
+      `expected ${s} pulled toward a/b/c's OWN equal share (10), not one inflated by fixedSym's 100 (got ${symbols[s].frequency})`);
+  });
 });
 
 // d and e deliberately have no minFrequency/maxFrequency at all - initialWeightStrategy only

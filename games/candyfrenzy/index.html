@@ -66,6 +66,8 @@
     </div>
 
     <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px;">
+      <button id="btn-tune" class="btn-icon btn-sim-btn">TUNE FREQUENCIES</button>
+      <button id="btn-sim" class="btn-icon btn-sim-btn">RUN SIMULATION</button>
       <button id="btn-spinlog" class="btn-icon btn-sim-btn">SPIN LOG</button>
     </div>
 
@@ -109,10 +111,28 @@
     </div>
   </div>
 
-  <!-- Shared modal shell for SPIN LOG (reused from core/SpinLogPanel.js - no RUN SIMULATION/TUNE FREQUENCIES buttons/modals for this game) -->
+  <!-- Shared modal shell for SPIN LOG / RUN SIMULATION / TUNE FREQUENCIES (core/SpinLogPanel.js / core/SimulationPanel.js) -->
   <div id="sim-modal" class="sim-modal" style="display: none;">
     <button class="btn-modal-close">×</button>
-    <div id="sim-stats" class="sim-stats"></div>
+    <h2>Simulation Results</h2>
+    <div id="sim-stats" class="sim-stats">
+      <div class="stat-box">
+        <span class="stat-label">Return to Player (RTP)</span>
+        <div id="sim-rtp" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Total Spins</span>
+        <div id="sim-total-spins" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Max Win</span>
+        <div id="sim-max-win" class="stat-value">-</div>
+      </div>
+      <div class="stat-box">
+        <span class="stat-label">Free Spins Triggered</span>
+        <div id="sim-free-spins" class="stat-value">-</div>
+      </div>
+    </div>
   </div>
 
   <script type="module" src="./game.js"></script>

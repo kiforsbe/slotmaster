@@ -4,6 +4,8 @@ import { generateReel } from '../../core/SlotMath.js';
 import { checkClusterWins } from '../../core/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { createMultiplierTilesMode } from '../../core/FreeSpinsModes.js';
+import { CascadeSpinMechanic } from '../../core/CascadeSpinMechanic.js';
+import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 
 export const REELS_COUNT = 7;
 export const ROWS_COUNT = 7;
@@ -54,30 +56,173 @@ export const PAYTABLE = {
 // All 7 reels start identical (same starting-point convention as barfruits/bookbookbook) -
 // each its own object so a future per-reel hand-edit can't silently affect the others.
 // bonus's triggerFreeSpins gets generateReel's automatic minGap-3 spacing for free.
-const BASE_FREQUENCIES = {
-  cottoncandy: 6.5, gum: 6.5, crystal: 5.0, rocket: 4.5, crown: 4.0, cake: 5.5,
-  mint: 12.0, gummy: 12.0, bean: 11.0, chocolate: 11.0, chewy: 10.0, cherry: 10.0,
-  bonus: 1.5,
+// const BASE_FREQUENCIES = {
+//   cottoncandy: 0.05,
+//   gum:         0.05,
+//   crystal:     0.05,
+//   rocket:      0.05,
+//   crown:       0.05,
+//   cake:        0.05,
+//   mint:        0.10,
+//   gummy:       0.10,
+//   bean:        0.10,
+//   chocolate:   0.10,
+//   chewy:       0.10,
+//   cherry:      0.10,
+//   bonus:       0.01,
+// };
+// function buildFrequencyReel() {
+//   const symbols = Object.fromEntries(Object.entries(BASE_FREQUENCIES).map(([sym, f]) => [sym, { frequency: f }]));
+//   // bonus is the scatter - it stays spaced out (minGap already handles that via
+//   // triggerFreeSpins) rather than ever clumping into a stack like the candy symbols do.
+//   symbols.bonus.minStack = 1;
+//   return {
+//     // 10% chance a given candy occurrence starts a 2-4 stack instead of landing as a lone
+//     // single - occasional clumps of the same candy, not a reel that's always/never stacked.
+//     defaults: { minStack: 2, maxStack: 4, stackChance: 0.10, minFrequency: 0.01, maxFrequency: 1.00 },
+//     symbols,
+//   };
+// }
+// export const FREQUENCY_REEL1 = buildFrequencyReel();
+// export const FREQUENCY_REEL2 = buildFrequencyReel();
+// export const FREQUENCY_REEL3 = buildFrequencyReel();
+// export const FREQUENCY_REEL4 = buildFrequencyReel();
+// export const FREQUENCY_REEL5 = buildFrequencyReel();
+// export const FREQUENCY_REEL6 = buildFrequencyReel();
+// export const FREQUENCY_REEL7 = buildFrequencyReel();
+
+export const FREQUENCY_REEL1 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.146 },
+    gum:         { frequency: 0.1314 },
+    crystal:     { frequency: 0.0627 },
+    rocket:      { frequency: 0.07837 },
+    crown:       { frequency: 0.03132 },
+    cake:        { frequency: 0.04445 },
+    mint:        { frequency: 0.02354 },
+    gummy:       { frequency: 0.0854 },
+    bean:        { frequency: 0.06306 },
+    chocolate:   { frequency: 0.05786 },
+    chewy:       { frequency: 0.06499 },
+    cherry:      { frequency: 0.1109 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
 };
-function buildFrequencyReel() {
-  const symbols = Object.fromEntries(Object.entries(BASE_FREQUENCIES).map(([sym, f]) => [sym, { frequency: f }]));
-  // bonus is the scatter - it stays spaced out (minGap already handles that via
-  // triggerFreeSpins) rather than ever clumping into a stack like the candy symbols do.
-  symbols.bonus.minStack = 1;
-  return {
-    // 10% chance a given candy occurrence starts a 2-4 stack instead of landing as a lone
-    // single - occasional clumps of the same candy, not a reel that's always/never stacked.
-    defaults: { minStack: 2, maxStack: 4, stackChance: 0.10 },
-    symbols,
-  };
-}
-export const FREQUENCY_REEL1 = buildFrequencyReel();
-export const FREQUENCY_REEL2 = buildFrequencyReel();
-export const FREQUENCY_REEL3 = buildFrequencyReel();
-export const FREQUENCY_REEL4 = buildFrequencyReel();
-export const FREQUENCY_REEL5 = buildFrequencyReel();
-export const FREQUENCY_REEL6 = buildFrequencyReel();
-export const FREQUENCY_REEL7 = buildFrequencyReel();
+
+export const FREQUENCY_REEL2 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.0863 },
+    gum:         { frequency: 0.03665 },
+    crystal:     { frequency: 0.00274 },
+    rocket:      { frequency: 0.02202 },
+    crown:       { frequency: 0.07073 },
+    cake:        { frequency: 0.05548 },
+    mint:        { frequency: 0.06362 },
+    gummy:       { frequency: 0.1255 },
+    bean:        { frequency: 0.163 },
+    chocolate:   { frequency: 0.06944 },
+    chewy:       { frequency: 0.1263 },
+    cherry:      { frequency: 0.0784 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
+};
+
+export const FREQUENCY_REEL3 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.04252 },
+    gum:         { frequency: 0.04417 },
+    crystal:     { frequency: 0.02513 },
+    rocket:      { frequency: 0.04414 },
+    crown:       { frequency: 0.02859 },
+    cake:        { frequency: 0.02044 },
+    mint:        { frequency: 0.07327 },
+    gummy:       { frequency: 0.0242 },
+    bean:        { frequency: 0.08399 },
+    chocolate:   { frequency: 0.06749 },
+    chewy:       { frequency: 0.0208 },
+    cherry:      { frequency: 0.02528 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
+};
+
+export const FREQUENCY_REEL4 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.1002 },
+    gum:         { frequency: 0.01783 },
+    crystal:     { frequency: 0.001806 },
+    rocket:      { frequency: 0.03198 },
+    crown:       { frequency: 0.07965 },
+    cake:        { frequency: 0.07212 },
+    mint:        { frequency: 0.00849 },
+    gummy:       { frequency: 0.1153 },
+    bean:        { frequency: 0.2006 },
+    chocolate:   { frequency: 0.1239 },
+    chewy:       { frequency: 0.07815 },
+    cherry:      { frequency: 0.06982 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
+};
+
+export const FREQUENCY_REEL5 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.09981 },
+    gum:         { frequency: 0.04317 },
+    crystal:     { frequency: 0.06434 },
+    rocket:      { frequency: 0.1144 },
+    crown:       { frequency: 0.08984 },
+    cake:        { frequency: 0.02201 },
+    mint:        { frequency: 0.009628 },
+    gummy:       { frequency: 0.1082 },
+    bean:        { frequency: 0.09757 },
+    chocolate:   { frequency: 0.1009 },
+    chewy:       { frequency: 0.08036 },
+    cherry:      { frequency: 0.06973 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
+};
+
+export const FREQUENCY_REEL6 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.06163 },
+    gum:         { frequency: 0.08619 },
+    crystal:     { frequency: 0.09488 },
+    rocket:      { frequency: 0.002432 },
+    crown:       { frequency: 0.1021 },
+    cake:        { frequency: 0.0887 },
+    mint:        { frequency: 0.03907 },
+    gummy:       { frequency: 0.1051 },
+    bean:        { frequency: 0.06764 },
+    chocolate:   { frequency: 0.06796 },
+    chewy:       { frequency: 0.04735 },
+    cherry:      { frequency: 0.1369 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
+};
+
+export const FREQUENCY_REEL7 = {
+  defaults: { maxStack: 4, minStack: 2, minFrequency: 0.005, maxFrequency: 0.25 },
+  symbols: {
+    cottoncandy: { frequency: 0.1044 },
+    gum:         { frequency: 0.0571 },
+    crystal:     { frequency: 0.09467 },
+    rocket:      { frequency: 0.06537 },
+    crown:       { frequency: 0.1115 },
+    cake:        { frequency: 0.12 },
+    mint:        { frequency: 0.06288 },
+    gummy:       { frequency: 0.06577 },
+    bean:        { frequency: 0.02655 },
+    chocolate:   { frequency: 0.08764 },
+    chewy:       { frequency: 0.04574 },
+    cherry:      { frequency: 0.05848 },
+    bonus:       { frequency: 0.008003, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.01 },
+  },
+};
 const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQUENCY_REEL4, FREQUENCY_REEL5, FREQUENCY_REEL6, FREQUENCY_REEL7];
 
 export const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable, REEL_LENGTH, REEL_SEEDS[i], [], 3, PAYTABLE));
@@ -86,7 +231,8 @@ const winEvaluator = (grid) => checkClusterWins(grid, PAYTABLE, MIN_CLUSTER_SIZE
 
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let displayBalance, betValue, betMinus, betPlus, gameTicker;
-let btnSpinLog, simModal, simStats;
+let btnSpinLog, btnSim, btnTune, simModal, simStats;
+let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable, modalFsTrigger, modalFsSummary, btnStartFs, btnCloseFsSummary, fsAwardAmount;
 let fsPanel, fsCounter, fsTotalWin;
 let cheatScatter;
@@ -128,8 +274,14 @@ async function initGame() {
   gameTicker = document.getElementById('game-ticker');
 
   btnSpinLog = document.getElementById('btn-spinlog');
+  btnSim = document.getElementById('btn-sim');
+  btnTune = document.getElementById('btn-tune');
   simModal = document.getElementById('sim-modal');
   simStats = document.getElementById('sim-stats');
+  simRtpDisplay = document.getElementById('sim-rtp');
+  simTotalSpinsDisplay = document.getElementById('sim-total-spins');
+  simMaxWinDisplay = document.getElementById('sim-max-win');
+  simFreeSpinsDisplay = document.getElementById('sim-free-spins');
 
   modalPaytable = document.getElementById('modal-paytable');
   modalFsTrigger = document.getElementById('modal-fs-trigger');
@@ -150,6 +302,51 @@ async function initGame() {
   if (btnSpinLog) {
     btnSpinLog.addEventListener('click', () => {
       openSpinLogPanel({ engine, domRefs: { simModal, simStats } });
+    });
+  }
+  if (btnSim) {
+    btnSim.addEventListener('click', () => {
+      runSimulationAndRender({
+        engine,
+        paytable: PAYTABLE,
+        betPerLine: BET_AMOUNT,
+        linesCount: 1,
+        numSpins: 1000000,
+        labels: CascadeSpinMechanic.statsLabels,
+        domRefs: { btnSim, simModal, simStats, simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay },
+      });
+    });
+  }
+  if (btnTune) {
+    btnTune.addEventListener('click', () => {
+      openTuneFrequenciesPanel({
+        paytable: PAYTABLE,
+        reelFrequencyTables: FREQUENCY_REELS,
+        tuneConfig: {
+          reelsCount: REELS_COUNT,
+          rowsCount: ROWS_COUNT,
+          scatterSymbol: 'bonus',
+          reelSeeds: REEL_SEEDS,
+          betPerLine: BET_AMOUNT,
+          linesCount: 1,
+          reelLength: REEL_LENGTH,
+          mechanic: CascadeSpinMechanic,
+          // Reuses this exact live instance (not a fresh one) so a tuned candidate's measured
+          // RTP reflects the real free-spins economics (persistent multiplier tiles) engine
+          // actually plays with, not a second, potentially-diverging copy.
+          freeSpinsMode: engine.config.freeSpinsMode,
+          // checkClusterWins is called through a per-game closure (winEvaluator, above) rather
+          // than a reusable bare function, so it can't be identified by its own `.name` the
+          // way a line-pay game's winEvaluator can - this names it explicitly instead, with
+          // the primitives (minClusterSize/scatterTriggerCount) tuneFrequenciesWorker.js needs
+          // to rebuild an equivalent closure on its side of postMessage.
+          winEvaluatorName: 'checkClusterWins',
+          minClusterSize: MIN_CLUSTER_SIZE,
+          scatterTriggerCount: SCATTER_TRIGGER_COUNT,
+          freeSpinsCount: FREE_SPINS_AWARD,
+        },
+        domRefs: { simModal, simStats },
+      });
     });
   }
 

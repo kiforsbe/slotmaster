@@ -46,9 +46,21 @@ function runTuneFrequenciesInWorker(paytable, reelFrequencyTables, options, onPr
     const worker = new Worker(new URL('./tuneFrequenciesWorker.js', import.meta.url), { type: 'module' });
     // winEvaluator (a function, e.g. checkWildLineWins) can't cross postMessage - send its
     // name instead, resolved back to the real function inside the worker (see its own
-    // WIN_EVALUATORS table). Everything else in `options` is already plain data.
-    const { onProgress: _ignored, winEvaluator, ...cloneableOptions } = options;
-    cloneableOptions.winEvaluatorName = winEvaluator ? winEvaluator.name : null;
+    // WIN_EVALUATORS table) - this is how every line-pay game already does it, since their
+    // winEvaluator is always one of a couple of reusable bare functions.
+    //
+    // A cascade game's winEvaluator is instead a per-game closure baking in its own paytable/
+    // minClusterSize/scatterSymbol (see CascadeMath.js's own doc), so `.name` (which would
+    // just be the closure's own variable name, e.g. 'winEvaluator') can't identify it the same
+    // way - tuneConfig sets `winEvaluatorName` explicitly instead (e.g. 'checkClusterWins',
+    // alongside minClusterSize/scatterTriggerCount), which wins over any derived name here.
+    //
+    // mechanic/freeSpinsMode (SpinSimulator.js's pluggable components) are likewise objects
+    // with function hooks - sent by name (their own `.name` property) the same way.
+    const { onProgress: _ignored, winEvaluator, mechanic, freeSpinsMode, ...cloneableOptions } = options;
+    cloneableOptions.winEvaluatorName = cloneableOptions.winEvaluatorName ?? (winEvaluator ? winEvaluator.name : null);
+    cloneableOptions.mechanicName = mechanic ? mechanic.name : null;
+    cloneableOptions.freeSpinsModeName = freeSpinsMode ? freeSpinsMode.name : null;
     worker.onmessage = (event) => {
       const msg = event.data;
       if (msg.type === 'progress') {
@@ -95,7 +107,11 @@ function renderWinTable(counts, hitLabel, accentColor, emptyText) {
   return html;
 }
 
-function createSection(title, symbols, symbolStats, paytable) {
+// `labels` overrides the primary (non-scatter, non-wild-assisted, non-alone, non-expanding)
+// win bucket's header/column - defaults to the line-pay wording; a cascade mechanic's caller
+// passes its own (see CascadeSpinMechanic.statsLabels: 'Cluster Wins'/'Cluster Size') so a
+// cluster win doesn't get mislabeled as a payline hit.
+function createSection(title, symbols, symbolStats, paytable, labels = { primaryHeader: 'Normal Wins', hitLabel: 'Hits' }) {
   if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
   let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
   sectionHtml += `<div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">`;
@@ -109,8 +125,8 @@ function createSection(title, symbols, symbolStats, paytable) {
     sectionHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">${friendlyName}</strong>`;
 
     sectionHtml += `<div style="margin-bottom: 8px;">`;
-    sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : 'Normal Wins'}</span>`;
-    sectionHtml += renderWinTable(stats.counts, 'Hits', '#ccc', isScatter ? 'No scatter wins' : 'No standard line wins');
+    sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : labels.primaryHeader}</span>`;
+    sectionHtml += renderWinTable(stats.counts, labels.hitLabel, '#ccc', isScatter ? 'No scatter wins' : `No ${labels.primaryHeader.toLowerCase()}`);
     sectionHtml += `</div>`;
 
     // Wild-assisted matches (natural run one short of a full line, completed by a wild) are
@@ -176,9 +192,12 @@ function groupSymbolsByType(paytable) {
  * @param {number} args.betPerLine
  * @param {number} args.linesCount
  * @param {number} [args.numSpins=1000000]
+ * @param {Object} [args.labels] - Primary win-bucket header/column override for a non-line-pay
+ *   mechanic (see createSection's own doc) - e.g. CascadeSpinMechanic.statsLabels for Candy
+ *   Frenzy's RUN SIMULATION button. Defaults to the line-pay wording.
  * @param {Object} args.domRefs
  */
-export function runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins = 1000000, domRefs }) {
+export function runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins = 1000000, labels, domRefs }) {
   const { btnSim, simModal, simStats, simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay } = domRefs;
 
   btnSim.textContent = 'RUNNING...';
@@ -244,7 +263,7 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
                       </div>`;
       groupSymbolsByType(paytable).forEach(({ type, symbols }) => {
         const title = type.charAt(0).toUpperCase() + type.slice(1) + ' Symbols';
-        detailsHtml += createSection(title, symbols, symbolStats, paytable);
+        detailsHtml += labels ? createSection(title, symbols, symbolStats, paytable, labels) : createSection(title, symbols, symbolStats, paytable);
       });
       detailsContainer.innerHTML = detailsHtml;
 
@@ -320,7 +339,11 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables) {
  * @param {Object} args
  * @param {Object} args.paytable
  * @param {Object[]} args.reelFrequencyTables - One table per reel, each `{ symbol: { frequency } }`.
- * @param {Object} args.tuneConfig - { reelsCount, rowsCount, paylines, reelSeeds, betPerLine, linesCount, reelLength, winEvaluator, wildSymbol, scatterSymbol }
+ * @param {Object} args.tuneConfig - { reelsCount, rowsCount, paylines, reelSeeds, betPerLine, linesCount, reelLength, winEvaluator, wildSymbol, scatterSymbol }.
+ *   A cascade game additionally sets `mechanic` (CascadeSpinMechanic), `freeSpinsMode`, and -
+ *   since its winEvaluator is a per-game closure, not a reusable named function -
+ *   `minClusterSize`/`scatterTriggerCount` alongside `winEvaluator: checkClusterWins` so
+ *   tuneFrequenciesWorker.js can rebuild an equivalent closure on its side of postMessage.
  * @param {Object} args.domRefs - { simModal, simStats }
  */
 export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneConfig, domRefs }) {
@@ -342,7 +365,14 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
     // default to favoring high pay more frequent (builds a "you can see it's close" feel),
     // middle reels to the traditional high-pay-rarer direction, late reels to no preference.
     // Still just a default selection - each dropdown can be changed before starting a tune.
+    //
+    // That near-miss shape is a payline illusion specifically ("premium symbols show up often
+    // on the reels you watch land, but rarely align") - meaningless for a cluster-pays cascade
+    // game, which has no left-to-right line of sight at all. A cascade tuneConfig (mechanic:
+    // CascadeSpinMechanic) defaults every reel to 'No preference' instead.
+    const isCascadeMechanic = tuneConfig.mechanic?.name === 'cascade';
     function defaultBiasForReel(r, count) {
+      if (isCascadeMechanic) return 0;
       if (count <= 1) return 1;
       const bucket = Math.floor(r * 3 / count);
       return bucket === 0 ? 1 : bucket === 1 ? -1 : 0;
@@ -393,7 +423,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <label title="How strongly a symbol's own soft minFrequency/maxFrequency bounds (set directly in its FREQUENCY_REELn entry in game.js, not from this panel) are enforced as a penalty on the search's loss. Higher discourages the search from letting a bounded symbol drift outside its configured range." style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
           <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
-        <label title="Discourages any one tunable symbol's frequency on a reel from sitting drastically far from what an equal split of that reel's budget would give it - 0 (default) is off; raise it if the search keeps producing one or two outlier symbols next to a pack of much smaller ones." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
+        <label title="Discourages any one tunable symbol's frequency on a reel from sitting far from a straight-line target across payout tiers - that line is flat (an equal split) when the reel's ordering preference is 'No preference', and tilts to match that preference's direction/Strength otherwise, so this never fights ordering with a competing flat target. 0 (default) is off; raise it if the search keeps producing one or two outlier symbols relative to that line." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
           <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
         </label>
         <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
@@ -409,9 +439,12 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       </div>
       <p style="font-size: 0.75em; color: #888; margin: -4px 0 12px;">
         Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
-        Nelder-Mead simplex search. Each reel has its own ordering preference (above,
-        pre-selected in a near-miss shape - early reels favor high pay more frequent, middle
-        reels favor it rarer, late reels no preference - adjust any of them freely): "more
+        Nelder-Mead simplex search. Each reel has its own ordering preference (above${isCascadeMechanic
+          ? `, pre-selected as 'No preference' on every reel - the near-miss shape below only
+        makes sense for a payline game's left-to-right line of sight, which a cluster-pays
+        cascade grid doesn't have; adjust any of them freely if you want one anyway`
+          : `, pre-selected in a near-miss shape - early reels favor high pay more frequent, middle
+        reels favor it rarer, late reels no preference - adjust any of them freely`}): "more
         frequent" discourages a higher-paying symbol from being less frequent than a
         lower-paying one on that reel (premium symbols show up often, so lines look close);
         "rarer" is the traditional direction; "no preference" disables it for that reel. It's
@@ -425,15 +458,18 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
         strongly those are enforced, same soft-preference semantics. Uniformity Penalty Weight
         (off by default) is a separate, reel-wide soft preference: it discourages any one
-        tunable symbol from landing drastically far from an equal split of its reel's budget,
-        independently of ordering or of any per-symbol min/max - raise it if the search keeps
-        producing one or two outlier symbols (e.g. 1.45 next to a pack sitting at 0.02-0.065)
-        rather than a comparatively gradual spread. Any violation still present at the end is
+        tunable symbol from landing far from a straight-line target across that reel's payout
+        tiers - not a flat "everyone equal" target. That line's slope comes entirely from the
+        reel's own ordering preference above (its direction and Strength): "No preference"
+        keeps the line flat (an equal split); a real preference tilts the line the same way, so
+        raising this weight pulls harder toward the tilt ordering already wants instead of
+        fighting it with a competing flat preference. Scatter symbols never participate (their
+        ideal frequency plays too different a role). Any violation still present at the end is
         listed below.
       </p>
       <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
       <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
-      <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 160px; overflow-y: auto; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
+      <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 1.05em; line-height: 1.5; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
     `;
     tuneContainer.querySelector('#tune-start-btn').addEventListener('click', () => startTuning({
@@ -573,12 +609,24 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     betPerLine: tuneConfig.betPerLine,
     linesCount: tuneConfig.linesCount,
     winEvaluator: tuneConfig.winEvaluator,
+    // Explicit override for a cascade game, whose winEvaluator is a per-game closure that
+    // can't be identified by its own `.name` (see runTuneFrequenciesInWorker's doc above).
+    winEvaluatorName: tuneConfig.winEvaluatorName,
     wildSymbol: tuneConfig.wildSymbol,
     scatterSymbol: tuneConfig.scatterSymbol,
     freeSpinsCount: tuneConfig.freeSpinsCount,
     freeSpinsAwardTable: tuneConfig.freeSpinsAwardTable,
     retriggerFreeSpinsAwardTable: tuneConfig.retriggerFreeSpinsAwardTable,
     hasExpandingWild: tuneConfig.hasExpandingWild,
+    // Cascade-mechanic-only (undefined/no-op for a line-pay tuneConfig - see SpinSimulator.js's
+    // tuneFrequencies doc): the gameplay mechanic + free-spins mode to measure candidates
+    // against, plus the cluster-evaluator "recipe" runTuneFrequenciesInWorker needs since a
+    // cascade winEvaluator is a per-game closure, not a reusable named function (see
+    // tuneFrequenciesWorker.js's own doc).
+    mechanic: tuneConfig.mechanic,
+    freeSpinsMode: tuneConfig.freeSpinsMode,
+    minClusterSize: tuneConfig.minClusterSize,
+    scatterTriggerCount: tuneConfig.scatterTriggerCount,
     reelLength: parseInt(inputs.reelLength.value, 10) || tuneConfig.reelLength,
     targetRtp: parseFloat(inputs.targetRtp.value) || 96,
     targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
@@ -618,6 +666,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     logEl.scrollTop = logEl.scrollHeight;
   };
 
+  // A 'busy' event (see tuneFrequencies' own doc) can fire more than once for the same
+  // shrink/widen-probe - identified by `key` (iteration+operation) - as it progresses. Updating
+  // the same row in place instead of appending a new one each time is what keeps this from
+  // turning into a wall of near-duplicate lines for one slow step.
+  let lastBusyRow = null, lastBusyKey = null;
+  const appendOrUpdateBusyLog = (key, line) => {
+    if (lastBusyRow && lastBusyKey === key) {
+      lastBusyRow.textContent = line;
+    } else {
+      lastBusyRow = document.createElement('div');
+      lastBusyRow.textContent = line;
+      logEl.appendChild(lastBusyRow);
+      lastBusyKey = key;
+    }
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
   try {
     const initialWeightStrategyLabels = {
       provided: 'configured baseline', uniform: 'random, uniform', normal: 'random, normal',
@@ -652,6 +717,24 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // 'shape' log line looks identical whether or not a restart just happened underneath it.
         if (phase === 'restart') {
           appendLog(`⚠ Round stalled - restarting with a wider step (stepSize=${r.stepSize.toFixed(4)}, stall ${r.stallStreak}/${r.maxStallRestarts} in a row, ${r.restarts} restart${r.restarts === 1 ? '' : 's'} total${r.willStopNow ? ' - giving up after this' : ''})`);
+          return;
+        }
+        // Explains an otherwise-silent, unusually long gap between two ordinary progress lines
+        // (a Nelder-Mead simplex shrink re-evaluating every vertex, or a gradient-descent
+        // plateau-widening retry). Only fires again while that same operation is still running,
+        // throttled server-side to at most once every busyReportIntervalMs - updating the same
+        // row in place (rather than appending a new one per update) keeps a slow step from
+        // turning into a wall of near-duplicate lines.
+        if (phase === 'busy') {
+          const label = r.sourcePhase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
+          const message = r.operation === 'shrink'
+            ? (r.verticesEvaluated != null
+              ? `still working - simplex shrinking (${r.verticesEvaluated}/${r.verticesToEvaluate} candidates evaluated)...`
+              : `still working - simplex shrinking, re-evaluating ${r.verticesToEvaluate} candidates...`)
+            : (r.probeAttempt != null
+              ? `still working - widening probe to find a measurable slope (attempt ${r.probeAttempt}/8)...`
+              : `still working - widening probe to find a measurable slope...`);
+          appendOrUpdateBusyLog(`${i}-${r.operation}`, `… [${label}] ${message}`);
           return;
         }
         const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
