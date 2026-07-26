@@ -191,8 +191,8 @@ export class CascadeEngine {
     this.activePopups = this.activePopups.filter(p => now - p.startTime < p.duration);
 
     if (this.state === 'dropping_in' || this.state === 'falling') {
-      const speed = this.turboMode ? 0.6 : 0.055; // rows per frame
-      const rampDuration = this.turboMode ? 80 : 220; // ms to ease from a standstill up to full speed
+      const speed = this.turboMode ? 0.19 : 0.095; // rows per frame
+      const rampDuration = this.turboMode ? 120 : 240; // ms to ease from a standstill up to full speed
       let allDone = true;
 
       for (let col = 0; col < this.config.reelsCount; col++) {
