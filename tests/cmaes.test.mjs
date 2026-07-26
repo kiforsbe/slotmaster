@@ -146,6 +146,33 @@ test('cmaes never checks signal before generation 0 has a usable best', async ()
   assert.ok(Number.isFinite(loss));
 });
 
+test('cmaes passes the generation index to evaluate, and it is constant within a generation', async () => {
+  // The contract a seed-rotating caller depends on: every candidate in one generation sees the
+  // SAME generation index (so they can share one RNG seed and be ranked fairly against each
+  // other), and it advances between generations (so the objective is resampled rather than a
+  // single fixed noise draw the search can learn to exploit).
+  const seenPerGeneration = new Map();
+  await cmaes({
+    initialPoint: [0, 0],
+    initialStepSize: 1,
+    evaluate: ([x, y], generation) => {
+      if (!seenPerGeneration.has(generation)) seenPerGeneration.set(generation, 0);
+      seenPerGeneration.set(generation, seenPerGeneration.get(generation) + 1);
+      return { loss: (x - 3) ** 2 + (y + 2) ** 2 };
+    },
+    maxIterations: 4,
+    seed: 1,
+    convergenceTolerance: 1e-12,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  const generations = [...seenPerGeneration.keys()].sort((a, b) => a - b);
+  assert.deepEqual(generations, [0, 1, 2, 3], 'expected one distinct generation index per generation, starting at 0');
+  // n=2 gives lambda = 4 + floor(3*ln(2)) = 6 candidates, all sharing that generation's index.
+  generations.forEach(g => {
+    assert.equal(seenPerGeneration.get(g), 6, `generation ${g} must evaluate its whole population under one index`);
+  });
+});
+
 test('cmaes carries extra evaluate() fields through onto the returned result', async () => {
   const { result } = await cmaes({
     initialPoint: [0],

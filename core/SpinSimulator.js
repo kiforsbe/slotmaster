@@ -1116,6 +1116,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePenaltyWeight = 0,
     maxTriggerRefineSteps = 12,
     spacingPenaltyWeight = 0,
+    rotateSeedPerGeneration = true,
     measureHeadroom = true,
     solvePayoutScale = false,
     orderingBiasByReel = null,
@@ -1884,10 +1885,28 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
     let rtpMin = Infinity, rtpMax = -Infinity;
 
+    // `generation` is supplied by cmaes (nelderMead leaves it undefined). When
+    // `rotateSeedPerGeneration` is on, it shifts the measurement seed so every generation sees a
+    // FRESH Monte Carlo draw while all candidates within one generation still share a seed.
+    //
+    // That split is the whole point. Common random numbers within a generation is what makes a
+    // generation's ranking fair, and rank is all CMA-ES consumes. But holding ONE seed across the
+    // entire run - which is what happened before, since cmaes gets its full budget in a single
+    // call and the seed only advanced on a stall-restart - turns the objective into a single
+    // fixed noise realization. The search then does not merely overfit it passively: covariance
+    // adaptation actively learns the directions in which that particular draw is favorable. The
+    // result looks converged and fails to reproduce on any other seed.
+    //
+    // Rotating per generation makes this proper stochastic approximation, which converges on the
+    // TRUE objective rather than one sample of it. Still fully deterministic: the whole sequence
+    // remains a pure function of searchSeed.
     function makeEvaluate(nmSeed) {
-      return async function evaluate(x) {
+      return async function evaluate(x, generation) {
         const reelTables = projectPoint(x);
-        const measured = await measure(reelTables, nmSeed);
+        const seedForThisPoint = (rotateSeedPerGeneration && generation != null)
+          ? nmSeed + generation * 65537
+          : nmSeed;
+        const measured = await measure(reelTables, seedForThisPoint);
         const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
         const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
         const uniformityPenalty = uniformityPenaltyOf(reelTables);
@@ -2064,7 +2083,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
       if (stillImproving.rtp || stillImproving.ordering || stillImproving.limits || stillImproving.uniformity) {
         stallStreak = 0;
-        point = nm.point;
+        // The anchor only moves to this round's endpoint if that endpoint actually became the
+        // cross-round incumbent (`candidateAccepted`, the same statistically-gated test `best`
+        // uses). Previously it advanced whenever ANY ONE of rtp/ordering/limits/uniformity
+        // improved by >2%, which is a much weaker condition than "this candidate is better
+        // overall" - so the search could keep walking its starting point in a direction that only
+        // helped a single term (possibly just noise) while total loss got worse, round after
+        // round. Compounded across restarts and across "continue from this result", that is a
+        // slow drift away from the best point ever found. Falling back to `best.point` keeps the
+        // search anchored to something it has actually verified.
+        point = candidateAccepted ? nm.point : best.point;
       } else {
         stallStreak++;
         restarts++;
@@ -2201,6 +2229,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild, spacingPenaltyWeight, solvePayoutScale,
+    rotateSeedPerGeneration,
   };
 
   return {

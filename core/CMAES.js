@@ -141,7 +141,15 @@ export async function cmaes({
   let D = new Array(n).fill(1);
   let lastEigenGen = 0;
 
-  const evalPoint = async (point) => ({ point, ...(await evaluate(point)) });
+  // `generation` is passed through to `evaluate` so a caller wrapping a stochastic measurement
+  // can rotate its RNG seed per generation while keeping common random numbers WITHIN a
+  // generation. That combination is what CMA-ES actually needs: it is rank-based, so it only
+  // requires that one generation's candidates be compared fairly against each other - it does
+  // not require the objective to be identical across generations. Holding one seed for a whole
+  // run instead makes the search optimize that single noise realization, and the covariance
+  // adaptation will steer into directions where that particular draw happens to be favorable.
+  // Ignored by any evaluate that doesn't declare the parameter, so this is backward compatible.
+  const evalPoint = async (point, generation) => ({ point, ...(await evaluate(point, generation)) });
 
   let best = null;
   let iterations = 0;
@@ -157,7 +165,7 @@ export async function cmaes({
     let completed = 0;
     let lastBusyReportTime = Date.now();
     if (onBusy) await onBusy({ iteration: gen, operation: 'generation', verticesToEvaluate: lambda });
-    const candidates = await Promise.all(points.map((point) => evalPoint(point).then(async (result) => {
+    const candidates = await Promise.all(points.map((point) => evalPoint(point, gen).then(async (result) => {
       completed++;
       const isLast = completed === points.length;
       const now = Date.now();

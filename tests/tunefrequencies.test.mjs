@@ -884,6 +884,62 @@ test('tuneFrequencies options.stdErrorPenaltyWeight defaults to 0 (off), matchin
   assert.equal(withDefault.diagnostics.rtpPhase.loss, withExplicitZero.diagnostics.rtpPhase.loss);
 });
 
+// ---- Phase 2: seed rotation and anchor gating ----
+
+test('rotateSeedPerGeneration resamples the measurement seed each CMA-ES generation, but not within one', async () => {
+  const seedsByGeneration = new Map();
+  await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 800, trialsPerPoint: 1, maxIterations: 4, searchSeed: 3,
+    searchAlgorithm: 'cmaes', measureHeadroom: false,
+    runTrial: (config, numSpins, betPerLine, linesCount, seed) => {
+      const gen = seedsByGeneration.size;
+      if (!seedsByGeneration.has(seed)) seedsByGeneration.set(seed, 0);
+      seedsByGeneration.set(seed, seedsByGeneration.get(seed) + 1);
+      return Promise.resolve({ rtpRaw: 0.9, freeSpinsTriggered: 1, baseSpins: numSpins });
+    },
+  });
+  // More than one distinct seed proves rotation happened at all; a single seed would mean the
+  // whole search ran against one fixed noise realization, which is the bug being fixed.
+  assert.ok(seedsByGeneration.size > 1,
+    `expected several distinct measurement seeds across generations, saw ${seedsByGeneration.size}`);
+  // Each distinct seed must be shared by a whole population, not used once - that is the
+  // common-random-numbers property that keeps a generation's ranking fair.
+  const counts = [...seedsByGeneration.values()];
+  assert.ok(Math.max(...counts) > 1,
+    `expected each generation's seed to be reused across its whole population, counts were ${counts}`);
+});
+
+test('rotateSeedPerGeneration: false keeps one fixed seed for the whole CMA-ES run', async () => {
+  const seeds = new Set();
+  await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 800, trialsPerPoint: 1, maxIterations: 4, searchSeed: 3,
+    searchAlgorithm: 'cmaes', measureHeadroom: false, rotateSeedPerGeneration: false,
+    runTrial: (config, numSpins, betPerLine, linesCount, seed) => {
+      seeds.add(seed);
+      return Promise.resolve({ rtpRaw: 0.9, freeSpinsTriggered: 1, baseSpins: numSpins });
+    },
+  });
+  assert.equal(seeds.size, 1, `expected exactly one seed for the whole run when rotation is off, got ${[...seeds]}`);
+});
+
+test('tuneFrequencies stays deterministic for a given searchSeed with seed rotation on', async () => {
+  const opts = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, maxIterations: 6, searchSeed: 77,
+    searchAlgorithm: 'cmaes', measureHeadroom: false,
+  };
+  const a = await tuneFrequencies(PAYTABLE, REEL_TABLES, opts);
+  const b = await tuneFrequencies(PAYTABLE, REEL_TABLES, opts);
+  assert.deepEqual(a.reelFrequencyTables, b.reelFrequencyTables,
+    'rotating the seed per generation must stay a pure function of searchSeed');
+  assert.equal(a.diagnostics.rtpPhase.loss, b.diagnostics.rtpPhase.loss);
+});
+
 // ---- Phase 0b: structural headroom, and the payout-value solve ----
 
 test('diagnostics.structuralHeadroom reports what an EVEN symbol distribution pays', async () => {
