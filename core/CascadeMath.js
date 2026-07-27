@@ -137,7 +137,9 @@ export function resolveCascadeSequence(strips, rowsCount, seed, winEvaluator, ma
       clusterWins: hasWin ? results.clusterWins : [],
       payout: hasWin ? results.totalPayoutMultiplier : 0,
     });
-    finalScatterWin = results.scatterWin;
+    if (results.scatterWin) {
+      finalScatterWin = results.scatterWin;
+    }
 
     if (!hasWin || stepCount >= maxCascadeSteps) break;
 

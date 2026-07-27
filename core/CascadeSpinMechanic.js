@@ -106,7 +106,10 @@ export const CascadeSpinMechanic = {
   // ClusterMath.js's own convention - the last entry is the biggest cluster's multiplier).
   defaultPayoutOf(paytable, symbol) {
     const tiers = paytable[symbol] && paytable[symbol].clusterPayout;
-    return tiers && tiers.length ? tiers[tiers.length - 1].multiplier : 0;
+    if (tiers && tiers.length) return tiers[tiers.length - 1].multiplier;
+    const payouts = paytable[symbol] && paytable[symbol].payout;
+    if (payouts && payouts.length) return payouts[payouts.length - 1];
+    return 0;
   },
 
   statsLabels: { primaryHeader: 'Cluster Wins', hitLabel: 'Cluster Size' },
