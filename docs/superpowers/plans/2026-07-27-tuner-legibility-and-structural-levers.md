@@ -28,6 +28,9 @@ Every task's requirements implicitly include this section.
 - **Statistical assertions use tolerances derived from the measured noise floor** (≈±1.3pp RTP at 2σ for Candy Frenzy at 40k spins), never exact values.
 - **Baseline test state:** 180 tests, 176 pass, 4 pre-existing failures (barfruits `501 !== 500`; 2× `limitPenaltyWeight` cap; converged-with-violations). These are unrelated to this work and must stay at exactly 4 — a 5th means you broke something.
 - **Docs footer convention:** any README/ARCHITECTURE.md edit updates the "Docs last synced" date + commit footer.
+- **Every capability must reach the panel.** A feature that exists only as a `diagnostics` field is not done. Each package has a UI task, and each one places its controls in the information architecture from the design doc's "User interface" section — *What do you want* / *How the reels should look* / *Search settings* / *Advanced* — rather than appending to the flat input grid.
+- **UI logic lives in pure exported formatters**, not in DOM code: `formatSensitivityReport`, `formatValidationFindings`, `formatLossBudget`, `describePlayerExperience`, and the unit converters. The panel places their output. This is what keeps screens 2 and 3 testable in `node --test` with no DOM, exactly as `formatReelFrequencyTablesForCopy` already is.
+- **Express quantities in the unit a human thinks in**, with the raw value shown alongside: "1 in 167 spins" beside "0.6%", "Low" beside "σ ≈ 2–3×", "Insist" beside "4". Comprehension, not concealment.
 
 ---
 
@@ -38,9 +41,10 @@ Every task's requirements implicitly include this section.
 ## File Structure
 
 - `core/SpinSimulator.js` — `dims` construction, `projectPoint`, a new Phase 2a/2b round loop, `diagnostics.rtpPhase.coupling`
-- `core/SimulationPanel.js` — "Reel coupling" dropdown, `readTuneOptions`, reproducibility header
+- `core/TuningUnits.js` — **new.** Pure unit converters shared by every later UI task.
+- `core/SimulationPanel.js` — restructured into four sections; "Reel coupling" control; `readTuneOptions`; reproducibility header
 - `games/candyfrenzy/game.js` — opt in to `'linked-then-refine'`
-- `tests/tunefrequencies.test.mjs`, `tests/simulationpanel.test.mjs`
+- `tests/tunefrequencies.test.mjs`, `tests/simulationpanel.test.mjs`, `tests/tuningunits.test.mjs`
 
 ### Task 0.1: Linked-mode dimensions and projection
 
@@ -307,7 +311,94 @@ git commit -m "feat: linked-then-refine runs a linked Phase 2a then a bounded pe
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
-### Task 0.3: Panel control, Candy Frenzy opt-in, reproducibility header
+### Task 0.3: Restructure the panel's information architecture
+
+**Files:**
+- Modify: `core/SimulationPanel.js` — `openTuneFrequenciesPanel`'s `innerHTML` block (~L452-545), `inputs` map, `readTuneOptions`
+- Create: `core/TuningUnits.js` — pure unit converters
+- Test: `tests/tuningunits.test.mjs` (new), `tests/simulationpanel.test.mjs`
+
+**Do this before Task 0.4 and before every Package 1–3 UI task.** Today's panel is one flat grid of ~15 numeric inputs at identical visual weight, with all explanation buried in `title` tooltips — "Uniformity Penalty Weight `[0]`" sits exactly as prominently as "Target RTP `[96]`". Every later task in this plan adds controls and output blocks; without a coherent home for them they extend the wall instead of replacing it, and each one becomes more expensive to place than it should be.
+
+**Interfaces:**
+- Produces: `core/TuningUnits.js` exporting `spinsPerTriggerToPct(n)`, `pctToSpinsPerTrigger(p)`, `volatilityBandToSigma(band)`, `sigmaToVolatilityBand(sigma)`, `intentToWeight(level)`, `weightToIntent(w)`. Task 2.2 consumes the last two; Task 3.3 consumes the volatility pair.
+- Produces: four panel sections — `#tune-section-desire` (always visible), `#tune-section-shape`, `#tune-section-search`, `#tune-section-advanced` (all `<details>`).
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spinsPerTriggerToPct, pctToSpinsPerTrigger, volatilityBandToSigma, sigmaToVolatilityBand } from '../core/TuningUnits.js';
+
+test('trigger rate round-trips between percent and 1-in-N without losing precision', () => {
+  // The panel asks for "1 in N spins" because that is how the number is actually reasoned about,
+  // but tuneFrequencies takes a percentage. A lossy conversion would silently tune toward a
+  // different target than the one typed in, which is the exact class of bug that made the old
+  // .toFixed(1) frequency output corrupt every result it produced.
+  for (const pct of [0.6, 0.53, 0.125, 2.04]) {
+    assert.ok(Math.abs(spinsPerTriggerToPct(pctToSpinsPerTrigger(pct)) - pct) < 1e-9, `round trip failed for ${pct}%`);
+  }
+  assert.equal(pctToSpinsPerTrigger(0.6).toFixed(0), '167');
+});
+
+test('volatility bands map to sigma ranges and back', () => {
+  const { min, max } = volatilityBandToSigma('low');
+  assert.ok(min < max);
+  assert.equal(sigmaToVolatilityBand(1.9), 'low', 'the measured Candy Frenzy sigma must classify as low');
+  assert.equal(sigmaToVolatilityBand(6.0), 'high');
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `node --test tests/tuningunits.test.mjs`
+Expected: FAIL — module not found.
+
+- [ ] **Step 3: Implement `core/TuningUnits.js`**
+
+Pure functions only, no DOM, no imports. Volatility bands are rules of thumb and must say so in the module comment: `low` σ < 3, `medium` 3–6, `high` > 6, per unit bet.
+
+- [ ] **Step 4: Restructure the panel markup**
+
+Replace the single grid with the four sections from the design doc. Move every existing input into its section unchanged — **this step must not alter any control's behavior, only its position and label**:
+
+| section | controls |
+|---|---|
+| `#tune-section-desire` (always visible) | target RTP + tolerance; free-spins frequency as 1-in-N + tolerance; (volatility band lands here in Task 3.3) |
+| `#tune-section-shape` (`<details>`) | the five penalty weights (Task 2.2 renames these to intents); per-reel ordering bias; (reel coupling lands here in Task 0.4) |
+| `#tune-section-search` (`<details>`) | algorithm; max iterations; trial spins; trials per point; initial-weight strategy; reel length |
+| `#tune-section-advanced` (`<details>`) | `maxRtpStdError`; `searchSeed`; (later: `maxReelDeviation`, `sensitivitySpins`, skip-validation) |
+
+Each `<summary>` carries a live one-line summary of its own contents (e.g. `Search settings — CMA-ES · 150 iterations · 300k spins`), updated on input change, so a developer can tell whether opening it is worth it.
+
+The trigger-rate input becomes `1 in [N]` with the equivalent percent rendered beside it, converted through `TuningUnits`. `readTuneOptions` converts back before calling `tuneFrequencies` — the library API is unchanged.
+
+- [ ] **Step 5: Write the panel test**
+
+```js
+test('readTuneOptions converts the 1-in-N trigger input back to the percentage the library takes', () => {
+  // The panel's units are for the human; tuneFrequencies' units are unchanged. This asserts the
+  // boundary between them, which is the only place the conversion can go wrong unnoticed.
+  // ... build a fake inputs map with spinsPerTrigger = 167, assert targetTriggerRatePct ~= 0.6 ...
+});
+```
+
+- [ ] **Step 6: Run tests and verify live**
+
+Run: `npm test` — failures still exactly 4.
+Live: open Candy Frenzy's tune panel. Confirm only the three desire controls are visible on open, each `<details>` summary shows its live contents, the trigger input reads "1 in 167" against a 0.6% target, and a short tune still runs and produces the same output as before. Console clean beyond the favicon 404.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add core/SimulationPanel.js core/TuningUnits.js tests/tuningunits.test.mjs tests/simulationpanel.test.mjs
+git commit -m "refactor: restructure the tuning panel around what a developer is asking for
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+### Task 0.4: Reel coupling control, Candy Frenzy opt-in, reproducibility header
 
 **Files:**
 - Modify: `core/SimulationPanel.js` — options block near `#tune-search-algorithm` (~L500), `inputs` map (~L730), `readTuneOptions` (~L797), `formatReelFrequencyTablesForCopy`
@@ -345,21 +436,21 @@ test('formatReelFrequencyTablesForCopy records reelCoupling in the reproducibili
 Run: `node --test tests/simulationpanel.test.mjs`
 Expected: FAIL — header lacks both fields.
 
-- [ ] **Step 3: Add the dropdown**
+- [ ] **Step 3: Add the control to *How the reels should look***
 
-Insert beside the Search Algorithm select, with a `title` explaining the tradeoff in one paragraph (match the existing tooltips' depth and tone):
+Goes in `#tune-section-shape` from Task 0.3 — this is a question about reel design, not about search mechanics, so it does not belong beside the algorithm picker. Phrase the **label and options as the design question**, and keep the dimensionality argument in the tooltip where it belongs:
 
 ```html
-<label title="Whether every reel gets its own frequency for each symbol, or they share one. On a CLUSTER-pays game reel index carries no meaning - a cluster forms from grid-adjacent cells, not from a payline position - so giving each reel its own free weight lets the search invent large per-reel spreads that no part of the design asked for and no part of the loss can justify. That spread IS the 'over-abundance' problem. 'Linked' searches one weight per symbol shared across every reel, which makes the spread unrepresentable rather than merely penalized, and cuts Candy Frenzy from 84 dimensions to 12. 'Linked, then refine' runs the linked search first, then reopens per-reel weights bounded to a small deviation around the linked answer, so a deliberate per-reel tilt is still expressible. Line-pay games should stay Independent - reel position genuinely does mean something there." style="font-size: 0.8em; color: #ccc;">Reel Coupling<br>
+<label title="On a CLUSTER-pays game reel index carries no meaning - a cluster forms from grid-adjacent cells, not from a position in a payline - so giving each reel its own free weight per symbol lets the search invent large per-reel spreads that no part of the design asked for and no part of the loss can justify. That spread IS the 'over-abundance' problem. Measured on Candy Frenzy at 849bc8a: chewy landed at 0.4105 on reel 2 against 0.0056 on reel 3, and those tables paid 74.70% RTP - 27pp WORSE than giving every candy the same frequency (101.48%). 'Same mix' searches one weight per symbol shared across every reel, which makes the spread unrepresentable rather than merely penalized, and cuts Candy Frenzy from 84 search dimensions to 12. 'Same mix, then vary slightly' runs that first, then reopens per-reel weights bounded to a small deviation around the shared answer, so a deliberate per-reel tilt is still expressible. Line-pay games want 'Different mix' - reel position genuinely does mean something there." style="font-size: 0.8em; color: #ccc;">Should every reel use the same symbol mix?<br>
   <select id="tune-reel-coupling" style="width: 100%; margin-top: 4px;">
-    <option value="independent">Independent per reel (default)</option>
-    <option value="linked">Linked - one weight per symbol</option>
-    <option value="linked-then-refine">Linked, then refine per reel</option>
+    <option value="independent">Different mix per reel (line-pay games)</option>
+    <option value="linked">Same mix on every reel</option>
+    <option value="linked-then-refine">Same mix, then vary slightly (cluster games)</option>
   </select>
 </label>
 ```
 
-Pre-select from `tuneConfig.reelCoupling`. Wire `reelCoupling` into the `inputs` map and `readTuneOptions`.
+Pre-select from `tuneConfig.reelCoupling`. Wire `reelCoupling` into the `inputs` map and `readTuneOptions`, and `maxReelDeviation` into *Advanced*. Include the selected mode in the section's `<summary>` line.
 
 - [ ] **Step 4: Emit both in the header, and add them to `inputParameters`**
 
@@ -407,8 +498,10 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - `core/TuningValidation.js` — **new.** Pure, no simulation. Owns every static config check.
 - `core/StructuralSensitivity.js` — **new.** Owns the sweep ladders, elasticity maths, and `routesToTarget`. Takes an injected `measure` so it never imports the simulator.
 - `core/SpinSimulator.js` — calls both as Phase 0a/0c; adds `winEvaluatorFactory`; adds `structuralSearch` as Phase 0d
-- `core/SimulationPanel.js` — renders validation, sensitivity, payout scale
+- `core/SimulationPanel.js` — builds screen 2 ("Before you tune") out of pure formatters, plus the `CHECK MY CONFIG` action that reaches it without running a search
 - `tests/tuningvalidation.test.mjs`, `tests/structuralsensitivity.test.mjs` — **new**
+
+Screen 2 is the highest-value surface in this plan: it answers "which knob do I turn" in seconds, with no search. Tasks 1.3, 1.6 and 1.10 build it; Task 2.3 adds the loss budget to the bottom of it.
 
 Two new modules rather than more of `SpinSimulator.js` (already 2,360 lines): both are pure and independently testable, which is what makes their tests cheap.
 
@@ -1052,6 +1145,77 @@ git commit -m "feat: Phase 0d recommends structural settings via grid search
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
+### Task 1.10: "CHECK MY CONFIG" — screen 2 without a search
+
+**Files:**
+- Modify: `core/SpinSimulator.js` — export `diagnoseConfig()`
+- Modify: `core/SimulationPanel.js` — the button, and screen 2 assembly
+- Test: `tests/tunefrequencies.test.mjs`, `tests/simulationpanel.test.mjs`
+
+**This is the interaction that makes Package 1 worth building.** The validation findings, the headroom number and the sensitivity table all exist without any search — but as written so far they only arrive as a side effect of starting a 150-iteration tune. A developer asking "why is my game at 74.70%" should not have to commit to a full run to find out.
+
+**Interfaces:**
+- Produces: `diagnoseConfig(paytable, reelFrequencyTables, options) -> { validation, structuralHeadroom, reelFeasibility, sensitivity }` — Phases 0a, 0b and 0c only. Shares every code path with `tuneFrequencies` (extracted, not duplicated), so the two can never disagree about what a config measures.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+test('diagnoseConfig runs the diagnosis phases and no search at all', async () => {
+  // The point is speed: a developer asking "which knob do I turn" gets an answer in seconds
+  // rather than after Phase 1 and 150 Phase 2 iterations. It must therefore be impossible for
+  // this to accidentally start a search - asserted by watching the progress phases.
+  const seen = [];
+  const out = await diagnoseConfig(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, sensitivitySpins: 800,
+    onProgress: (phase) => seen.push(phase),
+  });
+  assert.ok(out.sensitivity, 'sensitivity is the whole reason to call this');
+  assert.ok(out.structuralHeadroom);
+  assert.deepEqual(seen.filter(p => p === 'scatter' || p === 'shape'), [],
+    'diagnoseConfig must never run Phase 1 or Phase 2');
+});
+
+test('diagnoseConfig and tuneFrequencies agree on what a config measures', async () => {
+  // Extracted, not duplicated - a second implementation would drift, and a diagnosis that
+  // disagreed with the tune it precedes is worse than no diagnosis.
+  const opts = { ...couplingOptions, sensitivitySpins: 800, searchSeed: 3 };
+  const diag = await diagnoseConfig(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], opts);
+  const tuned = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], opts);
+  assert.equal(diag.structuralHeadroom.uniformRtp, tuned.diagnostics.structuralHeadroom.uniformRtp);
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `node --test tests/tunefrequencies.test.mjs`
+Expected: FAIL — `diagnoseConfig` is not exported.
+
+- [ ] **Step 3: Extract and export**
+
+Lift Phases 0a/0b/0c out of `tuneFrequencies` into a shared internal function that both call. `tuneFrequencies`'s behavior must not change — run the full suite after the extraction and before wiring the button.
+
+- [ ] **Step 4: Wire the button**
+
+`CHECK MY CONFIG` sits beside `START TUNING`. It renders screen 2 and nothing else, leaves the results area untouched, and stays enabled while no tune is running. Errors from validation render the same way they would before a tune, minus the exception.
+
+- [ ] **Step 5: Assemble screen 2 from the pure formatters**
+
+`formatValidationFindings` (Task 1.3) + `formatSensitivityReport` (Task 1.6) + the routes-to-target block with its `APPLY TO OUTPUT` action, in that order, matching the design doc's screen-2 layout. The elasticity bar is rendered from `elasticityRtpPerUnit` normalized against the highest-leverage knob, so leverage is visible before any number is read. A knob with `flat: true` renders "no effect", never a small misleading number.
+
+- [ ] **Step 6: Run tests and verify live**
+
+Run: `npm test` — failures still exactly 4.
+Live: on Candy Frenzy, click `CHECK MY CONFIG` and confirm it returns in seconds, ranks `maxStack` above `stackChance` above `minGap`, flags the `stackChance` mode switch, and offers `payout ×0.946` as the exact route. Confirm no search started (the progress log stays empty).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add core/SpinSimulator.js core/SimulationPanel.js tests/
+git commit -m "feat: CHECK MY CONFIG answers 'which knob do I turn' without running a search
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
 ---
 
 # Package 2 — "What do these knobs mean?"
@@ -1115,8 +1279,9 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ### Task 2.2: Intent-named controls
 
 **Files:**
-- Modify: `core/SimulationPanel.js` — replace the five weight inputs
-- Test: `tests/simulationpanel.test.mjs`
+- Modify: `core/TuningUnits.js` — `intentToWeight` / `weightToIntent` (stubs created in Task 0.3)
+- Modify: `core/SimulationPanel.js` — replace the five weight inputs in `#tune-section-shape`; move raw numbers to `#tune-section-advanced`
+- Test: `tests/tuningunits.test.mjs`, `tests/simulationpanel.test.mjs`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1127,13 +1292,31 @@ test('intent levels map onto normalized weights', () => {
   assert.equal(intentToWeight('insist'), 4);
   assert.equal(intentToWeight('require'), 12);
   assert.equal(weightToIntent(4), 'insist');
-  assert.equal(weightToIntent(2.5), 'custom', 'a hand-typed weight must not be silently rounded into a named level');
+  assert.equal(weightToIntent(2.5), 'custom',
+    'a hand-typed weight must not be silently rounded into a named level - the dropdown would then lie about what the search is doing');
 });
 ```
 
-- [ ] **Step 2–4: Run, implement, run**
+- [ ] **Step 2–3: Run, implement**
 
-Each of ordering / uniformity / spacing / trigger-rate / std-error becomes `Off | Prefer | Insist | Require` with a numeric override behind an `<details>` "advanced" toggle. Each carries a one-sentence description **and the current measured value of that quantity**, so a level is visibly a choice about a real number. Setting `penaltyNormalization: 'normalized'` is implied whenever a game uses intents.
+- [ ] **Step 4: Rebuild the shape section around intents**
+
+Each of ordering / uniformity / spacing / trigger-rate / std-error becomes `Off | Prefer | Insist | Require`, phrased as what it wants rather than what it penalizes:
+
+```
+How the reels should look
+  Should every reel use the same symbol mix?   [ Same mix, then vary slightly ▾ ]
+  Keep symbols evenly spread                   [ Off ▾ ]      now: 0.00 (even)
+  Respect payout ordering                      [ Prefer ▾ ]   now: 5.45 out of order
+  Honor reel spacing                           [ Off ▾ ]      now: 301 violations (19% of runs)
+  Hold the trigger rate                        [ Prefer ▾ ]   now: 0.53% vs 0.60% target
+```
+
+The `now:` column is the point of the exercise: a level is visibly a choice about a real, currently-measured quantity rather than an incantation. Populate it from the last `CHECK MY CONFIG` or tune; show `—` before either has run.
+
+Raw numeric weights move to *Advanced* and stay authoritative — changing one there sets the dropdown to `custom` rather than snapping to a named level. Selecting any named intent implies `penaltyNormalization: 'normalized'`, since the level numbers are only meaningful against normalized penalties; say so in the section's tooltip.
+
+- [ ] **Step 5: Run tests and verify live**
 
 - [ ] **Step 5: Commit**
 
@@ -1163,7 +1346,9 @@ test('the loss preview reports each term in pp, sorted by contribution', async (
 
 - [ ] **Step 2–4: Run, implement, run**
 
-Reuse `makeEvaluate(baseNmSeed)(initialPoint)` — CMA-ES already measures exactly this point for its baseline anchor, so reuse that measurement rather than paying for a second one. Render sorted descending with the dominant term arrowed.
+Reuse `makeEvaluate(baseNmSeed)(initialPoint)` — CMA-ES already measures exactly this point for its baseline anchor, so reuse that measurement rather than paying for a second one.
+
+Rendered by a pure `formatLossBudget` at the **bottom of screen 2**, so it appears both from `CHECK MY CONFIG` and at the start of a tune. Sorted descending, with the dominant term arrowed and called out in words — the failure this prevents is spending 150 iterations before noticing the search was optimizing spacing, not RTP.
 
 - [ ] **Step 5: Commit**
 
@@ -1257,9 +1442,19 @@ test('a flat game is described as low volatility with its big-win drought named'
 });
 ```
 
-- [ ] **Step 2–4: Run, implement, run**
+- [ ] **Step 2–3: Run, implement**
 
-Session outcomes by bootstrap resampling the round histogram — no extra simulation. Volatility bands and the "commercial cluster-cascade games typically run 4–8x" reference are rules of thumb; label them as such in both the code comment and the rendered text.
+Session outcomes by bootstrap resampling the round histogram — no extra simulation. Volatility bands come from `TuningUnits.sigmaToVolatilityBand` (Task 0.3) so the classification shown in the result matches the band the developer asked for in *What do you want*. The bands and the "commercial cluster-cascade games typically run 4–8x" reference are rules of thumb; label them as such in both the code comment and the rendered text.
+
+- [ ] **Step 4: Make it the top of screen 3**
+
+The report goes **above** the diagnostics, immediately under a row of pass/fail chips:
+
+```
+RTP 96.0% ✓        Bonus 1 in 189 ✓        Volatility LOW ✓
+```
+
+Each chip shows the achieved value against the target from *What do you want*, so the answer to "did I get what I asked for" is one glance. The existing diagnostics block, per-iteration table and progress log collapse into `<details>` below it — they are good, but their job is reassurance during the wait, not the answer afterwards.
 
 - [ ] **Step 5: Verify live and commit**
 
@@ -1287,7 +1482,11 @@ test('the volatility penalty is exactly zero inside its band', () => {
 });
 ```
 
-- [ ] **Step 2–4: Run, implement, run**
+- [ ] **Step 2–3: Run, implement**
+
+- [ ] **Step 4: Add it to *What do you want* as the third headline control**
+
+A named band, not a raw σ: `Low ▾` showing `(σ ≈ 2–3× bet)` beside it, converted through `TuningUnits.volatilityBandToSigma`. It sits alongside target RTP and free-spin frequency because it is one of the three things a developer actually wants, and the only one currently inexpressible.
 
 - [ ] **Step 5: Document the honest caveat**
 
@@ -1315,7 +1514,8 @@ Then revisit two deferred items, in this order:
 
 ## Self-Review
 
-- **Spec coverage:** Package 0 → Tasks 0.1–0.3. Package 1 → 1.1–1.9 (validation 1.1–1.3, sweep 1.4–1.6, payout scale 1.7–1.8, structural search 1.9). Package 2 → 2.1–2.3. Package 3 → 3.1–3.3. Package 4 → **deliberately unplanned, marked deferred in Scope and again in "After Package 3"**.
-- **Type consistency:** `Finding` (1.1) is consumed unchanged by 1.2 and 1.3. `buildLadders`/`summarize` (1.4) are consumed by 1.5 and rendered by 1.6. `roundStats` (3.1) is consumed by 3.2 and 3.3. `activeDims`/`reelIndex: null` (0.1) is consumed by 0.2.
+- **Spec coverage:** Package 0 → Tasks 0.1–0.4 (0.3 is the panel restructure every later UI task depends on). Package 1 → 1.1–1.10 (validation 1.1–1.3, sweep 1.4–1.6, payout scale 1.7–1.8, structural search 1.9, `CHECK MY CONFIG` 1.10). Package 2 → 2.1–2.3. Package 3 → 3.1–3.3. Package 4 → **deliberately unplanned, marked deferred in Scope and again in "After Package 3"**.
+- **UI coverage:** every capability has a panel home in the design doc's information architecture. *What do you want* → 0.3 (RTP, trigger-as-1-in-N) and 3.3 (volatility). *How the reels should look* → 0.4 (coupling) and 2.2 (intents). *Before you tune* → 1.3 (validation), 1.6 (sensitivity), 1.10 (assembly + the no-search button), 2.3 (loss budget). *What you got* → 3.2 (player experience + pass/fail chips), 1.8 (payout scale in the copy output). *Advanced* → raw weights (2.2), `maxReelDeviation` (0.4), `sensitivitySpins` (1.5), skip-validation (1.3).
+- **Type consistency:** `Finding` (1.1) is consumed unchanged by 1.2, 1.3 and 1.10. `buildLadders`/`summarize` (1.4) are consumed by 1.5, rendered by 1.6, assembled by 1.10. `roundStats` (3.1) is consumed by 3.2 and 3.3. `activeDims`/`reelIndex: null` (0.1) is consumed by 0.2. `core/TuningUnits.js` (0.3) is consumed by 2.2 (`intentToWeight`) and 3.2/3.3 (`volatilityBandToSigma`, `sigmaToVolatilityBand`) — its stubs are created in 0.3 so later tasks extend rather than invent them.
 - **Known gap:** Tasks 1.7, 1.8, 1.9, 2.1, 2.2, 2.3, 3.2 and 3.3 give test intent and implementation shape rather than complete literal test bodies, because several depend on fixtures established by the task immediately before them. Each one's first step is still "write the failing test" and must not be skipped — write the body against the fixture that exists at that point.
 - **Risk:** Task 2.1 changes what every existing weight means. The `'raw'` default plus dual reporting is the mitigation, but every game's `tuneConfig` needs a deliberate pass before that default flips, and no task here flips it.

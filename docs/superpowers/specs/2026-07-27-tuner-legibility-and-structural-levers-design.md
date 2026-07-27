@@ -39,6 +39,7 @@ A developer should be able to:
 - **Understand what a knob means** — a penalty weight should be denominated in something real, not an incantation.
 - **Know what the numbers mean for a player** — RTP is a margin statistic and says almost nothing about the experience.
 - **State a desire and get a candidate** to accept or reject, rather than hand-deriving the config that satisfies it.
+- **Do all of the above from the panel**, without reading source or a diagnostics JSON dump. Every capability below has a UI obligation attached (see "User interface"); a feature that only exists as a `diagnostics` field is not done.
 
 Non-goals for this design: the candidate-history/accept-reject UI (needs the metrics below to exist first — there is little to compare candidates *on* today), and any change to the live game engines' runtime behavior.
 
@@ -64,6 +65,115 @@ Package 0 first because it is small and because cutting 84 dimensions to 12 make
 - `tuneFrequencies` stays deterministic — every new random draw seeds off `searchSeed`.
 - New progress phases must be handled in `SimulationPanel.js` and covered by the phase-contract test in `tests/tunefrequencies.test.mjs`. An unhandled phase with `best === null` took the panel down once already (`e023fb2`).
 - No hash/golden tests on generated strips. Frequencies and structural settings change constantly; assert behavior, not output.
+
+---
+
+## User interface
+
+Everything above is only as good as the panel it surfaces in, and today's panel is the same shape as the problem this design exists to fix: **one flat grid of roughly fifteen numeric inputs, every one equally prominent, with all the explanation buried in `title` tooltips.** "Uniformity Penalty Weight `[0]`" sits at exactly the same visual weight as "Target RTP `[96]`", though one is the entire point of the exercise and the other is an incantation nobody can price. A developer cannot tell from looking which boxes are the ask, which are the mechanism, and which are dangerous.
+
+The UI is therefore treated as a first-class part of this design rather than a rendering step at the end of each package. **The panel is restructured before any package's own controls are added**, so each one lands somewhere coherent instead of extending the wall.
+
+### Principles
+
+1. **Ask for the desire, not the mechanism.** What a developer wants is three numbers — the RTP, roughly how often the bonus comes, and roughly how swingy it should feel. That is the top of the panel and nothing else is. Every other control is mechanism and gets hidden behind progressive disclosure.
+2. **Diagnose before you search.** The most valuable output in this design (the sensitivity table) needs no search at all. It must be reachable without committing to a 150-iteration run.
+3. **Express every quantity in the unit a human thinks in.** "1 in 167 spins" over "0.6%". "Low / Medium / High" over "σ = 1.9". "Insist" over "4". The raw number stays visible next to the friendly one — the goal is comprehension, not concealment.
+4. **Every knob shows its own current measured value.** A preference is a choice about a real quantity; a control that does not show that quantity is asking for a guess.
+5. **Results say what they mean, not just what they are.** "96.2% RTP" is a fact. "You win on 52% of spins and half those wins are under 0.8× your bet" is the same fact in a form that supports a decision.
+6. **Nothing is silently applied.** Recommendations render with an explicit apply action targeting the copyable output, never the running game.
+
+### Information architecture
+
+Three screens in one panel, in the order a developer actually moves through them.
+
+**1 — What do you want** (always visible, three controls)
+
+```
+WHAT DO YOU WANT?
+  Target RTP           [ 96.0 ] %   ±[ 1.5 ]
+  Free spins about     [ 1 in 167 ] spins        (0.6% ± 0.15)
+  Volatility           [ Low ▾ ]                 (σ ≈ 2–3× bet)
+
+  ▸ How the reels should look        (3 preferences set)
+  ▸ Search settings                  (CMA-ES · 150 iterations · 300k spins)
+  ▸ Advanced                         (raw weights, seeds, per-reel bias)
+
+  [ CHECK MY CONFIG ]        [ START TUNING ]
+```
+
+Trigger rate is entered as "1 in N spins" with the percentage shown alongside, because that is how the number is reasoned about. Volatility is a named band, not a raw σ. The three collapsed sections carry a live summary of their own contents in the header, so a developer knows whether opening one is worth it.
+
+**2 — Before you tune** (produced by `CHECK MY CONFIG`, and automatically at the start of a tune)
+
+This is the "hey dev, if you change these values, this is what it will do" screen. `CHECK MY CONFIG` runs Phase 0a validation, 0b headroom and 0c sensitivity **only** — no Phase 1, no Phase 2 — so the answer arrives in seconds rather than after a full search. It is the single highest-value interaction in this design.
+
+```
+✖ 2 problems must be fixed before tuning
+   cake pays LESS for a bigger cluster: 7+ pays 0.50x but 5+ pays 2.00x
+     → Raise the 7+ multiplier above 2.00x. Until then the tuner is rewarded
+       for making big clusters RARER.
+⚠ 1 warning
+   stackChance is 1.0 — that is a MODE SWITCH, not "always stack" (it pays 40%)
+
+WHICH KNOB MATTERS      even frequencies pay 101.5% · target 96% · noise ±1.3pp
+   maxStack       4     ████████████   ±1 ≈ 87pp     3:40%  [4:101%]  5:189%
+   stackChance  0.30    ███            ±0.1 ≈ 25pp   0.2:77%  [0.3:101%]  0.4:121%
+   minGap         4     ·              no effect     1:105%  [4:101%]  6:102%
+                                       spacing is free here — spend it on looks
+
+TO REACH 96% FROM HERE
+   • scale every payout by 0.946     exact — RTP is strictly proportional to payouts
+   • or set stackChance to ~0.29     interpolated between 0.2 and 0.3
+                                                        [ APPLY TO OUTPUT ]
+
+LOSS BUDGET AT START    what the search will actually optimize
+   spacing      15.1pp  ◀── dominates; the search will trade RTP away for this
+   RTP error     5.5pp
+   ordering      2.7pp
+```
+
+The bar next to each knob is its elasticity, so leverage is visible before any number is read. A knob whose whole ladder sits inside the noise floor renders as "no effect" rather than a small misleading number.
+
+**3 — What you got** (after a tune)
+
+```
+RTP 96.0% ✓        Bonus 1 in 189 ✓        Volatility LOW ✓
+
+WHAT THIS GAME FEELS LIKE
+  You win something on 52% of spins. Half of those wins are under 0.8x your
+  bet — most "wins" return less than the spin cost.
+  A 5x+ win lands every ~90 spins.  20x+ every ~2,400.  50x+: never observed.
+  500-spin session at 1.00:  median −38 · worst 5% −131 · best 5% +47.
+
+  Volatility LOW (σ = 1.9x). Cluster-cascade games typically run 4–8x
+  — rule of thumb, not a measurement.
+
+▸ Diagnostics    (loss breakdown, violations, per-phase reasons)
+▸ Copy output    (frequencies, REEL_LENGTH, scaled paytable, full run header)
+```
+
+The live progress log and per-iteration table stay exactly as they are today — they are genuinely good — but collapse by default once a run finishes, since their job is reassurance during the wait, not the answer.
+
+### Control inventory after the restructure
+
+| section | controls |
+|---|---|
+| **What do you want** (always visible) | target RTP + tolerance; free-spins frequency as 1-in-N + tolerance; volatility band |
+| **How the reels should look** | the five shaping preferences as `Off / Prefer / Insist / Require`, each showing its current measured value; reel coupling; per-reel ordering direction |
+| **Search settings** | algorithm; iterations; trial spins; trials per point; initial-weight strategy |
+| **Advanced** | raw numeric penalty weights; `searchSeed`; `maxRtpStdError`; `maxReelDeviation`; `sensitivitySpins`; skip-validation escape hatch |
+
+The split is by **who needs it, and when** — not by which phase consumes it. A developer tuning a game touches the first section every time, the second occasionally, the third rarely, and the fourth when something has gone wrong.
+
+### Per-package UI obligations
+
+Each package must land its controls in the section above, not append to the panel:
+
+- **Package 0** — reel coupling goes in *How the reels should look*, phrased as a design question ("should every reel use the same symbol mix?"), not as a dimensionality one. Its default for cascade games is pre-selected with the reason visible.
+- **Package 1** — validation and sensitivity are the whole of screen 2, plus the `CHECK MY CONFIG` action that reaches them without a tune. The payout-scale solve renders as a *route to target* with an apply action, not as a checkbox buried among the weights.
+- **Package 2** — the intent controls replace the raw weight inputs in *How the reels should look*; raw numbers move to *Advanced*. The loss budget joins screen 2.
+- **Package 3** — the player-experience report becomes the top of screen 3, above the diagnostics. The volatility target joins *What do you want* as the third headline control.
 
 ---
 
@@ -246,7 +356,9 @@ Known defects, none visible from outside. Deferred because none is worth as much
 - Option defaults are regression-tested: every new option absent must produce results identical to today.
 - New progress phases are added to the existing phase-contract test.
 - Statistical assertions use tolerances derived from the measured noise floor, never exact values, and never strip hashes.
-- Panel tests assert on the formatter output (as `tests/simulationpanel.test.mjs` already does), not on DOM.
+- Panel tests assert on the formatter output (as `tests/simulationpanel.test.mjs` already does), not on DOM. Every screen-2 and screen-3 block is therefore built as a **pure exported formatter** taking plain data and returning a string or a small render descriptor — `formatSensitivityReport`, `formatValidationFindings`, `formatLossBudget`, `describePlayerExperience`. The panel's own job shrinks to placing those outputs, which keeps the interesting logic testable in `node --test` with no DOM.
+- Unit conversions used by the controls (`1 in N` ↔ percent, volatility band ↔ σ range, intent ↔ weight) are pure functions with their own round-trip tests. A conversion that silently loses precision would misreport what the developer asked for.
+- Live verification via Playwright against `http://localhost:5757` for each package's UI task: the control renders, its default is right, and the run completes with no console errors beyond the known favicon 404.
 
 ## Open risks
 
