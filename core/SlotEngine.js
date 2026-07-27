@@ -12,6 +12,10 @@ import { ParticleSystem } from './ParticleSystem.js';
 // enough that an unattended autoplay/turbo session doesn't grow memory usage without bound.
 const SPIN_LOG_MAX_ENTRIES = 20000;
 
+// How far outside the grid a payline's numbered tag sits - and therefore where its line starts
+// and ends, since the line runs tag to tag.
+const LINE_TAG_OFFSET = 15;
+
 export class SlotEngine {
   constructor(canvas, config = {}) {
     this.canvas = canvas;
@@ -1061,25 +1065,29 @@ export class SlotEngine {
       this.ctx.shadowColor = this.ctx.strokeStyle;
       this.ctx.shadowBlur = 12;
 
+      // The tags are where the line begins and ends, not decorations parked beside it, so the
+      // stroke runs from one tag's center to the other, through every cell between. Stopping it
+      // at the outer cells left the numbers floating unattached to the line they label.
+      const lastReel = this.config.reelsCount - 1;
+      const startY = this.reelsY + (path[0] * this.symbolHeight) + (this.symbolHeight / 2);
+      const endY = this.reelsY + (path[lastReel] * this.symbolHeight) + (this.symbolHeight / 2);
+      const leftTagX = this.reelsX - LINE_TAG_OFFSET;
+      const rightTagX = this.reelsX + this.reelsWidth + LINE_TAG_OFFSET;
+
       this.ctx.beginPath();
+      this.ctx.moveTo(leftTagX, startY);
       for (let col = 0; col < this.config.reelsCount; col++) {
         const row = path[col];
         const cx = this.reelsX + (col * this.symbolWidth) + (this.symbolWidth / 2);
         const cy = this.reelsY + (row * this.symbolHeight) + (this.symbolHeight / 2);
-        if (col === 0) {
-          this.ctx.moveTo(cx, cy);
-        } else {
-          this.ctx.lineTo(cx, cy);
-        }
+        this.ctx.lineTo(cx, cy);
       }
+      this.ctx.lineTo(rightTagX, endY);
       this.ctx.stroke();
 
-      // Draw Line Tag numbers at start and end
-      const lastReel = this.config.reelsCount - 1;
-      const startY = this.reelsY + (path[0] * this.symbolHeight) + (this.symbolHeight / 2);
-      const endY = this.reelsY + (path[lastReel] * this.symbolHeight) + (this.symbolHeight / 2);
-      this.drawTag(win.lineIndex + 1, this.reelsX - 15, startY, this.ctx.strokeStyle);
-      this.drawTag(win.lineIndex + 1, this.reelsX + this.reelsWidth + 15, endY, this.ctx.strokeStyle);
+      // Drawn after the stroke, so each tag's opaque disc caps the end it sits on.
+      this.drawTag(win.lineIndex + 1, leftTagX, startY, this.ctx.strokeStyle);
+      this.drawTag(win.lineIndex + 1, rightTagX, endY, this.ctx.strokeStyle);
 
       this.ctx.restore();
     });

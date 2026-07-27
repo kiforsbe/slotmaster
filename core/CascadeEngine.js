@@ -32,6 +32,32 @@ const LINE_COLORS = [
   '#ff6600', '#00ffff', '#9933ff', '#d4af37', '#33ff33',
 ];
 
+// How far outside the grid a payline's numbered tag sits - and therefore where its line starts
+// and ends, since the line runs tag to tag.
+const LINE_TAG_OFFSET = 15;
+
+// How the playfield itself is drawn - everything behind and around the symbols. These were
+// hardcoded to Candy Frenzy's pink-on-purple, which is why Mayan Tumble's stone-and-jade art sat
+// on a synthwave cabinet: one engine, two games, one palette. The defaults below ARE the Candy
+// Frenzy look, so a game that passes nothing is unchanged.
+//
+// `gridLines` is a real choice rather than a colour: a cluster game reads better with cells marked
+// out, because a cluster IS a set of cells and the grid is what makes its shape legible. A themed
+// line-pay game does not need them, and drawing them anyway is what makes a playfield look like a
+// spreadsheet. `noise` replaces them with a fixed grain - texture where the ruling used to be.
+const DEFAULT_PLAYFIELD_THEME = {
+  backdropInner: '#3a1440',
+  backdropOuter: '#140518',
+  outline: '#ff6ec7',
+  outlineGlow: 10,
+  frame: '#2d1030',
+  gridLines: 'rgba(255, 110, 199, 0.25)',
+  noise: null,
+  loadingBackground: '#2a0e2e',
+  loadingColor: '#ff6ec7',
+  loadingText: 'LOADING CANDY...',
+};
+
 export class CascadeEngine {
   constructor(canvas, config = {}) {
     this.canvas = canvas;
@@ -58,6 +84,9 @@ export class CascadeEngine {
       onScatterTrigger: (scatterCount, isInFreeSpins) => {},
       onWin: () => {},
       ...config,
+      // Merged rather than replaced, so a game can restyle one thing (drop the grid lines, say)
+      // without restating the whole playfield.
+      playfield: { ...DEFAULT_PLAYFIELD_THEME, ...(config.playfield ?? {}) },
     };
 
     this.spritesheetUrl = config.spritesheetUrl || '';
@@ -682,6 +711,9 @@ export class CascadeEngine {
     const mode = this.config.freeSpinsMode;
     const overlayBehind = mode.renderOverlayOrder === 'behind';
 
+    // Behind everything inside the grid - it is the playfield's surface, not an effect over it.
+    this._renderPlayfieldNoise();
+
     if (overlayBehind) mode.renderOverlay(this.freeSpinsModeState, this);
     this._renderOutgoingGridSymbols();
     this._renderGridSymbols();
@@ -719,10 +751,16 @@ export class CascadeEngine {
     if (!path) return;
 
     const color = LINE_COLORS[win.lineIndex % LINE_COLORS.length];
+    const lastReel = this.config.reelsCount - 1;
     const centerOf = (col) => ({
       x: this.reelsX + (col + 0.5) * this.symbolWidth,
       y: this.reelsY + (path[col] + 0.5) * this.symbolHeight,
     });
+    // The tags are where the line begins and ends, not decorations parked beside it - so the
+    // stroke runs from one tag's center to the other, through every cell between. Stopping it at
+    // the outer cells instead left the numbers floating unattached to the line they label.
+    const leftTagX = this.reelsX - LINE_TAG_OFFSET;
+    const rightTagX = this.reelsX + this.reelsWidth + LINE_TAG_OFFSET;
 
     this.ctx.save();
     this.ctx.strokeStyle = color;
@@ -732,18 +770,20 @@ export class CascadeEngine {
     this.ctx.shadowColor = color;
     this.ctx.shadowBlur = 12;
     this.ctx.beginPath();
+    this.ctx.moveTo(leftTagX, centerOf(0).y);
     for (let col = 0; col < this.config.reelsCount; col++) {
       const { x, y } = centerOf(col);
-      if (col === 0) this.ctx.moveTo(x, y);
-      else this.ctx.lineTo(x, y);
+      this.ctx.lineTo(x, y);
     }
+    this.ctx.lineTo(rightTagX, centerOf(lastReel).y);
     this.ctx.stroke();
     this.ctx.restore();
 
+    // Drawn after the stroke, so each tag's opaque disc caps the end it sits on.
     // 1-based, because a paytable and a player both count lines from 1.
     const label = win.lineIndex + 1;
-    this._renderLineTag(label, this.reelsX - 15, centerOf(0).y, color);
-    this._renderLineTag(label, this.reelsX + this.reelsWidth + 15, centerOf(this.config.reelsCount - 1).y, color);
+    this._renderLineTag(label, leftTagX, centerOf(0).y, color);
+    this._renderLineTag(label, rightTagX, centerOf(lastReel).y, color);
   }
 
   _renderLineTag(num, x, y, color) {
@@ -765,29 +805,81 @@ export class CascadeEngine {
   }
 
   _renderLoading() {
-    this.ctx.fillStyle = '#2a0e2e';
+    const theme = this.config.playfield;
+    this.ctx.fillStyle = theme.loadingBackground;
     this.ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
-    this.ctx.fillStyle = '#ff6ec7';
+    this.ctx.fillStyle = theme.loadingColor;
     this.ctx.font = 'bold 24px Outfit, Inter, sans-serif';
     this.ctx.textAlign = 'center';
     this.ctx.textBaseline = 'middle';
-    this.ctx.fillText('LOADING CANDY...', this.canvas.width / (2 * (window.devicePixelRatio || 1)), this.canvas.height / (2 * (window.devicePixelRatio || 1)));
+    this.ctx.fillText(theme.loadingText, this.canvas.width / (2 * (window.devicePixelRatio || 1)), this.canvas.height / (2 * (window.devicePixelRatio || 1)));
   }
 
   _renderCabinet() {
+    const theme = this.config.playfield;
     const rx = this.reelsX, ry = this.reelsY, rw = this.reelsWidth, rh = this.reelsHeight;
     const gradient = this.ctx.createRadialGradient(rx + rw / 2, ry + rh / 2, rh * 0.2, rx + rw / 2, ry + rh / 2, rw * 0.7);
-    gradient.addColorStop(0, '#3a1440');
-    gradient.addColorStop(1, '#140518');
+    gradient.addColorStop(0, theme.backdropInner);
+    gradient.addColorStop(1, theme.backdropOuter);
     this.ctx.fillStyle = gradient;
     this.ctx.fillRect(0, 0, rx * 2 + rw, ry * 2 + rh);
 
-    this.ctx.strokeStyle = '#ff6ec7';
+    this.ctx.strokeStyle = theme.outline;
     this.ctx.lineWidth = 4;
-    this.ctx.shadowColor = '#ff6ec7';
-    this.ctx.shadowBlur = 10;
+    this.ctx.shadowColor = theme.outline;
+    this.ctx.shadowBlur = theme.outlineGlow;
     this.ctx.strokeRect(rx - 2, ry - 2, rw + 4, rh + 4);
     this.ctx.shadowBlur = 0;
+  }
+
+  /**
+   * A fixed grain across the playfield, drawn behind the symbols.
+   *
+   * Generated ONCE into an offscreen canvas and blitted every frame: regenerating per frame would
+   * make the whole playfield crawl, which reads as a rendering fault rather than as texture. It is
+   * also seeded, so the grain is the same on every load - a backdrop that reshuffles each time the
+   * page opens is a backdrop the player notices.
+   *
+   * Rebuilt whenever the grid is resized, since it is sized to the grid.
+   */
+  _playfieldNoise() {
+    const noise = this.config.playfield.noise;
+    if (!noise) return null;
+    const w = Math.max(1, Math.ceil(this.reelsWidth));
+    const h = Math.max(1, Math.ceil(this.reelsHeight));
+    if (this._noiseCanvas && this._noiseCanvas.width === w && this._noiseCanvas.height === h) {
+      return this._noiseCanvas;
+    }
+
+    const scale = noise.scale ?? 3;
+    const cols = Math.ceil(w / scale), rows = Math.ceil(h / scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+
+    // A tiny LCG rather than Math.random, for the "same grain every load" promise above.
+    let seed = noise.seed ?? 1337;
+    const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+
+    const [r, g, b] = noise.color ?? [255, 255, 255];
+    const strength = noise.strength ?? 0.05;
+    for (let row = 0; row < rows; row++) {
+      for (let col = 0; col < cols; col++) {
+        // Squared, so most cells are nearly invisible and a few carry the texture - flat uniform
+        // noise just raises the backdrop's brightness and reads as a gray wash.
+        const t = rand() ** 2;
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${(t * strength).toFixed(4)})`;
+        ctx.fillRect(col * scale, row * scale, scale, scale);
+      }
+    }
+    this._noiseCanvas = canvas;
+    return canvas;
+  }
+
+  _renderPlayfieldNoise() {
+    const noise = this._playfieldNoise();
+    if (noise) this.ctx.drawImage(noise, this.reelsX, this.reelsY);
   }
 
   _renderGridSymbols() {
@@ -929,12 +1021,17 @@ export class CascadeEngine {
   }
 
   _renderGridBorders() {
+    const theme = this.config.playfield;
     const rx = this.reelsX, ry = this.reelsY, rw = this.reelsWidth, rh = this.reelsHeight;
-    this.ctx.strokeStyle = '#2d1030';
+    this.ctx.strokeStyle = theme.frame;
     this.ctx.lineWidth = 6;
     this.ctx.strokeRect(rx, ry, rw, rh);
 
-    this.ctx.strokeStyle = 'rgba(255, 110, 199, 0.25)';
+    // A cluster game wants its cells ruled - a cluster IS a set of cells, and the grid is what
+    // makes its shape legible. A themed line-pay game does not, and ruling it anyway makes the
+    // playfield look like a spreadsheet with art in it.
+    if (!theme.gridLines) return;
+    this.ctx.strokeStyle = theme.gridLines;
     this.ctx.lineWidth = 1;
     for (let c = 1; c < this.config.reelsCount; c++) {
       const cx = rx + c * this.symbolWidth;

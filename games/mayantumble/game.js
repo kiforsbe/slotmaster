@@ -254,6 +254,23 @@ async function initGame() {
     paytable: PAYTABLE,
     reelStrips: REEL_STRIPS,
     paylines: PAYLINES,
+    // Stone and jungle rather than the engine's default candy pink-on-purple, which is Candy
+    // Frenzy's look and was showing through under this game's art. No ruled cells: this is a
+    // payline game, so a win is a path across the grid rather than a shape made of cells, and the
+    // lines only made the playfield look like a spreadsheet. The grain replaces them - it gives
+    // the surface something to be without drawing anything the player has to read.
+    playfield: {
+      backdropInner: '#16281c',
+      backdropOuter: '#050c07',
+      outline: '#dfb239',
+      outlineGlow: 6,
+      frame: '#0b120d',
+      gridLines: null,
+      noise: { color: [156, 196, 140], strength: 0.16, scale: 5, seed: 20260727 },
+      loadingBackground: '#0a1410',
+      loadingColor: '#dfb239',
+      loadingText: 'ENTERING THE TEMPLE...',
+    },
     winEvaluator,
     scatterSymbol: 'gold',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),

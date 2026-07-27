@@ -18,10 +18,29 @@ Mayan Tumble is a 5×3 cascading slot game with paylines instead of clusters, se
 - **Premium Symbols:** Llama, Mayan Face, Maize, Mayan Head, Jaguar.
 - **Scatter Symbol:** Gold. (Triggers 10 Free Spins for 3+ scatters, and pays anywhere on the grid like in `bookbookbook`).
 
+## Playfield
+
+`CascadeEngine` draws everything behind and around the symbols, and it used to draw it in Candy
+Frenzy's pink-on-purple — one engine, two games, one hardcoded palette — which is why this game's
+stone-and-jade art sat on a synthwave cabinet. The playfield is now themed per game via the
+engine's `playfield` config, whose defaults *are* the Candy Frenzy look, so a game that passes
+nothing is unchanged.
+
+Mayan Tumble passes a stone-and-jungle theme: a dark green backdrop, a weathered gold outline with
+only a soft halo instead of a neon glow, **no ruled cells**, and a fixed grain across the surface
+in their place. Dropping the grid is a real choice, not a colour one — a cluster game wants its
+cells ruled, because a cluster *is* a set of cells and the ruling is what makes its shape legible,
+but a payline win is a path across the grid and the lines only made the playfield look like a
+spreadsheet with art in it.
+
+The grain is generated once into an offscreen canvas and blitted, not regenerated per frame — a
+crawling backdrop reads as a rendering fault rather than as texture. It is seeded too, so it is
+identical on every load.
+
 ## Dev Tooling
 
 - **SPIN LOG, RUN SIMULATION, and TUNE FREQUENCIES** are supported using the custom line-cascade win evaluator. Run the tuner in-browser to calibrate reel weights and achieve the targeted RTP of ~96%. The reels are **not tuned yet** — short runs land anywhere from 89% to 103%.
 - Tuning trials run in Worker threads, and a closure cannot cross `postMessage`, so the worker rebuilds this game's evaluator from `winEvaluatorName` plus the primitives in `tuneConfig` (`core/mechanicRegistry.js`). Anything the evaluator closes over — `paylines` above all — has to be listed there or the rebuild has nothing to evaluate against.
 
 ---
-_Docs last synced with the codebase: 2026-07-27, commit `5758d0b`._
+_Docs last synced with the codebase: 2026-07-27, commit `5d3cba7`._
