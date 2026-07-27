@@ -117,3 +117,31 @@ test('a knob whose ladder never reaches the target offers no route', () => {
     { targetRtp: 96, noiseFloorPct: 1.3 });
   assert.equal(summary.routesToTarget.find(r => r.knob === 'minGap'), undefined);
 });
+
+test('a flat payoutScale ladder is reported as a broken measurement, not as a useless knob', () => {
+  // RTP is strictly proportional to a global payout multiplier, so a flat payoutScale ladder is
+  // arithmetically impossible - it can only mean the rescaled paytable never reached the win
+  // evaluator. Observed on Candy Frenzy before winEvaluatorFactory existed: 0.8 and 1.25 both
+  // measured 105%. Reporting that as "no measurable effect" would sit directly above
+  // "payoutScale -> 0.953 (exact)" in the same report, and a developer would believe the wrong half.
+  const summary = summarize(
+    { rtp: 105.0 },
+    [{ knob: 'payoutScale', current: 1, ladder: [
+      { value: 0.8, rtp: 105.0 }, { value: 1, rtp: 105.0 }, { value: 1.25, rtp: 105.0 }] }],
+    { targetRtp: 96, noiseFloorPct: 5.2 });
+  const payout = summary.knobs.find(k => k.knob === 'payoutScale');
+  assert.equal(payout.measurementUnreliable, true);
+  assert.match(payout.measurementNote, /winEvaluatorFactory/);
+  // The closed-form route is unaffected - it never depended on the ladder.
+  assert.equal(summary.routesToTarget.find(r => r.knob === 'payoutScale').exact, true);
+});
+
+test('a payoutScale ladder that really moved is not flagged', () => {
+  const summary = summarize(
+    { rtp: 105.3 },
+    [{ knob: 'payoutScale', current: 1, ladder: [
+      { value: 0.8, rtp: 84.2 }, { value: 1, rtp: 105.3 }, { value: 1.25, rtp: 131.6 }] }],
+    { targetRtp: 96, noiseFloorPct: 5.2 });
+  const payout = summary.knobs.find(k => k.knob === 'payoutScale');
+  assert.ok(!payout.measurementUnreliable);
+});

@@ -320,6 +320,13 @@ async function initGame() {
           // simulationTrialWorker.js) needs to rebuild an equivalent closure on its side of
           // postMessage.
           winEvaluatorName: 'checkClusterWins',
+          // Rebuilds an equivalent evaluator around whatever paytable is being measured. Without
+          // it, anything that measures under a RESCALED paytable silently measures the original
+          // payouts instead, because `winEvaluator` above closes over PAYTABLE: the payout-scale
+          // solve cannot verify itself, and the sensitivity sweep's payoutScale ladder comes back
+          // perfectly flat (measured: 0.8 and 1.25 both at 105%), which is arithmetically
+          // impossible for a lever RTP is strictly proportional to.
+          winEvaluatorFactory: (pt) => (grid) => checkClusterWins(grid, pt, MIN_CLUSTER_SIZE, 'bonus', SCATTER_TRIGGER_COUNT),
           minClusterSize: MIN_CLUSTER_SIZE,
           scatterTriggerCount: SCATTER_TRIGGER_COUNT,
           freeSpinsCount: FREE_SPINS_AWARD,

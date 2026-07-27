@@ -6,6 +6,7 @@ import { generateReel, createSeededRng, resolveFrequencyBounds } from './SlotMat
 import { LineMechanic } from './LineMechanic.js';
 import { cmaes } from './CMAES.js';
 import { validateTuningConfig } from './TuningValidation.js';
+import { buildLadders, summarize } from './StructuralSensitivity.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis. Mechanic-agnostic: how one spin
@@ -742,6 +743,33 @@ export async function nelderMead({
  * @param {number} z - margin multiplier (tuneFrequencies' `bestAcceptanceZ` option)
  * @returns {boolean}
  */
+/**
+ * A copy of `paytable` with every payout multiplied by `scale`. Both the line-pay `payout` array
+ * and the cluster `clusterPayout` tier list are scaled; everything else is carried through as-is,
+ * and the input is never mutated.
+ *
+ * This is the one exact RTP lever there is: RTP is strictly proportional to a global multiplier on
+ * every payout - verified on Candy Frenzy to 5 significant figures at both uniform and heavily
+ * skewed frequencies (RTP/k constant at 9.791 and 21.754 respectively). Shared by the
+ * closed-form payout solve and by the sensitivity sweep's own payoutScale ladder, so the two can
+ * never disagree about what "scale the payouts by k" means.
+ */
+export function scalePaytable(paytable, scale) {
+  const scaled = {};
+  Object.keys(paytable).forEach(sym => {
+    const entry = paytable[sym];
+    const copy = { ...entry };
+    if (Array.isArray(entry.clusterPayout)) {
+      copy.clusterPayout = entry.clusterPayout.map(tier => ({ ...tier, multiplier: tier.multiplier * scale }));
+    }
+    if (Array.isArray(entry.payout)) {
+      copy.payout = entry.payout.map(v => (typeof v === 'number' ? v * scale : v));
+    }
+    scaled[sym] = copy;
+  });
+  return scaled;
+}
+
 export function beatsIncumbent(candidate, incumbent, z) {
   if (!incumbent) return true;
   const margin = z * Math.sqrt((candidate.trialRtpStdError ?? 0) ** 2 + (incumbent.trialRtpStdError ?? 0) ** 2);
@@ -1100,6 +1128,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     linesCount = 10,
     paylines,
     winEvaluator,
+    // `(paytable) => winEvaluator` - supply this for any game whose evaluator captures its own
+    // paytable, so measurements taken under a rescaled paytable actually use it. Without it, the
+    // payout-scale solve cannot verify itself and the sensitivity sweep's payoutScale ladder
+    // measures the original payouts at every point.
+    winEvaluatorFactory = null,
     wildSymbol = null,
     scatterSymbol = null,
     targetRtp = 96,
@@ -1121,6 +1154,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     maxReelDeviation = 0.25,
     rotateSeedPerGeneration = true,
     measureHeadroom = true,
+    // Off by default despite being this package's headline feature. The sweep costs ~30 extra
+    // measurements, which is right for a developer who clicked TUNE and wrong for every existing
+    // caller and unit test that never asked for it. The tuning panel turns it on.
+    measureSensitivity = false,
+    sensitivitySpins = null,
+    sensitivityAt = 'uniform',
     skipValidation = false,
     minClusterSize,
     scatterTriggerCount,
@@ -1257,33 +1296,49 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // `paytableOverride` exists for the payout-value solve, which needs to measure the SAME reels
   // under a rescaled paytable to verify the scale actually landed on target. Omitted everywhere
   // else, i.e. unchanged behavior.
-  async function measure(reelTables, rngSeed, lengthOverride, paytableOverride) {
+  // `spinsOverride`/`trialsOverride` exist for the Phase 0c sensitivity sweep, which deliberately
+  // measures many points cheaply (fewer spins, one trial each) because it ranks knobs by leverage
+  // rather than converging any one of them - and reports its own measured noise floor so that
+  // cheapness stays visible. Omitted everywhere else, i.e. unchanged behavior.
+  async function measure(reelTables, rngSeed, lengthOverride, paytableOverride, spinsOverride, trialsOverride) {
+    const spins = spinsOverride ?? trialSpins;
+    const trials = trialsOverride ?? trialsPerPoint;
     const reelStrips = buildReelStrips(reelTables, lengthOverride);
+    // A cascade game's `winEvaluator` is typically a closure over its own paytable - e.g.
+    // `(grid) => checkClusterWins(grid, PAYTABLE, ...)` - so swapping `config.paytable` alone has
+    // no effect on it and the run silently measures the ORIGINAL payouts. That is not a
+    // hypothetical: the Phase 0c payoutScale ladder came back perfectly flat on Candy Frenzy
+    // (0.8 and 1.25 both measuring 105%), which is arithmetically impossible for a lever RTP is
+    // strictly proportional to. `winEvaluatorFactory` lets a caller rebuild an equivalent
+    // evaluator around whichever paytable is actually being measured.
+    const evaluatorForRun = (paytableOverride && winEvaluatorFactory)
+      ? winEvaluatorFactory(paytableOverride)
+      : winEvaluator;
     const config = {
-      reelsCount, rowsCount, paytable: paytableOverride ?? paytable, reelStrips, paylines, winEvaluator, wildSymbol, scatterSymbol,
+      reelsCount, rowsCount, paytable: paytableOverride ?? paytable, reelStrips, paylines, winEvaluator: evaluatorForRun, wildSymbol, scatterSymbol,
       freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
       mechanic, freeSpinsMode,
     };
     let triggerSum = 0;
     const trialRtps = [];
     if (runTrial) {
-      const trialResults = await Promise.all(Array.from({ length: trialsPerPoint }, (_, i) => {
+      const trialResults = await Promise.all(Array.from({ length: trials }, (_, i) => {
         const seed = rngSeed != null ? rngSeed + i * 104729 : null;
-        return runTrial(config, trialSpins, betPerLine, linesCount, seed);
+        return runTrial(config, spins, betPerLine, linesCount, seed);
       }));
       trialResults.forEach(r => {
         triggerSum += (r.freeSpinsTriggered / r.baseSpins) * 100;
         trialRtps.push(r.rtpRaw * 100);
       });
     } else {
-      for (let i = 0; i < trialsPerPoint; i++) {
+      for (let i = 0; i < trials; i++) {
         const rng = rngSeed != null ? createSeededRng(rngSeed + i * 104729) : Math.random;
-        const results = simulateSpins(config, trialSpins, betPerLine, linesCount, rng);
+        const results = simulateSpins(config, spins, betPerLine, linesCount, rng);
         triggerSum += (results.freeSpinsTriggered / results.baseSpins) * 100;
         trialRtps.push(results.rtpRaw * 100);
       }
     }
-    const rtp = trialRtps.reduce((a, b) => a + b, 0) / trialsPerPoint;
+    const rtp = trialRtps.reduce((a, b) => a + b, 0) / trials;
     // Sample standard deviation (n-1 denominator) of the individual trials' own RTP - only
     // meaningful with more than one trial; a single trial has no variance to observe from, so
     // it's reported as 0 (not NaN) - same "no variance information available" signal as
@@ -1297,10 +1352,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // trialsPerPoint grows - the whole point of averaging more trials - so it's what
     // `maxRtpStdError` (see tuneFrequencies' own doc) actually gates acceptability on, not the
     // raw per-trial spread.
-    const trialRtpStdError = trialRtpStdDev / Math.sqrt(trialsPerPoint);
+    const trialRtpStdError = trialRtpStdDev / Math.sqrt(trials);
     return {
       rtp,
-      triggerRate: triggerSum / trialsPerPoint,
+      triggerRate: triggerSum / trials,
       trialRtpMin: Math.min(...trialRtps),
       trialRtpMax: Math.max(...trialRtps),
       trialRtpStdDev,
@@ -1485,6 +1540,74 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   }
   if (onProgress && reelFeasibility.length > 0) {
     await onProgress('feasibility', 0, null, { infeasible: reelFeasibility, reelLength }, null);
+  }
+
+  // ---- Phase 0c: structural sensitivity ----
+  // Phase 0b answers "can an even distribution reach the target?" with one number. This answers
+  // the question a developer actually has next: WHICH knob do I turn, and how far?
+  //
+  // Measured on Candy Frenzy at uniform frequencies, maxStack 4->5 is worth +87pp while minGap
+  // across its whole range moves ~3pp with no monotone trend. That is a ~90x difference in
+  // leverage between two settings that look equally important in a game.js file, and no amount of
+  // frequency search can substitute for the larger one.
+  //
+  // Measured at UNIFORM frequencies by default so a knob's effect is isolated from whatever the
+  // current frequencies happen to be - the shipped Candy Frenzy tables pay 74.70% against 101.48%
+  // for the same reels at even frequencies, so sweeping at the current shape would measure both
+  // things at once and attribute the sum to the knob.
+  let sensitivity = null;
+  if (measureSensitivity) {
+    const sweepBase = sensitivityAt === 'current' ? baseReelTables : uniformizeTables(baseReelTables);
+    const sweepSpins = sensitivitySpins ?? Math.max(1, Math.round(trialSpins / 4));
+    // Trials are held at 1 and spins reduced: this ranks knobs by leverage, and a ranking survives
+    // noise that a converged RTP would not. The noise floor below is what keeps that honest.
+    const sweepMeasure = (tables, seed, lengthOverride, paytableOverride) =>
+      measure(tables, seed, lengthOverride, paytableOverride, sweepSpins, 1);
+
+    // The sweep's own noise floor, measured rather than assumed: the same config under three
+    // different seeds, reported as twice the sample standard deviation. Without it a 1pp
+    // difference between two ladder points reads exactly like a 100pp one, only smaller - and the
+    // whole purpose here is to stop a developer chasing a parameter that did nothing.
+    const noiseSamples = [];
+    for (let i = 0; i < 3; i++) {
+      noiseSamples.push((await sweepMeasure(sweepBase, searchSeed + 880011 + i * 7919)).rtp);
+    }
+    const noiseMean = noiseSamples.reduce((a, b) => a + b, 0) / noiseSamples.length;
+    const noiseSd = Math.sqrt(noiseSamples.reduce((s, v) => s + (v - noiseMean) ** 2, 0) / (noiseSamples.length - 1));
+    const noiseFloorPct = 2 * noiseSd;
+
+    const ladders = buildLadders(sweepBase, { reelLength });
+    const ladderResults = [];
+    for (const { knob, current, values } of ladders) {
+      const ladder = [];
+      for (const value of values) {
+        if (signal?.aborted) break;
+        // Each knob reaches the measurement by its own route: the reel-arrangement knobs through
+        // `defaults`, reel length through the strip builder, payout scale through the paytable.
+        const tables = ['stackChance', 'maxStack', 'minStack', 'minGap'].includes(knob)
+          ? withStructuralDefaults(sweepBase, { [knob]: value })
+          : sweepBase;
+        const lengthOverride = knob === 'reelLength' ? value : undefined;
+        const paytableOverride = knob === 'payoutScale' ? scalePaytable(paytable, value) : undefined;
+        const m = await sweepMeasure(tables, searchSeed + 880100, lengthOverride, paytableOverride);
+        ladder.push({ value, rtp: m.rtp, triggerRate: m.triggerRate });
+        if (onProgress) {
+          await onProgress('sensitivity', ladder.length, null,
+            { event: 'point', knob, value, current, rtp: m.rtp, triggerRate: m.triggerRate, of: values.length }, null);
+        }
+        await yieldToEventLoop();
+      }
+      if (ladder.length >= 2) ladderResults.push({ knob, current, ladder });
+    }
+
+    const baselinePoint = { rtp: noiseMean, triggerRate: null };
+    sensitivity = {
+      measuredAt: sensitivityAt,
+      spinsPerPoint: sweepSpins,
+      noiseFloorPct,
+      ...summarize(baselinePoint, ladderResults, { targetRtp, noiseFloorPct }),
+    };
+    if (onProgress) await onProgress('sensitivity', 0, null, { event: 'complete', ...sensitivity }, null);
   }
 
   let currentReelTables = baseReelTables;
@@ -2453,18 +2576,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   let payoutScale = null;
   if (solvePayoutScale && finalResult.rtp > 0) {
     const scale = targetRtp / finalResult.rtp;
-    const scaledPaytable = {};
-    Object.keys(paytable).forEach(sym => {
-      const entry = paytable[sym];
-      const scaled = { ...entry };
-      if (Array.isArray(entry.clusterPayout)) {
-        scaled.clusterPayout = entry.clusterPayout.map(tier => ({ ...tier, multiplier: tier.multiplier * scale }));
-      }
-      if (Array.isArray(entry.payout)) {
-        scaled.payout = entry.payout.map(v => (typeof v === 'number' ? v * scale : v));
-      }
-      scaledPaytable[sym] = scaled;
-    });
+    const scaledPaytable = scalePaytable(paytable, scale);
     // Verified rather than asserted: linearity held everywhere it was measured, but a mechanic
     // with any non-multiplicative payout component would break it, and silently shipping a
     // paytable that misses the target would be worse than reporting the discrepancy.
@@ -2508,6 +2620,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
     rotateSeedPerGeneration, measureHeadroom, skipValidation,
+    measureSensitivity, sensitivitySpins, sensitivityAt,
   };
 
   return {
@@ -2528,6 +2641,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // asked to invent. Well above 1 means the over-abundance a tune produces is the optimizer
       // correctly compensating for a structural setting, not a search defect.
       structuralHeadroom,
+      // Which structural knob actually moves RTP, and by how much - the answer to "what do I
+      // change?", produced without any search at all. `knobs` is sorted by leverage;
+      // `routesToTarget` gives the single-knob values that reach targetRtp from here, with
+      // payoutScale exact and everything else interpolated between measured points.
+      sensitivity,
       // Closed-form payout-value solve, when requested: the exact multiplier applied to every
       // payout to hit targetRtp, plus a verification measurement under the scaled paytable.
       payoutScale: payoutScale

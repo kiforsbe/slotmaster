@@ -1831,3 +1831,95 @@ test('warnings are reported without blocking the tune', async () => {
   });
   assert.deepEqual(result.diagnostics.validation.filter(f => f.severity === 'error'), []);
 });
+
+// ---- Phase 0c: structural sensitivity ----
+
+// THREE reels, because couplingPaytable pays from 3-of-a-kind. An earlier two-reel version of this
+// fixture could not produce a single line win, so every measurement in the sweep came back at
+// exactly 0% RTP - and the "ladders every knob" test below passed anyway, since 0 is a finite
+// number. Hence the explicit non-zero baseline assertion in that test: a dead fixture must not be
+// able to satisfy it a second time.
+const sensitivityTables = () => Array.from({ length: 3 }, () => ({
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.3 },
+  symbols: { hi: { frequency: 3 }, lo: { frequency: 6 }, scat: { frequency: 1 } },
+}));
+
+const sensitivityOptions = {
+  reelsCount: 3, rowsCount: 3, reelLength: 60, reelSeeds: [11, 22, 33],
+  paylines: [[0, 0, 0]], linesCount: 1, betPerLine: 1,
+  trialSpins: 1200, trialsPerPoint: 1, maxIterations: 2, searchSeed: 5,
+};
+
+test('the sensitivity sweep ladders every configured knob and reports its own noise floor', async () => {
+  const result = await tuneFrequencies(couplingPaytable, sensitivityTables(), {
+    ...sensitivityOptions, measureSensitivity: true, sensitivitySpins: 400,
+  });
+  const s = result.diagnostics.sensitivity;
+  assert.ok(s, 'sensitivity must be reported when asked for');
+  assert.equal(s.measuredAt, 'uniform');
+  assert.ok(Number.isFinite(s.noiseFloorPct) && s.noiseFloorPct >= 0,
+    'the sweep must report its own noise floor, or a tie reads as a finding');
+  assert.ok(s.baseline.rtp > 0,
+    'the fixture must actually pay something - an all-zero sweep satisfies every other assertion here while measuring nothing');
+  for (const knob of ['stackChance', 'maxStack', 'minStack', 'minGap', 'reelLength', 'payoutScale']) {
+    assert.ok(s.knobs.some(k => k.knob === knob), `expected a ladder for ${knob}, got ${s.knobs.map(k => k.knob).join(', ')}`);
+  }
+  s.knobs.forEach(k => {
+    assert.ok(k.ladder.length >= 2, `${k.knob} needs at least two measured points to say anything`);
+    k.ladder.forEach(p => assert.ok(Number.isFinite(p.rtp), `${k.knob} ladder point ${p.value} has no measured RTP`));
+  });
+  for (let i = 1; i < s.knobs.length; i++) {
+    assert.ok(s.knobs[i - 1].elasticityRtpPerUnit >= s.knobs[i].elasticityRtpPerUnit,
+      `knobs must be sorted by leverage, got ${s.knobs.map(k => `${k.knob}:${k.elasticityRtpPerUnit.toFixed(2)}`).join(' ')}`);
+  }
+});
+
+test('the payoutScale ladder actually rescales payouts, so its route to target is exact', async () => {
+  // RTP is strictly proportional to a global payout multiplier. If the sweep measured payoutScale
+  // without really applying it, every point would come back identical and the one exactly-solvable
+  // route in the whole report would be silently fictional.
+  const result = await tuneFrequencies(couplingPaytable, sensitivityTables(), {
+    ...sensitivityOptions, measureSensitivity: true, sensitivitySpins: 400,
+  });
+  const scale = result.diagnostics.sensitivity.knobs.find(k => k.knob === 'payoutScale');
+  const at = (v) => scale.ladder.find(p => p.value === v).rtp;
+  assert.ok(at(1.25) > at(0.8), `payoutScale must move RTP: 0.8 gave ${at(0.8)}, 1.25 gave ${at(1.25)}`);
+  // Proportional to 3 significant figures - the property the closed-form route depends on.
+  assert.ok(Math.abs((at(1.25) / at(0.8)) - (1.25 / 0.8)) < 0.01,
+    `RTP must scale linearly with payouts, got ratio ${(at(1.25) / at(0.8)).toFixed(4)} against ${(1.25 / 0.8).toFixed(4)}`);
+});
+
+test('measureSensitivity defaults to off, so no existing caller pays for the sweep', async () => {
+  const result = await tuneFrequencies(couplingPaytable, sensitivityTables(), sensitivityOptions);
+  assert.equal(result.diagnostics.sensitivity, null);
+});
+
+test('the sweep can measure at the current frequencies instead of uniform ones', async () => {
+  const result = await tuneFrequencies(couplingPaytable, sensitivityTables(), {
+    ...sensitivityOptions, measureSensitivity: true, sensitivitySpins: 400, sensitivityAt: 'current',
+  });
+  assert.equal(result.diagnostics.sensitivity.measuredAt, 'current');
+});
+
+test('winEvaluatorFactory rebuilds the evaluator so a rescaled paytable is actually measured', async () => {
+  // A cascade game's evaluator closes over its own paytable, so swapping config.paytable alone
+  // does nothing and the run measures the ORIGINAL payouts. Measured on Candy Frenzy before this
+  // existed: the payoutScale ladder came back flat at 105% for every point from 0.8 to 1.25,
+  // which is impossible for a lever RTP is strictly proportional to.
+  const closureEvaluator = (pt) => (grid) => checkWildLineWins(grid, pt, [[0, 0, 0]], 1);
+  const measured = {};
+  for (const withFactory of [false, true]) {
+    const result = await tuneFrequencies(couplingPaytable, sensitivityTables(), {
+      ...sensitivityOptions, measureSensitivity: true, sensitivitySpins: 600,
+      // Captured over the ORIGINAL paytable, exactly like a real game's winEvaluator.
+      winEvaluator: closureEvaluator(couplingPaytable),
+      winEvaluatorFactory: withFactory ? closureEvaluator : null,
+    });
+    const ladder = result.diagnostics.sensitivity.knobs.find(k => k.knob === 'payoutScale').ladder;
+    measured[withFactory] = ladder.find(p => p.value === 1.25).rtp - ladder.find(p => p.value === 0.8).rtp;
+  }
+  assert.ok(Math.abs(measured[false]) < 1e-9,
+    `without the factory the ladder must be flat - that is the bug being demonstrated, got a span of ${measured[false]}`);
+  assert.ok(measured[true] > 0,
+    `with the factory the ladder must move, got a span of ${measured[true]}`);
+});

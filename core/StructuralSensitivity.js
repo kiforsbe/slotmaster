@@ -126,6 +126,25 @@ export function summarize(baseline, ladderResults, { targetRtp, noiseFloorPct = 
     return { knob, current, ladder: sorted, span, flat, elasticityRtpPerUnit: flat ? 0 : elasticityRtpPerUnit };
   }).sort((a, b) => b.elasticityRtpPerUnit - a.elasticityRtpPerUnit);
 
+  // RTP is strictly proportional to a global payout multiplier, so a FLAT payoutScale ladder is
+  // arithmetically impossible - it can only mean the scaled paytable never reached the win
+  // evaluator. That happens whenever a game's evaluator is a closure over its own paytable (every
+  // cascade game here) and no `winEvaluatorFactory` was supplied to rebuild it.
+  //
+  // Detected rather than reported as a knob property, because "payoutScale: no measurable effect"
+  // sitting directly above "payoutScale -> 0.953 (exact)" is a self-contradicting report, and the
+  // wrong half is the one a developer would believe.
+  const payout = knobs.find(k => k.knob === 'payoutScale');
+  const payoutMeasurementBroken = !!payout && payout.flat;
+  if (payoutMeasurementBroken) {
+    payout.measurementUnreliable = true;
+    payout.measurementNote =
+      'This ladder measured the ORIGINAL payouts at every point, so its flatness says nothing about the knob. '
+      + 'RTP is strictly proportional to a global payout multiplier, so a flat result here is impossible. '
+      + "The cause is a winEvaluator that captured its own paytable - pass `winEvaluatorFactory: (paytable) => ...` in this game's tuneConfig to fix it. "
+      + 'The closed-form route below is still correct; only this ladder is uninformative.';
+  }
+
   const routesToTarget = [];
 
   // The exact one. RTP is strictly proportional to a global multiplier on every payout - verified
