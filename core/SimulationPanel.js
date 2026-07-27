@@ -5,6 +5,7 @@ import { resolveFrequencyBounds } from './SlotMath.js';
 import { exportSpinLogCsv } from './SpinLog.js';
 import { tuneFrequencies } from './SpinSimulator.js';
 import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
+import { spinsPerTriggerToPct, pctToSpinsPerTrigger } from './TuningUnits.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -450,95 +451,134 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
 
     tuneContainer.innerHTML = `
       <h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Frequency Tuner</h3>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px;">
-        <label title="The RTP percent the search tries to hit (e.g. 96 for 96%). Phase 2 stops adjusting once within its tolerance band, balanced against the Ordering/Limit/Uniformity penalties below." style="font-size: 0.8em; color: #ccc;">Target RTP (%)<br>
-          <input id="tune-target-rtp" type="number" value="96" step="0.5" min="1" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="The percent of spins that should trigger free spins - only matters if this paytable has a triggerFreeSpins: true symbol. Phase 1 scales that symbol's frequency (identically on every reel) until the measured rate lands within tolerance of this, before Phase 2 touches anything else." style="font-size: 0.8em; color: #ccc;">Target Trigger Rate (%)<br>
-          <input id="tune-target-trigger" type="number" value="0.6" step="0.05" min="0.01" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Virtual reel strip length used to build each candidate's reel strips - defaults to this game's own REEL_LENGTH. Longer reels let low frequencies round to more distinct symbol counts, at the cost of a slower simulation per candidate." style="font-size: 0.8em; color: #ccc;">Reel Length<br>
-          <input id="tune-reel-length" type="number" value="${tuneConfig.reelLength}" step="10" min="30" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="How many spins are simulated to measure each candidate's RTP/trigger rate. Higher reduces Monte Carlo noise but makes every iteration slower - see also Trials Averaged." style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
-          <input id="tune-trial-spins" type="number" value="300000" step="50000" min="10000" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="How many independent Trial Spins runs are averaged per candidate measurement. Higher further reduces noise in the RTP/trigger estimate, at a proportional cost in time (2 trials ≈ 2x the work per iteration)." style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
-          <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Caps how uncertain a candidate's own averaged RTP is allowed to be before it can count as a genuine hit on Target RTP - measured as the standard error of the mean across its Trials Averaged repeats. A high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly) can average out to a plausible-looking RTP while its individual trials still disagree wildly - that's a lucky/unlucky sample, not a trustworthy measurement. Raise this (or raise Trial Spins/Trials Averaged instead, now cheap thanks to the Worker pool) if a real search keeps stalling here." style="font-size: 0.8em; color: #ccc;">Max RTP Std Error (%)<br>
-          <input id="tune-max-rtp-std-error" type="number" value="1" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Upper bound on Nelder-Mead iterations for the joint frequency search (Phase 2). The search may stop earlier if it converges, stalls out after repeated restarts, or is already essentially resolved - see the reason reported after a run." style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
-          <input id="tune-max-iterations" type="number" value="150" step="10" min="10" max="1000" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="How strongly each reel's ordering preference (below) is enforced as a soft penalty on the search's loss, relative to hitting Target RTP. Higher makes the search work harder to satisfy every reel's preference even at some cost to RTP accuracy." style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
-          <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="How strongly a symbol's own soft minFrequency/maxFrequency bounds (set directly in its FREQUENCY_REELn entry in game.js, not from this panel) are enforced as a penalty on the search's loss. Higher discourages the search from letting a bounded symbol drift outside its configured range." style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
-          <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Discourages any one tunable symbol's frequency on a reel from sitting far from a straight-line target across payout tiers - that line is flat (an equal split) when the reel's ordering preference is 'No preference', and tilts to match that preference's direction/Strength otherwise, so this never fights ordering with a competing flat target. 0 (default) is off; raise it if the search keeps producing one or two outlier symbols relative to that line." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
-          <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Adds a candidate's own measurement unreliability (standard error across its Trials Averaged repeats) directly into the search's loss, on top of Max RTP Std Error / a candidate's Best-acceptance margin (which only ever gate whether a result can count as converged or replace the current best AFTER the fact). Raising this gives the search an active incentive to prefer more reliably-reproducible regions of the search space DURING the search itself, not just whichever candidate happens to look best on one noisy average. 0 (default) is off - loss ignores std error entirely, unchanged from before this option existed." style="font-size: 0.8em; color: #ccc;">Std Error Penalty Weight<br>
-          <input id="tune-std-error-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Penalizes how far a candidate's trigger rate sits OUTSIDE the target band (zero anywhere inside it), in percentage points - the same scale as RTP error, so a weight of 1 trades 1pp of trigger-rate drift against 1pp of RTP error. Phase 2 never tunes trigger symbols directly, so for a line-pay game the trigger rate cannot move and this can stay 0. For a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies (bonus frequency held identical) swings the trigger rate from 0.75% to 2.04%. With this at 0 the search cannot see that happening, which is how a cascade tune ends up with a good RTP and a trigger rate nowhere near target." style="font-size: 0.8em; color: #ccc;">Trigger Rate Penalty Weight<br>
-          <input id="tune-trigger-rate-weight" type="number" value="${tuneConfig.triggerRatePenaltyWeight ?? 0}" step="0.5" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="Penalizes reel-SPACING constraints the generated strip actually fails to honor: runs of the same symbol closer together than its minGap, and runs longer than its maxStack. generateReel enforces both BEST-EFFORT - on a strip too dense to space a symbol out it silently gives up - so without this the search sees no cost at all in pushing a symbol's frequency past what the strip can represent, while the shipped reels clump far more than the config asks. On a cluster-pays game that clumping is exactly what inflates cluster wins and RTP. Counted as one unit per too-close run pair plus one per position a run exceeds maxStack. Note this cannot always reach zero: a symbol needing minGap G can have at most reelLength/G runs, and a game already over that ceiling at baseline starts non-zero - the point is to stop the search making it much worse." style="font-size: 0.8em; color: #ccc;">Reel Spacing Penalty Weight<br>
-          <input id="tune-spacing-weight" type="number" value="${tuneConfig.spacingPenaltyWeight ?? 0}" step="0.05" min="0" style="width: 100%; margin-top: 4px;">
-        </label>
-        <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
-          <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
-            <option value="provided" selected>Use configured baseline (default)</option>
-            <option value="uniform">Random (uniform) within min/max</option>
-            <option value="normal">Random (normal) within min/max</option>
-          </select>
-        </label>
-        <label title="Which algorithm searches the per-symbol reel weights (Phase 2). CMA-ES (default in this panel) is a population-based search that scales better to many tunable symbols at once and is more tolerant of noisy RTP measurements (e.g. Candy Frenzy's cascade multiplier bonus), at the cost of evaluating a whole population of candidates every generation instead of one or two. Nelder-Mead is a simpler simplex search - cheaper for a small number of tunable symbols, and still tuneFrequencies' own library-level default when this option is omitted entirely." style="font-size: 0.8em; color: #ccc;">Search Algorithm<br>
-          <select id="tune-search-algorithm" style="width: 100%; margin-top: 4px;">
-            <option value="cmaes" selected>CMA-ES (default)</option>
-            <option value="nelderMead">Nelder-Mead</option>
-          </select>
-        </label>
+      <!-- 1. WHAT DO YOU WANT - the three things a developer is actually asking for, always
+           visible. Everything below this is mechanism and lives behind progressive disclosure. -->
+      <div id="tune-section-desire" style="background: rgba(127,191,255,0.07); border: 1px solid rgba(127,191,255,0.25); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;">
+        <div style="font-size: 0.72em; letter-spacing: 0.08em; color: #8fb8ff; text-transform: uppercase; margin-bottom: 8px;">What do you want?</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px;">
+          <label title="The RTP percent the search tries to hit (e.g. 96 for 96%), and how far either side of it still counts as a hit. Phase 2 stops adjusting once inside that band, balanced against the shaping preferences below." style="font-size: 0.8em; color: #ccc;">Target RTP<br>
+            <span style="display: flex; gap: 5px; align-items: center; margin-top: 4px;">
+              <input id="tune-target-rtp" type="number" value="96" step="0.5" min="1" style="flex: 1; min-width: 0;">
+              <span style="color: #888;">%  ±</span>
+              <input id="tune-rtp-tolerance" type="number" value="1.5" step="0.1" min="0.01" style="width: 62px;">
+            </span>
+          </label>
+          <label title="How often free spins should trigger, entered the way it is actually reasoned about - one bonus every N spins - and converted to the percentage the search takes. Only matters if this paytable has a triggerFreeSpins: true symbol. Phase 1 scales that symbol's frequency until the measured rate lands inside the band, before Phase 2 touches anything else. Note the reachable rates form a coarse lattice: a symbol landing only a handful of times on the strip means one whole symbol is a large step, so a target can sit in a gap between two achievable values - Phase 1 reports that as 'lattice-gap' rather than burning its budget on it." style="font-size: 0.8em; color: #ccc;">Free spins about every<br>
+            <span style="display: flex; gap: 5px; align-items: center; margin-top: 4px;">
+              <input id="tune-target-trigger-spins" type="number" value="${Math.round(pctToSpinsPerTrigger(tuneConfig.targetTriggerRatePct ?? 0.6) ?? 167)}" step="1" min="1" style="flex: 1; min-width: 0;">
+              <span style="color: #888;">spins ±</span>
+              <input id="tune-trigger-tolerance" type="number" value="0.15" step="0.05" min="0.01" style="width: 62px;">
+            </span>
+            <span id="tune-trigger-pct-echo" style="display: block; font-size: 0.85em; color: #888; margin-top: 3px;">&nbsp;</span>
+          </label>
+        </div>
       </div>
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 12px;">
-        ${biasSelectorsHtml}
-      </div>
-      <details style="margin-bottom: 12px;">
-        <summary style="font-size: 0.75em; color: #999; cursor: pointer; user-select: none;">How this search works, and what each option above does ▸</summary>
-        <p style="font-size: 0.75em; color: #888; margin: 8px 0 0;">
-        Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
-        Nelder-Mead simplex search. Each reel has its own ordering preference (above${isCascadeMechanic
-          ? `, pre-selected as 'No preference' on every reel - the near-miss shape below only
-        makes sense for a payline game's left-to-right line of sight, which a cluster-pays
-        cascade grid doesn't have; adjust any of them freely if you want one anyway`
-          : `, pre-selected in a near-miss shape - early reels favor high pay more frequent, middle
-        reels favor it rarer, late reels no preference - adjust any of them freely`}): "more
-        frequent" discourages a higher-paying symbol from being less frequent than a
-        lower-paying one on that reel (premium symbols show up often, so lines look close);
-        "rarer" is the traditional direction; "no preference" disables it for that reel. It's
-        always a soft preference, not an absolute rule - the search will accept a small violation rather
-        than push RTP far off target. Each reel's own <strong>Strength</strong> multiplies how hard
-        that specific reel's preference is enforced (1 = normal, 0 = same as "no preference" without
-        losing the direction dropdown's selection, above 1 = enforced harder) - useful when one
-        reel's preference is visibly dominating the tune at the shared Ordering Penalty Weight
-        below. A symbol can also carry its own soft <code>min</code>/
-        <code>max</code> frequency bounds directly in its FREQUENCY_REELn entry (edit that in
-        game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
-        strongly those are enforced, same soft-preference semantics. Uniformity Penalty Weight
-        (off by default) is a separate, reel-wide soft preference: it discourages any one
-        tunable symbol from landing far from a straight-line target across that reel's payout
-        tiers - not a flat "everyone equal" target. That line's slope comes entirely from the
-        reel's own ordering preference above (its direction and Strength): "No preference"
-        keeps the line flat (an equal split); a real preference tilts the line the same way, so
-        raising this weight pulls harder toward the tilt ordering already wants instead of
-        fighting it with a competing flat preference. Scatter symbols never participate (their
-        ideal frequency plays too different a role). Any violation still present at the end is
-        listed below.
-        </p>
+
+      <!-- 2. HOW THE REELS SHOULD LOOK - shaping preferences and per-reel ordering. Opened
+           occasionally: these are design choices, not search mechanics. -->
+      <details id="tune-section-shape" style="margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
+        <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">How the reels should look <span id="tune-summary-shape" style="color: #888; font-size: 0.85em;"></span></summary>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px;">
+          <label title="How strongly each reel's ordering preference (below) is enforced as a soft penalty on the search's loss, relative to hitting Target RTP. Higher makes the search work harder to satisfy every reel's preference even at some cost to RTP accuracy." style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
+            <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="How strongly a symbol's own soft minFrequency/maxFrequency bounds (set directly in its FREQUENCY_REELn entry in game.js, not from this panel) are enforced as a penalty on the search's loss. Higher discourages the search from letting a bounded symbol drift outside its configured range." style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
+            <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="Discourages any one tunable symbol's frequency on a reel from sitting far from a straight-line target across payout tiers - that line is flat (an equal split) when the reel's ordering preference is 'No preference', and tilts to match that preference's direction/Strength otherwise, so this never fights ordering with a competing flat target. 0 (default) is off; raise it if the search keeps producing one or two outlier symbols relative to that line." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
+            <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="Penalizes how far a candidate's trigger rate sits OUTSIDE the target band (zero anywhere inside it), in percentage points - the same scale as RTP error, so a weight of 1 trades 1pp of trigger-rate drift against 1pp of RTP error. Phase 2 never tunes trigger symbols directly, so for a line-pay game the trigger rate cannot move and this can stay 0. For a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies (bonus frequency held identical) swings the trigger rate from 0.75% to 2.04%. With this at 0 the search cannot see that happening, which is how a cascade tune ends up with a good RTP and a trigger rate nowhere near target." style="font-size: 0.8em; color: #ccc;">Trigger Rate Penalty Weight<br>
+            <input id="tune-trigger-rate-weight" type="number" value="${tuneConfig.triggerRatePenaltyWeight ?? 0}" step="0.5" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="Penalizes reel-SPACING constraints the generated strip actually fails to honor: runs of the same symbol closer together than its minGap, and runs longer than its maxStack. generateReel enforces both BEST-EFFORT - on a strip too dense to space a symbol out it silently gives up - so without this the search sees no cost at all in pushing a symbol's frequency past what the strip can represent, while the shipped reels clump far more than the config asks. On a cluster-pays game that clumping is exactly what inflates cluster wins and RTP. Counted as one unit per too-close run pair plus one per position a run exceeds maxStack. Note this cannot always reach zero: a symbol needing minGap G can have at most reelLength/G runs, and a game already over that ceiling at baseline starts non-zero - the point is to stop the search making it much worse." style="font-size: 0.8em; color: #ccc;">Reel Spacing Penalty Weight<br>
+            <input id="tune-spacing-weight" type="number" value="${tuneConfig.spacingPenaltyWeight ?? 0}" step="0.05" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px;">
+          ${biasSelectorsHtml}
+        </div>
+        <details style="margin-top: 10px;">
+          <summary style="font-size: 0.75em; color: #999; cursor: pointer; user-select: none;">How this search works, and what each option above does ▸</summary>
+          <p style="font-size: 0.75em; color: #888; margin: 8px 0 0;">
+          Every value symbol on every reel is tuned jointly (one search, not per-reel) via a
+          Nelder-Mead simplex search. Each reel has its own ordering preference (above${isCascadeMechanic
+            ? `, pre-selected as 'No preference' on every reel - the near-miss shape below only
+          makes sense for a payline game's left-to-right line of sight, which a cluster-pays
+          cascade grid doesn't have; adjust any of them freely if you want one anyway`
+            : `, pre-selected in a near-miss shape - early reels favor high pay more frequent, middle
+          reels favor it rarer, late reels no preference - adjust any of them freely`}): "more
+          frequent" discourages a higher-paying symbol from being less frequent than a
+          lower-paying one on that reel (premium symbols show up often, so lines look close);
+          "rarer" is the traditional direction; "no preference" disables it for that reel. It's
+          always a soft preference, not an absolute rule - the search will accept a small violation rather
+          than push RTP far off target. Each reel's own <strong>Strength</strong> multiplies how hard
+          that specific reel's preference is enforced (1 = normal, 0 = same as "no preference" without
+          losing the direction dropdown's selection, above 1 = enforced harder) - useful when one
+          reel's preference is visibly dominating the tune at the shared Ordering Penalty Weight
+          above. A symbol can also carry its own soft <code>min</code>/
+          <code>max</code> frequency bounds directly in its FREQUENCY_REELn entry (edit that in
+          game.js - there's no input for it here); Frequency Limit Penalty Weight controls how
+          strongly those are enforced, same soft-preference semantics. Uniformity Penalty Weight
+          (off by default) is a separate, reel-wide soft preference: it discourages any one
+          tunable symbol from landing far from a straight-line target across that reel's payout
+          tiers - not a flat "everyone equal" target. That line's slope comes entirely from the
+          reel's own ordering preference above (its direction and Strength): "No preference"
+          keeps the line flat (an equal split); a real preference tilts the line the same way, so
+          raising this weight pulls harder toward the tilt ordering already wants instead of
+          fighting it with a competing flat preference. Scatter symbols never participate (their
+          ideal frequency plays too different a role). Any violation still present at the end is
+          listed below.
+          </p>
+        </details>
+      </details>
+
+      <!-- 3. SEARCH SETTINGS - how hard and how carefully to look. Rarely touched. -->
+      <details id="tune-section-search" style="margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
+        <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">Search settings <span id="tune-summary-search" style="color: #888; font-size: 0.85em;"></span></summary>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px;">
+          <label title="Which algorithm searches the per-symbol reel weights (Phase 2). CMA-ES (default in this panel) is a population-based search that scales better to many tunable symbols at once and is more tolerant of noisy RTP measurements (e.g. Candy Frenzy's cascade multiplier bonus), at the cost of evaluating a whole population of candidates every generation instead of one or two. Nelder-Mead is a simpler simplex search - cheaper for a small number of tunable symbols, and still tuneFrequencies' own library-level default when this option is omitted entirely." style="font-size: 0.8em; color: #ccc;">Search Algorithm<br>
+            <select id="tune-search-algorithm" style="width: 100%; margin-top: 4px;">
+              <option value="cmaes" selected>CMA-ES (default)</option>
+              <option value="nelderMead">Nelder-Mead</option>
+            </select>
+          </label>
+          <label title="Upper bound on iterations for the joint frequency search (Phase 2). The search may stop earlier if it converges, stalls out after repeated restarts, or is already essentially resolved - see the reason reported after a run." style="font-size: 0.8em; color: #ccc;">Max Iterations<br>
+            <input id="tune-max-iterations" type="number" value="150" step="10" min="10" max="1000" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="How many spins are simulated to measure each candidate's RTP/trigger rate. Higher reduces Monte Carlo noise but makes every iteration slower - see also Trials Averaged." style="font-size: 0.8em; color: #ccc;">Trial Spins / Candidate<br>
+            <input id="tune-trial-spins" type="number" value="300000" step="50000" min="10000" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="How many independent Trial Spins runs are averaged per candidate measurement. Higher further reduces noise in the RTP/trigger estimate, at a proportional cost in time (2 trials ≈ 2x the work per iteration)." style="font-size: 0.8em; color: #ccc;">Trials Averaged / Candidate<br>
+            <input id="tune-trials-per-point" type="number" value="2" step="1" min="1" max="10" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="Virtual reel strip length used to build each candidate's reel strips - defaults to this game's own REEL_LENGTH. Longer reels let low frequencies round to more distinct symbol counts (which is what makes a trigger-rate target reachable when it currently sits in a lattice gap), at the cost of a slower simulation per candidate. Whatever you set here is emitted as REEL_LENGTH in the copyable output, since a result tuned at one length does not reproduce at another." style="font-size: 0.8em; color: #ccc;">Reel Length<br>
+            <input id="tune-reel-length" type="number" value="${tuneConfig.reelLength}" step="10" min="30" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
+            <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
+              <option value="provided" selected>Use configured baseline (default)</option>
+              <option value="uniform">Random (uniform) within min/max</option>
+              <option value="normal">Random (normal) within min/max</option>
+            </select>
+          </label>
+        </div>
+      </details>
+
+      <!-- 4. ADVANCED - reached when something has gone wrong, or to reproduce a specific run. -->
+      <details id="tune-section-advanced" style="margin-bottom: 12px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
+        <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">Advanced <span id="tune-summary-advanced" style="color: #888; font-size: 0.85em;"></span></summary>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px;">
+          <label title="Caps how uncertain a candidate's own averaged RTP is allowed to be before it can count as a genuine hit on Target RTP - measured as the standard error of the mean across its Trials Averaged repeats. A high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly) can average out to a plausible-looking RTP while its individual trials still disagree wildly - that's a lucky/unlucky sample, not a trustworthy measurement. Raise this (or raise Trial Spins/Trials Averaged instead, now cheap thanks to the Worker pool) if a real search keeps stalling here." style="font-size: 0.8em; color: #ccc;">Max RTP Std Error (%)<br>
+            <input id="tune-max-rtp-std-error" type="number" value="1" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="Adds a candidate's own measurement unreliability (standard error across its Trials Averaged repeats) directly into the search's loss, on top of Max RTP Std Error / a candidate's Best-acceptance margin (which only ever gate whether a result can count as converged or replace the current best AFTER the fact). Raising this gives the search an active incentive to prefer more reliably-reproducible regions of the search space DURING the search itself, not just whichever candidate happens to look best on one noisy average. 0 (default) is off - loss ignores std error entirely." style="font-size: 0.8em; color: #ccc;">Std Error Penalty Weight<br>
+            <input id="tune-std-error-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="Base PRNG seed for the whole search. A given seed always explores the same sequence, so a run is reproducible end to end - the copyable output records whichever seed produced it. Change it to explore a different path through the same search space without changing any other setting." style="font-size: 0.8em; color: #ccc;">Search Seed<br>
+            <input id="tune-search-seed" type="number" value="12345" step="1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+        </div>
       </details>
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
         <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
@@ -573,6 +613,63 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       paytable, reelFrequencyTables, tuneConfig, tuneContainer,
       originalReelFrequencyTables: reelFrequencyTables,
     }));
+
+    // Each collapsed section carries a live summary of its own contents in its <summary> line, so
+    // a developer can tell whether opening it is worth it without opening it. Without this,
+    // collapsing the panel's settings just hides them - trading one problem (fifteen inputs all
+    // shouting at once) for another (no idea what the search is about to do).
+    //
+    // Wired here, during panel CONSTRUCTION, rather than in startTuning: the panel is built once
+    // and lives for the whole session, while startTuning runs per click. Wiring listeners there
+    // would both leave the summaries blank until the first tune started and add a duplicate set of
+    // listeners on every subsequent START TUNING / CONTINUE.
+    const summaryEls = {
+      shape: tuneContainer.querySelector('#tune-summary-shape'),
+      search: tuneContainer.querySelector('#tune-summary-search'),
+      advanced: tuneContainer.querySelector('#tune-summary-advanced'),
+    };
+    const echoEl = tuneContainer.querySelector('#tune-trigger-pct-echo');
+    const el = (id) => tuneContainer.querySelector(id);
+    const num = (id, fallback = 0) => {
+      const parsed = parseFloat(el(id)?.value);
+      return Number.isFinite(parsed) ? parsed : fallback;
+    };
+
+    function refreshSectionSummaries() {
+      // The echo shows the library's own unit beside the panel's, so the conversion between them
+      // is visible rather than something a developer has to take on trust.
+      if (echoEl) {
+        const pct = spinsPerTriggerToPct(num('#tune-target-trigger-spins'));
+        const tol = num('#tune-trigger-tolerance');
+        echoEl.textContent = pct > 0
+          ? `= ${pct.toFixed(3)}% of spins (band ${Math.max(0, pct - tol).toFixed(2)}–${(pct + tol).toFixed(2)}%)`
+          : 'no free-spin target';
+      }
+      // Only preferences actually turned ON are worth naming. Listing "ordering 0.5, limits 0.5,
+      // uniformity 0, trigger 0, spacing 0" would make the two that matter exactly as hard to pick
+      // out as they are in the expanded grid, which is the problem this is here to solve.
+      const active = [
+        ['ordering', '#tune-ordering-weight'], ['limits', '#tune-limit-weight'],
+        ['uniformity', '#tune-uniformity-weight'], ['trigger', '#tune-trigger-rate-weight'],
+        ['spacing', '#tune-spacing-weight'],
+      ].filter(([, id]) => num(id) > 0).map(([label, id]) => `${label} ${num(id)}`);
+      if (summaryEls.shape) {
+        summaryEls.shape.textContent = active.length ? `— ${active.join(' · ')}` : '— no shaping preferences set';
+      }
+      if (summaryEls.search) {
+        const algo = el('#tune-search-algorithm')?.value === 'nelderMead' ? 'Nelder-Mead' : 'CMA-ES';
+        summaryEls.search.textContent = `— ${algo} · ${num('#tune-max-iterations')} iterations · ` +
+          `${fmt(num('#tune-trial-spins'))} spins x${num('#tune-trials-per-point')} · reel ${num('#tune-reel-length')}`;
+      }
+      if (summaryEls.advanced) {
+        summaryEls.advanced.textContent = `— seed ${num('#tune-search-seed')} · max std error ${num('#tune-max-rtp-std-error')}%`;
+      }
+    }
+    tuneContainer.querySelectorAll('input, select').forEach(control => {
+      control.addEventListener('input', refreshSectionSummaries);
+      control.addEventListener('change', refreshSectionSummaries);
+    });
+    refreshSectionSummaries();
   }
 
   if (simStats) simStats.style.display = 'none';
@@ -716,7 +813,12 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const resultsEl = tuneContainer.querySelector('#tune-results');
   const inputs = {
     targetRtp: tuneContainer.querySelector('#tune-target-rtp'),
-    targetTriggerRatePct: tuneContainer.querySelector('#tune-target-trigger'),
+    rtpTolerancePct: tuneContainer.querySelector('#tune-rtp-tolerance'),
+    // Entered as "one bonus every N spins" and converted at the boundary - see core/TuningUnits.js
+    // for why the panel and the library deliberately speak different units here.
+    targetTriggerSpins: tuneContainer.querySelector('#tune-target-trigger-spins'),
+    triggerRateTolerancePct: tuneContainer.querySelector('#tune-trigger-tolerance'),
+    searchSeed: tuneContainer.querySelector('#tune-search-seed'),
     reelLength: tuneContainer.querySelector('#tune-reel-length'),
     trialSpins: tuneContainer.querySelector('#tune-trial-spins'),
     trialsPerPoint: tuneContainer.querySelector('#tune-trials-per-point'),
@@ -782,7 +884,12 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     scatterTriggerCount: tuneConfig.scatterTriggerCount,
     reelLength: parseInt(inputs.reelLength.value, 10) || tuneConfig.reelLength,
     targetRtp: parseFloat(inputs.targetRtp.value) || 96,
-    targetTriggerRatePct: parseFloat(inputs.targetTriggerRatePct.value) || 0.6,
+    rtpTolerancePct: parseFloat(inputs.rtpTolerancePct.value) || 1.5,
+    // The panel's own unit ("one bonus every N spins") converted back to the percentage
+    // tuneFrequencies takes. The library API is untouched; only the presentation differs.
+    targetTriggerRatePct: spinsPerTriggerToPct(parseFloat(inputs.targetTriggerSpins.value)) || 0.6,
+    triggerRateTolerancePct: parseFloat(inputs.triggerRateTolerancePct.value) || 0.15,
+    searchSeed: Number.isFinite(parseInt(inputs.searchSeed.value, 10)) ? parseInt(inputs.searchSeed.value, 10) : 12345,
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
     trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
     // Number.isFinite (not `|| 1`) so an explicit 0 - "no measurement uncertainty at all

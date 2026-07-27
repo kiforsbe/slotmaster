@@ -121,3 +121,25 @@ test('formatReelFrequencyTablesForCopy includes minGap/maxStack on a symbol that
   assert.match(output, /book:\s*\{ frequency: 0\.051, minGap: 5 \}/);
   assert.match(output, /bar:\s*\{ frequency: 10, maxStack: 1 \}/);
 });
+
+test('the reproducibility header records the tolerances and seed the panel now controls', () => {
+  // Target RTP tolerance, trigger tolerance and searchSeed used to be library defaults with no
+  // panel input at all - a run could not be reproduced from the panel because two of the three
+  // numbers defining "did this converge" were invisible. Now that they are editable they must
+  // also be recorded, same reasoning as REEL_LENGTH in 2548ac2.
+  const table = { defaults: {}, symbols: { bar: { frequency: 2 } } };
+  const output = formatReelFrequencyTablesForCopy([table], {
+    rtp: 96.0, triggerRatePct: 0.6,
+    inputParameters: {
+      searchSeed: 4242, reelSeeds: [1], reelLength: 500, reelsCount: 1, rowsCount: 3,
+      targetRtp: 96, rtpTolerancePct: 2.5, targetTriggerRatePct: 0.6, triggerRateTolerancePct: 0.2,
+      trialSpins: 1000, trialsPerPoint: 1, searchAlgorithm: 'cmaes', maxIterations: 10,
+      initialWeightStrategy: 'provided', maxRtpStdError: 1,
+      orderingPenaltyWeight: 0.5, limitPenaltyWeight: 0.5, uniformityPenaltyWeight: 0,
+      stdErrorPenaltyWeight: 0, triggerRatePenaltyWeight: 0, spacingPenaltyWeight: 0,
+    },
+  });
+  assert.match(output, /searchSeed 4242/);
+  assert.match(output, /\+\/-2\.5/, 'the RTP tolerance actually used must be recorded, not assumed to be the default');
+  assert.match(output, /\+\/-0\.2/);
+});
