@@ -9,6 +9,72 @@ import { spinsPerTriggerToPct, pctToSpinsPerTrigger } from './TuningUnits.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
+/**
+ * The Phase 0c sensitivity sweep, rendered as the answer to "which knob do I turn?".
+ *
+ * A pure function of the diagnostics object so it can be tested without a DOM, same as
+ * `formatReelFrequencyTablesForCopy`. Returns a monospace text block; the panel only places it.
+ *
+ * The shape is deliberate. Knobs come in leverage order, each with a bar so the ranking is visible
+ * before a single number is read, and each with its own ladder so the SHAPE of the response is
+ * visible too - "maxStack 5 pays 193%" matters more than any elasticity average. A knob inside the
+ * noise floor says "no measurable effect" rather than printing a small number, because a small
+ * number next to a large one reads as a weak-but-real lever and that is the exact mistake this
+ * report exists to prevent.
+ */
+export function formatSensitivityReport(sensitivity) {
+  if (!sensitivity || !sensitivity.knobs?.length) return '';
+  const { knobs, routesToTarget, noiseFloorPct, baseline, targetRtp, measuredAt, spinsPerPoint } = sensitivity;
+
+  const lines = [];
+  lines.push(`WHICH KNOB MATTERS`);
+  lines.push(`  measured at ${measuredAt === 'uniform' ? 'EVEN symbol frequencies' : 'the current frequencies'}`
+    + `, ${fmt(spinsPerPoint)} spins per point`);
+  lines.push(`  baseline ${baseline.rtp.toFixed(2)}%  |  target ${targetRtp}%  |  noise floor +/-${noiseFloorPct.toFixed(2)}pp`);
+  lines.push('');
+
+  // Bars are scaled against the strongest knob, so the first row is always full and every other
+  // row reads as a fraction of it. Absolute scaling would make a game whose knobs are all weak
+  // look identical to one whose knobs are all strong.
+  const strongest = Math.max(...knobs.map(k => k.elasticityRtpPerUnit), 0);
+  const nameWidth = Math.max(...knobs.map(k => k.knob.length));
+
+  knobs.forEach(k => {
+    const bar = strongest > 0 ? '█'.repeat(Math.max(0, Math.round((k.elasticityRtpPerUnit / strongest) * 12))) : '';
+    const lead = k.measurementUnreliable
+      ? 'MEASUREMENT FAILED'
+      : k.flat
+      ? 'no measurable effect'
+      : `${k.elasticityRtpPerUnit.toFixed(1)}pp per unit`;
+    const ladder = k.ladder
+      .map(p => (p.value === k.current ? `[${p.value}:${p.rtp.toFixed(0)}%]` : `${p.value}:${p.rtp.toFixed(0)}%`))
+      .join('  ');
+    lines.push(`  ${k.knob.padEnd(nameWidth)}  ${String(k.current).padStart(5)}  ${(bar || '·').padEnd(13)}${lead.padEnd(21)}${ladder}`);
+    if (k.measurementUnreliable && k.measurementNote) {
+      lines.push(`  ${' '.repeat(nameWidth)}         ${k.measurementNote}`);
+    }
+    // The one knob with a discontinuity in it. Worth saying at the point of use, not only in a
+    // tooltip: a developer reaching for "more stacking" will otherwise reach straight past 0.9.
+    if (k.knob === 'stackChance' && !k.flat) {
+      lines.push(`  ${' '.repeat(nameWidth)}         note: 1.0 is a MODE SWITCH, not more stacking - it pays far less than 0.7`);
+    }
+  });
+
+  if (routesToTarget?.length) {
+    lines.push('');
+    lines.push(`TO REACH ${targetRtp}% FROM HERE (one knob at a time, everything else unchanged)`);
+    routesToTarget.forEach(r => {
+      const detail = r.exact
+        ? 'exact - RTP is strictly proportional to payouts'
+        : `interpolated between ${r.interpolatedFrom.join(' and ')}`;
+      const verb = r.knob === 'payoutScale' ? 'scale every payout by' : `set ${r.knob} to`;
+      lines.push(`  - ${verb} ${r.value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}   (${detail})`);
+    });
+  }
+
+  return lines.join('\n');
+}
+
 // Shared symbol-type -> color mapping, used anywhere a symbol name is listed next to others of
 // mixed type (the TUNE FREQUENCIES live/results tables) so type is visible at a glance without
 // needing a separate column or section per type. Deliberately distinct from the gauge's own
@@ -965,6 +1031,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
     reelCoupling: inputs.reelCoupling.value,
+    // On in the panel, off in the library. ~30 extra measurements is right for a developer who
+    // just clicked TUNE and wrong for every programmatic caller that never asked for it.
+    measureSensitivity: true,
+    winEvaluatorFactory: tuneConfig.winEvaluatorFactory ?? null,
     // Number.isFinite rather than `|| 0.25`, so an explicit 0 - "pin the refinement to the linked
     // answer entirely" - survives instead of being silently replaced by the default.
     maxReelDeviation: Number.isFinite(parseFloat(inputs.maxReelDeviation.value))
@@ -1199,6 +1269,34 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
               name: `Config has ${bySeverity.error.length} error${bySeverity.error.length === 1 ? '' : 's'}`,
               strategy: 'the tune will not start - these describe a config no amount of searching can compensate for',
               why: 'fix them in game.js and run again, or pass skipValidation to tune anyway',
+            });
+          }
+          return;
+        }
+        // Phase 0c: which structural knob actually moves RTP. The single most useful thing the
+        // tuner can say, and it needs no search at all - so it is reported in full before Phase 1
+        // starts, not buried in the final diagnostics.
+        if (phase === 'sensitivity') {
+          if (r.event === 'point') {
+            // One line per measurement would be ~30 lines of noise before anything useful; a
+            // single updating line keeps the wait explained without burying the report that follows.
+            appendOrUpdateBusyLog('sensitivity', `… measuring ${r.knob} = ${r.value} (${r.rtp.toFixed(1)}%)…`);
+            setPhaseBanner({
+              name: 'Phase 0c · Which knob matters',
+              strategy: `sweeping ${r.knob} across its plausible range at even symbol frequencies`,
+              why: 'frequencies are the weakest lever this tuner has - this measures the ones that are not, before spending any budget on a search',
+              progress: `${r.knob} ${r.value}`,
+            });
+          } else if (r.event === 'complete') {
+            formatSensitivityReport(r).split('\n').forEach(line => {
+              const emphasise = /^(WHICH KNOB MATTERS|TO REACH)/.test(line);
+              // pre-wrap, not the default: the report aligns its columns with padded spaces, and
+              // HTML collapses runs of spaces, which turns a table into a ragged list. `pre-wrap`
+              // rather than `pre` so a long ladder still wraps instead of forcing a scrollbar.
+              appendLog(line, {
+                whiteSpace: 'pre-wrap',
+                ...(emphasise ? { color: '#cfe6ff', fontWeight: 'bold', marginTop: '6px' } : null),
+              });
             });
           }
           return;

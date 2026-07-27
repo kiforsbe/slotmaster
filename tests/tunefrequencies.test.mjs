@@ -905,7 +905,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // give core/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
     'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
-    'validation',
+    'validation', 'sensitivity',
   ]);
   const offenders = new Set();
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {

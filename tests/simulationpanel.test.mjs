@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatReelFrequencyTablesForCopy } from '../core/SimulationPanel.js';
+import { formatReelFrequencyTablesForCopy, formatSensitivityReport } from '../core/SimulationPanel.js';
 
 test('formatReelFrequencyTablesForCopy preserves distinct small frequencies instead of collapsing them', () => {
   // Reproduces the bookbookbook bug: several genuinely distinct tuned frequencies under 1
@@ -164,4 +164,89 @@ test('formatReelFrequencyTablesForCopy records reelCoupling in the reproducibili
   });
   assert.match(output, /reelCoupling linked-then-refine/);
   assert.match(output, /maxReelDeviation 0\.25/);
+});
+
+// ---- Phase 0c report ----
+
+const sensitivityFixture = () => ({
+  measuredAt: 'uniform', spinsPerPoint: 12000, noiseFloorPct: 5.2,
+  baseline: { rtp: 100.74 }, targetRtp: 96,
+  knobs: [
+    { knob: 'stackChance', current: 0.3, flat: false, elasticityRtpPerUnit: 236.5, span: 142,
+      ladder: [{ value: 0.1, rtp: 36 }, { value: 0.3, rtp: 105 }, { value: 0.7, rtp: 178 }] },
+    { knob: 'maxStack', current: 4, flat: false, elasticityRtpPerUnit: 73.3, span: 294,
+      ladder: [{ value: 3, rtp: 41 }, { value: 4, rtp: 105 }, { value: 6, rtp: 303 }] },
+    { knob: 'minGap', current: 4, flat: true, elasticityRtpPerUnit: 0, span: 5,
+      ladder: [{ value: 1, rtp: 105 }, { value: 4, rtp: 105 }, { value: 8, rtp: 105 }] },
+  ],
+  routesToTarget: [
+    { knob: 'payoutScale', value: 0.953, exact: true },
+    { knob: 'stackChance', value: 0.267, exact: false, interpolatedFrom: [0.2, 0.3] },
+  ],
+});
+
+test('formatSensitivityReport leads with the highest-leverage knob and marks the current value', () => {
+  const out = formatSensitivityReport(sensitivityFixture());
+  const lines = out.split('\n');
+  const stackIdx = lines.findIndex(l => l.includes('stackChance'));
+  const maxStackIdx = lines.findIndex(l => l.includes('maxStack'));
+  assert.ok(stackIdx > 0 && stackIdx < maxStackIdx, 'knobs must appear in leverage order, highest first');
+  assert.match(out, /\[0\.3:105%\]/, "the current value must be bracketed so 'where am I' needs no arithmetic");
+  assert.match(out, /236\.5|237/, 'the elasticity is the number that ranks the knob - it has to be visible');
+});
+
+test('formatSensitivityReport says "no measurable effect" instead of printing a tiny number', () => {
+  // A knob inside the noise floor has not demonstrated anything. Printing "0.4pp per unit" next to
+  // maxStack's 73.3 invites a developer to treat it as a weak-but-real lever, which is the exact
+  // mistake this report exists to prevent.
+  const out = formatSensitivityReport(sensitivityFixture());
+  const minGapLine = out.split('\n').find(l => l.includes('minGap'));
+  assert.match(minGapLine, /no measurable effect/i);
+  assert.ok(!/0\.0pp per unit/.test(minGapLine));
+});
+
+test('formatSensitivityReport states the routes to target, marking which one is exact', () => {
+  const out = formatSensitivityReport(sensitivityFixture());
+  assert.match(out, /TO REACH 96%/i);
+  assert.match(out, /0\.953/);
+  assert.match(out, /exact/i);
+  assert.match(out, /0\.267/);
+  assert.match(out, /0\.2.*0\.3|interpolat/i, 'an interpolated route must show what it was interpolated between');
+});
+
+test('formatSensitivityReport reports the noise floor, the sample size, and which frequencies it used', () => {
+  // Without the noise floor, a 3pp gap between two ladder points is indistinguishable from a 300pp
+  // one except by size. Without the measurement basis, the numbers are not comparable across knobs
+  // at all - sweeping at the CURRENT frequencies measures the knob and the existing skew together
+  // and attributes the sum to the knob.
+  const out = formatSensitivityReport(sensitivityFixture());
+  assert.match(out, /5\.2/, 'noise floor');
+  // Digits only, separators stripped: the panel formats numbers with toLocaleString, so the
+  // thousands separator is whatever the developer's machine uses - a comma here, a non-breaking
+  // space on this one. Asserting the literal separator would make the test pass or fail by locale.
+  assert.match(out.replace(/[\s,.  ]/g, ''), /12000spinsperpoint/i);
+
+  // Asserted as "the two bases read differently" rather than by matching one wording, so the
+  // report stays free to phrase it for a human ("EVEN symbol frequencies") instead of echoing the
+  // internal mode name.
+  const atCurrent = formatSensitivityReport({ ...sensitivityFixture(), measuredAt: 'current' });
+  const basisLine = (text) => text.split('\n').find(l => /frequencies/i.test(l));
+  assert.ok(basisLine(out), 'the report must state which frequencies it measured at');
+  assert.notEqual(basisLine(out), basisLine(atCurrent),
+    'uniform and current must not render identically - which one was used changes what the numbers mean');
+});
+
+test('formatSensitivityReport surfaces a broken payoutScale measurement instead of hiding it', () => {
+  const s = sensitivityFixture();
+  s.knobs.push({
+    knob: 'payoutScale', current: 1, flat: true, elasticityRtpPerUnit: 0, span: 0,
+    ladder: [{ value: 0.8, rtp: 105 }, { value: 1.25, rtp: 105 }],
+    measurementUnreliable: true,
+    measurementNote: 'This ladder measured the ORIGINAL payouts at every point. Pass winEvaluatorFactory to fix it.',
+  });
+  const out = formatSensitivityReport(s);
+  assert.match(out, /winEvaluatorFactory/);
+  const payoutLine = out.split('\n').find(l => l.includes('payoutScale') && !l.includes('scale every payout'));
+  assert.ok(!/no measurable effect/i.test(payoutLine),
+    'a knob whose measurement failed must not be described as having no effect - the two mean opposite things');
 });
