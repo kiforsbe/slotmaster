@@ -64,6 +64,138 @@ import { structuralSearch } from './StructuralSearch.js';
  *   Math.random for today's non-deterministic behavior.
  * @returns {Object} Simulation results including RTP, win distribution, etc.
  */
+// ---- Round-level win shape ----------------------------------------------------------------
+// A ROUND is one paid spin plus every free spin it bought. That is the unit a player actually
+// experiences, and it is not the unit `winDistribution` records: that keys individual SPINS, base
+// and free alike, and free spins are charged no bet - so they inflate the hit rate and deflate the
+// mean win. A game whose bonus pays 40x across 12 free spins looks like twelve small wins there
+// and like one 40x round here, and only the second describes what it feels like to play.
+//
+// Accumulated as running moments plus a fixed log-spaced histogram rather than a list of rounds:
+// `logSpins` already holds one object per spin and is off by default at a million spins for
+// exactly that reason. This has to be cheap enough to leave on always, so it is a handful of
+// counters and 61 buckets regardless of how many rounds run.
+const ROUND_HISTOGRAM_MIN = 0.01;   // 0.01x bet
+const ROUND_HISTOGRAM_MAX = 10000;  // 10,000x bet - above this everything lands in the top bucket
+const ROUND_HISTOGRAM_BUCKETS = 60; // plus one dedicated zero bucket, hence 61 below
+
+function createRoundAccumulator() {
+  return {
+    rounds: 0, hits: 0, sum: 0, sumSq: 0, max: 0,
+    // buckets[0] is exactly zero (a losing round); 1..60 are log-spaced over [0.01x, 10000x].
+    // Zero needs its own bucket because log(0) has nowhere to go and "no win" is the single most
+    // common outcome in every game here - folding it into the smallest positive bucket would put
+    // roughly half of all rounds into a bucket labelled "0.01x to 0.014x".
+    buckets: new Array(ROUND_HISTOGRAM_BUCKETS + 1).fill(0),
+  };
+}
+
+function roundBucketIndex(multiple) {
+  if (!(multiple > 0)) return 0;
+  const lo = Math.log(ROUND_HISTOGRAM_MIN);
+  const hi = Math.log(ROUND_HISTOGRAM_MAX);
+  const t = (Math.log(multiple) - lo) / (hi - lo);
+  return 1 + Math.min(ROUND_HISTOGRAM_BUCKETS - 1, Math.max(0, Math.floor(t * ROUND_HISTOGRAM_BUCKETS)));
+}
+
+// Representative value of a bucket - its geometric midpoint, which is the right centre for a
+// log-spaced bucket in the same way the arithmetic midpoint is for a linear one.
+function roundBucketValue(index) {
+  if (index === 0) return 0;
+  const lo = Math.log(ROUND_HISTOGRAM_MIN);
+  const hi = Math.log(ROUND_HISTOGRAM_MAX);
+  const width = (hi - lo) / ROUND_HISTOGRAM_BUCKETS;
+  return Math.exp(lo + (index - 1 + 0.5) * width);
+}
+
+function summarizeRounds(acc) {
+  const { rounds, hits, sum, sumSq, max, buckets } = acc;
+  if (rounds === 0) {
+    return { rounds: 0, hitRate: 0, meanWin: 0, medianWin: 0, p90: 0, p99: 0, p999: 0, maxWin: 0, top1PctShare: 0, volatilityIndex: 0, histogram: [] };
+  }
+  const meanWin = sum / rounds;
+  // Population standard deviation of the per-round return, in units of the bet. This IS the
+  // volatility index the industry quotes - it is not a measurement-noise figure like
+  // trialRtpStdError, and the two must never be read as the same kind of number.
+  const variance = Math.max(0, sumSq / rounds - meanWin * meanWin);
+  const volatilityIndex = Math.sqrt(variance);
+
+  // Percentiles read off the histogram's cumulative counts. Bucket-resolution, and deliberately
+  // so: an exact percentile would need every round retained, which is precisely the cost this
+  // avoids. The buckets are ~19% wide, which is far finer than any decision made on these.
+  const percentileAt = (p) => {
+    const target = p * rounds;
+    let seen = 0;
+    for (let i = 0; i < buckets.length; i++) {
+      seen += buckets[i];
+      if (seen >= target) return roundBucketValue(i);
+    }
+    return max;
+  };
+
+  // What share of ALL payout the top 1% of rounds carries - the single most useful number for
+  // "will this feel flat or spiky". Approximated from the histogram: walk down from the top until
+  // 1% of rounds is accounted for, summing bucket value x count.
+  const topCount = rounds * 0.01;
+  let counted = 0, topSum = 0;
+  for (let i = buckets.length - 1; i >= 0 && counted < topCount; i--) {
+    const take = Math.min(buckets[i], topCount - counted);
+    topSum += take * roundBucketValue(i);
+    counted += take;
+  }
+
+  return {
+    rounds,
+    hitRate: hits / rounds,
+    meanWin,
+    medianWin: percentileAt(0.5),
+    p90: percentileAt(0.9),
+    p99: percentileAt(0.99),
+    p999: percentileAt(0.999),
+    maxWin: max,
+    top1PctShare: sum > 0 ? Math.min(1, topSum / sum) : 0,
+    volatilityIndex,
+    // Emitted as {from, to, count} so a consumer can render or resample it without needing to
+    // know how the bucketing works.
+    // `index` is carried so several trials' stats can be merged back together EXACTLY
+    // (mergeRoundStats) - without it the buckets could only be matched by floating-point value,
+    // which is a needless way to introduce disagreement between two runs of the same code.
+    histogram: buckets.map((count, i) => ({
+      index: i,
+      from: i === 0 ? 0 : roundBucketValue(i) / Math.exp((Math.log(ROUND_HISTOGRAM_MAX) - Math.log(ROUND_HISTOGRAM_MIN)) / ROUND_HISTOGRAM_BUCKETS / 2),
+      to: i === 0 ? 0 : roundBucketValue(i) * Math.exp((Math.log(ROUND_HISTOGRAM_MAX) - Math.log(ROUND_HISTOGRAM_MIN)) / ROUND_HISTOGRAM_BUCKETS / 2),
+      value: roundBucketValue(i),
+      count,
+    })).filter(b => b.count > 0),
+  };
+}
+
+/**
+ * Combines several trials' `roundStats` into one, as if every round had come from a single run.
+ *
+ * Needed because a candidate is measured over `trialsPerPoint` independent trials, and averaging
+ * their percentiles would be wrong: the mean of two medians is not the median of the union. Every
+ * quantity here is instead recovered back to its underlying counter (count, sum, sum of squares,
+ * bucket tallies), added, and re-derived - so merging N trials gives exactly what one trial of N
+ * times the length would have.
+ */
+export function mergeRoundStats(statsList) {
+  const usable = (statsList ?? []).filter(s => s && s.rounds > 0);
+  if (usable.length === 0) return summarizeRounds(createRoundAccumulator());
+  if (usable.length === 1) return usable[0];
+  const acc = createRoundAccumulator();
+  usable.forEach(s => {
+    acc.rounds += s.rounds;
+    acc.hits += Math.round(s.hitRate * s.rounds);
+    acc.sum += s.meanWin * s.rounds;
+    // variance = E[x^2] - mean^2, so E[x^2] = variance + mean^2 and the sum of squares follows.
+    acc.sumSq += (s.volatilityIndex * s.volatilityIndex + s.meanWin * s.meanWin) * s.rounds;
+    if (s.maxWin > acc.max) acc.max = s.maxWin;
+    (s.histogram ?? []).forEach(b => { acc.buckets[b.index] += b.count; });
+  });
+  return summarizeRounds(acc);
+}
+
 export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, linesCount = 10, rng = Math.random) {
   // Input validation
   if (!config || !config.reelStrips || !config.paytable) {
@@ -140,14 +272,33 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     if (spinWin > results.maxWin) results.maxWin = spinWin;
     if (spinWin < results.minWin) results.minWin = spinWin;
     results.winDistribution[spinWin] = (results.winDistribution[spinWin] || 0) + 1;
+    // Every spin's win joins the round currently open - free spins included, which is the whole
+    // point: the bonus they pay belongs to the paid spin that bought it.
+    roundWin += spinWin;
     detailedWins.forEach(w => results.detailedWins.push(w));
     if (logSpins && logEntry) results.spinLog.push(logEntry);
 
     return { scatterWin };
   }
 
+  // The round currently being accumulated. Reset by the base-spin loop, added to by every spin.
+  let roundWin = 0;
+  const roundAcc = createRoundAccumulator();
+  const closeRound = () => {
+    // In units of the bet, so the figures are comparable across games and bet sizes - and so
+    // `meanWin` is exactly `rtpRaw`, which is what makes the two reconcilable.
+    const multiple = simConfig.totalBet > 0 ? roundWin / simConfig.totalBet : 0;
+    roundAcc.rounds++;
+    if (multiple > 0) roundAcc.hits++;
+    roundAcc.sum += multiple;
+    roundAcc.sumSq += multiple * multiple;
+    if (multiple > roundAcc.max) roundAcc.max = multiple;
+    roundAcc.buckets[roundBucketIndex(multiple)]++;
+  };
+
   // Main simulation loop for base spins
   for (let i = 0; i < numBaseSpins; i++) {
+    roundWin = 0;
     const result = runOneSpin(false, null);
 
     // If free spins were triggered by this base spin, simulate them (unless the global free
@@ -173,6 +324,9 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
         }
       }
     }
+    // After the free-spins chain, so the round carries what the bonus paid. This is exactly the
+    // boundary the loop already had; nothing needed restructuring to find it.
+    closeRound();
   }
 
   const rtp = results.totalBets > 0 ? (results.totalWins / results.totalBets) * 100 : 0;
@@ -190,7 +344,11 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     freeSpinsTriggered: results.freeSpinsTriggered,
     winDistribution: results.winDistribution,
     detailedWins: results.detailedWins,
-    spinLog: results.spinLog
+    spinLog: results.spinLog,
+    // The SHAPE of the payout, per round rather than per spin - see createRoundAccumulator.
+    // Always produced: it costs a handful of counters and a fixed 61-bucket histogram, which is
+    // cheap enough that making it optional would only add a way to not have the answer.
+    roundStats: summarizeRounds(roundAcc),
   };
 }
 
@@ -1416,6 +1574,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     };
     let triggerSum = 0;
     const trialRtps = [];
+    const trialRoundStats = [];
     if (runTrial) {
       const trialResults = await Promise.all(Array.from({ length: trials }, (_, i) => {
         const seed = rngSeed != null ? rngSeed + i * 104729 : null;
@@ -1424,6 +1583,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       trialResults.forEach(r => {
         triggerSum += (r.freeSpinsTriggered / r.baseSpins) * 100;
         trialRtps.push(r.rtpRaw * 100);
+        // Absent from an older//custom runTrial that doesn't return it - merged as nothing rather
+        // than treated as a run with zero rounds, which would drag every percentile to 0.
+        if (r.roundStats) trialRoundStats.push(r.roundStats);
       });
     } else {
       for (let i = 0; i < trials; i++) {
@@ -1431,6 +1593,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         const results = simulateSpins(config, spins, betPerLine, linesCount, rng);
         triggerSum += (results.freeSpinsTriggered / results.baseSpins) * 100;
         trialRtps.push(results.rtpRaw * 100);
+        trialRoundStats.push(results.roundStats);
       }
     }
     const rtp = trialRtps.reduce((a, b) => a + b, 0) / trials;
@@ -1455,6 +1618,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       trialRtpMax: Math.max(...trialRtps),
       trialRtpStdDev,
       trialRtpStdError,
+      // Merged across trials rather than averaged - see mergeRoundStats for why the mean of two
+      // medians is the wrong answer. Null when no trial reported any, so a caller can tell
+      // "not measured" from "measured as empty".
+      roundStats: trialRoundStats.length > 0 ? mergeRoundStats(trialRoundStats) : null,
     };
   }
 
@@ -2359,6 +2526,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
           trialRtpMax: measured.trialRtpMax,
           trialRtpStdDev: measured.trialRtpStdDev,
           trialRtpStdError: measured.trialRtpStdError,
+          // The shape of this candidate's payout, not just its average. Carried on every candidate
+          // so the winning one can be described without re-simulating it.
+          roundStats: measured.roundStats ?? null,
           error,
           orderingPenalty: orderPenalty,
           orderingPenaltyNormalized: orderNorm,

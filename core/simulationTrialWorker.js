@@ -27,7 +27,15 @@ self.onmessage = (event) => {
     const results = simulateSpins({ ...simConfig, winEvaluator, mechanic, freeSpinsMode }, numSpins, betPerLine, linesCount, rng);
     self.postMessage({
       taskId,
-      result: { rtpRaw: results.rtpRaw, freeSpinsTriggered: results.freeSpinsTriggered, baseSpins: results.baseSpins },
+      // roundStats joins the three numbers measure() has always needed. It is a handful of scalars
+      // plus at most 61 histogram buckets, so it crosses postMessage for far less than the full
+      // result would (winDistribution/detailedWins/spinLog stay discarded here, as before).
+      result: {
+        rtpRaw: results.rtpRaw,
+        freeSpinsTriggered: results.freeSpinsTriggered,
+        baseSpins: results.baseSpins,
+        roundStats: results.roundStats,
+      },
     });
   } catch (error) {
     self.postMessage({ taskId, error: error.message });
