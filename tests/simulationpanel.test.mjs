@@ -652,3 +652,45 @@ test('renderTuneLogHtml renders nothing before anything has been accepted', () =
   assert.equal(renderTuneLogHtml([]), '');
   assert.equal(renderTuneLogHtml(null), '');
 });
+
+test('a log entry copied as JS says which entry it is, not just what it achieved', () => {
+  // Pasting a history entry as though it were the run's final answer is how a config with a known
+  // problem gets shipped believing it won. The reason to reach past the winner is usually that an
+  // earlier candidate was measured more reliably, so the error bar travels with the code.
+  const out = formatReelFrequencyTablesForCopy(
+    [{ defaults: { minGap: 2 }, symbols: { bar: { frequency: 2 } } }],
+    {
+      rtp: 105.6, triggerRatePct: 0.512,
+      inputParameters: { reelLength: 500, searchSeed: 12345, reelSeeds: [101] },
+      tuneLogEntry: logEntryFixture({
+        index: 2, step: 3, stage: 'linked',
+        achieved: { ...logEntryFixture().achieved, rtp: 105.6, rtpError: 9.6, withinRtpTolerance: false },
+        measurement: { trialRtpStdError: 0.97, reliable: true },
+      }),
+    });
+  assert.match(out, /accepted-best entry #2 \(step 3, linked\)/);
+  assert.match(out, /\+\/-0\.97pp/, 'the error bar is the whole reason to pick this one');
+  assert.match(out, /NOT necessarily its final result/);
+  assert.match(out, /RTP off by 9\.60pp/, 'and its known problem travels with it');
+  assert.match(out, /volatility 5\.5x \(medium\)/);
+  // Still the same paste-ready code as any other export.
+  assert.match(out, /export const FREQUENCY_REEL1/);
+  assert.match(out, /export const REEL_LENGTH = 500;/);
+});
+
+test('the ordinary end-of-tune output is unchanged when no log entry is involved', () => {
+  const out = formatReelFrequencyTablesForCopy(
+    [{ defaults: {}, symbols: { bar: { frequency: 2 } } }],
+    { rtp: 96, triggerRatePct: 0.6, inputParameters: { reelLength: 500, reelSeeds: [1] } });
+  assert.ok(!/accepted-best entry/.test(out));
+  assert.ok(!/NOT necessarily/.test(out));
+  assert.match(out, /^\/\/ ---- Tuned \d{4}-\d{2}-\d{2} ----/);
+});
+
+test('renderTuneLogHtml offers JS code alongside JSON for every entry', () => {
+  const out = renderTuneLogHtml([logEntryFixture()]);
+  assert.match(out, /tune-log-copy-js" data-index="3"/);
+  assert.match(out, />COPY JS</);
+  assert.match(out, />JSON</);
+  assert.match(out, />FILE</);
+});

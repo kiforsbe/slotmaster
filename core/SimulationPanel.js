@@ -92,8 +92,9 @@ export function renderTuneLogHtml(entries) {
         <td style="padding: 5px 8px 5px 0; white-space: nowrap; color: #aaa; font-size: 0.85em;">loss ${e.loss.total != null ? e.loss.total.toFixed(4) : '—'}</td>
         <td style="padding: 5px 8px 5px 0; font-size: 0.85em; color: ${q.ok ? '#7fd97f' : '#e6b800'};">${q.ok ? '✓' : '⚠'} ${esc(q.verdict)}</td>
         <td style="padding: 5px 0; white-space: nowrap;">
-          <button class="btn-icon tune-log-copy" data-index="${e.index}" style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">COPY</button>
-          <button class="btn-icon tune-log-export" data-index="${e.index}" style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">JSON</button>
+          <button class="btn-icon tune-log-copy-js" data-index="${e.index}" title="Copy this config as paste-ready FREQUENCY_REEL code, exactly like the output at the end of a tune - with a header saying which log entry it is and what was wrong with it, since this is one candidate from the history rather than the run's final answer." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,214,0,0.18); border-color: rgba(255,214,0,0.5); color: #ffe9a3;">COPY JS</button>
+          <button class="btn-icon tune-log-copy" data-index="${e.index}" title="Copy this entry as JSON - every measured field, not just the frequencies." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">JSON</button>
+          <button class="btn-icon tune-log-export" data-index="${e.index}" title="Download this entry as a .json file." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">FILE</button>
         </td>
       </tr>`;
   }).join('');
@@ -894,9 +895,24 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     ['triggerRate', p.triggerRatePenaltyWeight], ['spacing', p.spacingPenaltyWeight],
   ].filter(([, v]) => v != null).map(([k, v]) => `${k} ${v}`).join(', ');
 
+  // An entry pulled out of the accepted-best log is NOT the run's final answer, and pasting it as
+  // though it were is how a config with a known problem gets shipped believing it was the winner.
+  // So it identifies itself, and carries the same verdict the log showed - most importantly the
+  // measurement uncertainty, since the reason to reach past the winner is usually that an earlier
+  // candidate was measured more reliably.
+  const e = context.tuneLogEntry ?? null;
+  const q = e ? describeTuneEntryQuality(e) : null;
   const header = [
-    `// ---- Tuned ${new Date().toISOString().slice(0, 10)} ----`,
-    `// Achieved: RTP ${num(context.rtp, 2)}%  |  free-spin trigger ${num(context.triggerRatePct, 3)}%`,
+    e
+      ? `// ---- Tuned ${new Date().toISOString().slice(0, 10)} - accepted-best entry #${e.index} (step ${e.step}${e.stage ? `, ${e.stage}` : ''}) ----`
+      : `// ---- Tuned ${new Date().toISOString().slice(0, 10)} ----`,
+    `// Achieved: RTP ${num(context.rtp, 2)}%  |  free-spin trigger ${num(context.triggerRatePct, 3)}%`
+      + (e ? `  |  measured +/-${e.measurement.trialRtpStdError.toFixed(2)}pp` : ''),
+    e ? `// This is one candidate from that run's history, NOT necessarily its final result.` : null,
+    e ? `// Verdict at the time: ${q.ok ? 'meets every target' : q.verdict}${q.notes.length ? ` (${q.notes.join(', ')})` : ''}` : null,
+    e && e.shape
+      ? `// Shape: volatility ${e.shape.volatilityIndex.toFixed(1)}x (${e.shape.volatilityBand}), hit rate ${(e.shape.hitRate * 100).toFixed(0)}%, biggest round ${e.shape.maxWin.toFixed(0)}x, top 1% carry ${(e.shape.top1PctShare * 100).toFixed(0)}%`
+      : null,
     `//`,
     `// To reproduce this exact run, the tuner needs all of the following - same searchSeed AND`,
     `// same reel geometry, since strips are generated from them:`,
@@ -1628,6 +1644,21 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     bestLogEl.innerHTML = renderTuneLogHtml(tuneLog);
     // Rebuilt markup means fresh elements every time, so handlers are attached here rather than
     // once - and `.onclick` rather than addEventListener so a re-render cannot stack them up.
+    // Paste-ready game.js code, through the exact same formatter the end-of-tune output uses -
+    // so a config lifted out of the history is indistinguishable in form from the winner, and the
+    // only difference is the header saying which entry it is.
+    bestLogEl.querySelectorAll('.tune-log-copy-js').forEach(b => {
+      b.onclick = () => {
+        const e = tuneLog.find(x => x.index === Number(b.dataset.index));
+        if (!e) return;
+        copyToClipboard(formatReelFrequencyTablesForCopy(e.reelFrequencyTables, {
+          inputParameters: lastDiagnostics?.inputParameters ?? {},
+          rtp: e.achieved.rtp,
+          triggerRatePct: e.achieved.triggerRatePct,
+          tuneLogEntry: e,
+        }), b);
+      };
+    });
     bestLogEl.querySelectorAll('.tune-log-copy').forEach(b => {
       b.onclick = () => {
         const e = tuneLog.find(x => x.index === Number(b.dataset.index));
