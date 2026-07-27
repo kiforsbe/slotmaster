@@ -1616,3 +1616,59 @@ test('tuneFrequencies with searchAlgorithm: "nelderMead" also stops early via op
   assert.equal(result.diagnostics.rtpPhase.reason, 'stopped');
   assert.ok(result.diagnostics.rtpPhase.iterationsRun < 100, `expected far fewer than 100 iterations to have run, got ${result.diagnostics.rtpPhase.iterationsRun}`);
 });
+
+// ---- Package 0: reel coupling ----
+// Shared fixture for the coupling tests below. A line-pay shape is used deliberately even though
+// coupling exists for CLUSTER games: it keeps the test fast and mechanic-independent, and what is
+// under test is how `dims` and `projectPoint` treat the reel axis, which is identical either way.
+const couplingPaytable = {
+  hi:   { payout: [0, 0, 10, 40, 200], type: 'regular' },
+  lo:   { payout: [0, 0,  5, 20, 100], type: 'regular' },
+  scat: { payout: [0, 0,  2,  5,  20], type: 'scatter', triggerFreeSpins: true },
+};
+const couplingTable = () => ({ defaults: {}, symbols: { hi: { frequency: 3 }, lo: { frequency: 6 }, scat: { frequency: 1 } } });
+const couplingOptions = {
+  reelsCount: 3, rowsCount: 3, reelLength: 100, reelSeeds: [11, 22, 33],
+  paylines: [[0, 0, 0]], linesCount: 1, betPerLine: 1,
+  trialSpins: 2000, trialsPerPoint: 1, maxIterations: 6, searchSeed: 7,
+};
+
+test('reelCoupling "linked" gives every reel identical tuned frequencies', async () => {
+  // On a cluster game reel index means nothing - a cluster forms from grid-adjacent cells, not
+  // from a payline position. Independent per-reel dims let the search invent a large spread
+  // between reels for the same symbol, which is the "over-abundance" complaint: it is search
+  // noise given one scalar objective and (on Candy Frenzy) 84 degrees of freedom, not a design
+  // decision. Linking makes that spread unrepresentable rather than merely penalized.
+  const result = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, reelCoupling: 'linked',
+  });
+
+  const out = result.reelFrequencyTables;
+  for (const symbol of ['hi', 'lo']) {
+    const values = out.map(rt => rt.symbols[symbol].frequency);
+    values.forEach(v => assert.ok(Math.abs(v - values[0]) < 1e-9,
+      `${symbol} must be identical across reels under 'linked', got ${values.join(', ')}`));
+  }
+  assert.equal(result.diagnostics.rtpPhase.coupling.mode, 'linked');
+  assert.equal(result.diagnostics.rtpPhase.coupling.dimsLinked, 2,
+    'one dim per tunable symbol, not per (symbol, reel)');
+});
+
+test('reelCoupling defaults to independent and leaves existing results untouched', async () => {
+  // The regression guard every new option in this plan needs: absent, behavior is identical.
+  const a = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], couplingOptions);
+  const b = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()],
+    { ...couplingOptions, reelCoupling: 'independent' });
+  assert.deepEqual(b.reelFrequencyTables, a.reelFrequencyTables);
+  assert.equal(a.rtp, b.rtp);
+});
+
+test('reelCoupling rejects reels that do not carry the same symbols', async () => {
+  // Linking writes ONE weight per symbol to every reel, so the reels must agree on what symbols
+  // exist. A best-effort merge would write a frequency onto a reel that never had that symbol,
+  // producing a strip nobody configured - so this is a hard error naming the offender.
+  const mismatched = [couplingTable(), couplingTable(), { defaults: {}, symbols: { hi: { frequency: 3 }, scat: { frequency: 1 } } }];
+  await assert.rejects(
+    () => tuneFrequencies(couplingPaytable, mismatched, { ...couplingOptions, reelCoupling: 'linked' }),
+    /reel 2.*missing.*lo/s);
+});

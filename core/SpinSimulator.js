@@ -1116,6 +1116,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRatePenaltyWeight = 0,
     maxTriggerRefineSteps = 12,
     spacingPenaltyWeight = 0,
+    reelCoupling = 'independent',
+    maxReelDeviation = 0.25,
     rotateSeedPerGeneration = true,
     measureHeadroom = true,
     solvePayoutScale = false,
@@ -1152,6 +1154,25 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
   const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
+
+  // Linking writes ONE weight per symbol to every reel, so the reels have to agree on which
+  // symbols exist. A best-effort merge would write a frequency onto a reel that never carried
+  // that symbol (or silently skip one that did), producing a strip nobody configured - so this
+  // is a hard error naming the offending reel and symbols instead.
+  if (reelCoupling !== 'independent') {
+    const canonical = Object.keys(baseReelTables[0].symbols).sort();
+    baseReelTables.forEach((rt, r) => {
+      const here = Object.keys(rt.symbols).sort();
+      if (here.join(' ') === canonical.join(' ')) return;
+      const missing = canonical.filter(s => !here.includes(s));
+      const extra = here.filter(s => !canonical.includes(s));
+      const detail = [
+        missing.length ? `is missing [${missing.join(', ')}]` : null,
+        extra.length ? `has extra [${extra.join(', ')}]` : null,
+      ].filter(Boolean).join(' and ');
+      throw new Error(`reelCoupling '${reelCoupling}' requires every reel to carry the same symbols; reel ${r} ${detail}`);
+    });
+  }
 
   // Mirrors generateReel's own resolution order (symbol override -> reel defaults -> built-in
   // fallback, see core/SlotMath.js) so a constraint is read here exactly as the strip builder
@@ -1626,6 +1647,36 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     }
   });
 
+  // Under `reelCoupling` other than 'independent', collapse the per-(symbol, reel) dims down to
+  // one dimension per SYMBOL, carrying `reelIndex: null` to mean "every reel". On a cluster-pays
+  // game reel index carries no meaning - a cluster forms from grid-adjacent cells, not from a
+  // position in a payline - so a free weight per (symbol, reel) simply hands the search degrees
+  // of freedom that nothing in the design asked for and nothing in the loss can justify. Measured
+  // on Candy Frenzy at 849bc8a, that freedom produced `chewy` at 0.4105 on reel 2 against 0.0056
+  // on reel 3, and the resulting tables paid 74.70% RTP - 27pp WORSE than setting every candy to
+  // the same frequency. Linking makes that spread unrepresentable rather than merely penalized,
+  // and cuts the search from 84 dimensions to 12.
+  //
+  // Bounds are the TIGHTEST across reels, not the loosest: a bound configured on any one reel
+  // still means something once the weight is shared, and taking the widest would let the shared
+  // value violate a reel that had specifically asked for a narrower range.
+  //
+  // `dims` itself is deliberately left intact - the ordering/limit/uniformity penalties below
+  // iterate it to find (reel, symbol) pairs, and they measure the PROJECTED reel tables, which
+  // always carry real per-reel frequencies regardless of how few free parameters produced them.
+  const linkedCoupling = reelCoupling !== 'independent';
+  let activeDims = dims;
+  if (linkedCoupling && dims.length > 0) {
+    const bySymbol = new Map();
+    dims.forEach(d => {
+      const prev = bySymbol.get(d.symbol);
+      if (!prev) { bySymbol.set(d.symbol, { reelIndex: null, symbol: d.symbol, min: d.min, max: d.max }); return; }
+      if (d.min != null) prev.min = prev.min == null ? d.min : Math.max(prev.min, d.min);
+      if (d.max != null) prev.max = prev.max == null ? d.max : Math.min(prev.max, d.max);
+    });
+    activeDims = [...bySymbol.values()];
+  }
+
   // uniformityPenaltyOf's own per-symbol targets - excluded from any symbol whose paytable
   // `type` is 'scatter' - even one that doesn't happen to trigger free spins (the only thing
   // that otherwise excludes a symbol from `dims` above). A scatter's ideal frequency plays a
@@ -1693,8 +1744,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // A dimension only has a defined [min, max] to sample from once both bounds are
     // configured (via resolveFrequencyBounds - symbol override or reel default) - one missing
     // either bound, or the strategy being 'provided', always starts at its baseline frequency.
-    const initialPoint = dims.map(d => {
-      const provided = currentReelTables[d.reelIndex].symbols[d.symbol].frequency;
+    // A linked dim (`reelIndex: null`) has no single reel to read a baseline from - reel 0 stands
+    // in for all of them, which is exact for the identical-reel starting point every cluster game
+    // here uses, and a reasonable anchor otherwise since the first projection renormalizes each
+    // reel against its own budget anyway.
+    const baselineReelOf = (d) => d.reelIndex ?? 0;
+    const initialPoint = activeDims.map(d => {
+      const provided = currentReelTables[baselineReelOf(d)].symbols[d.symbol].frequency;
       if (initialWeightStrategy === 'provided' || d.min == null || d.max == null) {
         return Math.log(provided);
       }
@@ -1707,8 +1763,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // not a shared absolute range) - wide enough to not artificially constrain the search,
     // just enough to keep the simplex from drifting to a degenerate near-zero or runaway
     // value on a reel whose other symbols have a very different scale.
-    const dimBounds = dims.map(d => {
-      const base = currentReelTables[d.reelIndex].symbols[d.symbol].frequency;
+    const dimBounds = activeDims.map(d => {
+      const base = currentReelTables[baselineReelOf(d)].symbols[d.symbol].frequency;
       return { minX: Math.log(base * 0.001), maxX: Math.log(base * 1000) };
     });
 
@@ -1720,9 +1776,18 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     function projectPoint(x) {
       const reelTables = currentReelTables.map(rt => JSON.parse(JSON.stringify(rt)));
       const rawByReel = {};
-      dims.forEach((d, i) => {
+      activeDims.forEach((d, i) => {
         const xi = Math.min(dimBounds[i].maxX, Math.max(dimBounds[i].minX, x[i]));
-        (rawByReel[d.reelIndex] ??= {})[d.symbol] = Math.exp(xi);
+        const value = Math.exp(xi);
+        // `reelIndex: null` is a LINKED dimension - the same raw weight goes to every reel. Each
+        // reel is still renormalized against its OWN valueBudget below, which is what preserves
+        // that reel's scatter:candy ratio, so Phase 1's trigger-rate result survives linking
+        // unchanged even though the candy weights are now shared.
+        if (d.reelIndex == null) {
+          for (let r = 0; r < reelTables.length; r++) (rawByReel[r] ??= {})[d.symbol] = value;
+        } else {
+          (rawByReel[d.reelIndex] ??= {})[d.symbol] = value;
+        }
       });
       Object.keys(rawByReel).forEach(rIdxStr => {
         const rIdx = Number(rIdxStr);
@@ -2141,6 +2206,17 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       iterations: iterationsUsed,
       restarts,
       reason,
+      // How Phase 2's reel axis was treated. `dimsLinked` vs `dimsRefined` is the concrete thing
+      // to look at: identical-looking frequencies from a linked run and an independent run came
+      // out of searches with very different degrees of freedom, and the diagnostics should say
+      // which one produced this result rather than leaving it to be inferred from the tables.
+      coupling: {
+        mode: reelCoupling,
+        dimsLinked: linkedCoupling ? activeDims.length : 0,
+        dimsRefined: linkedCoupling ? 0 : dims.length,
+        linkedRtp: linkedCoupling ? best.rtp : null,
+        refinedRtp: linkedCoupling ? null : best.rtp,
+      },
       rtpRange: { min: rtpMin, max: rtpMax },
       orderingPenaltyRemaining: bestOrderingPenalty,
       limitPenaltyRemaining: bestLimitPenalty,
@@ -2311,6 +2387,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // this result.
         loss: rtpPhaseResult.loss,
         error: rtpPhaseResult.error,
+        coupling: rtpPhaseResult.coupling,
         // Always false when `reason` is 'stopped' - the search was ended by explicit request,
         // not by meeting its own criteria, even if the error happened to be within tolerance
         // when the signal fired - consistent with `reason` itself taking the same priority.
