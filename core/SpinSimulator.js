@@ -1254,6 +1254,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     scatterTriggerCount,
     solvePayoutScale = false,
     orderingBiasByReel = null,
+    // 'raw' (default, unchanged behavior) or 'normalized'. Raw penalty totals are incommensurable
+    // with each other and with the RTP error term they are added to - ordering is in frequency
+    // units, spacing is a violation count - so a weight has no fixed meaning across games, or even
+    // across terms within one game. Normalized re-denominates each into a scale-free fraction, so
+    // a weight of 1 buys about one RTP percentage point everywhere.
+    penaltyNormalization = 'raw',
     initialStepSize = 0.5,
     searchAlgorithm = 'nelderMead',
     bestAcceptanceZ = 1.0,
@@ -2132,21 +2138,31 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // of bias.
     function orderingPenaltyOf(reelTables) {
       let total = 0;
+      // Each violation re-expressed as a fraction of its own reel's equal share, then averaged
+      // over every pair CONSIDERED (not just the violated ones). That makes it "the average pair
+      // is out of order by this fraction of a symbol's fair share" - a quantity with the same
+      // meaning on a 3-symbol line game and a 12-symbol cluster grid, which the raw sum does not
+      // have: the raw total grows with both the frequency scale and the symbol count.
+      let normalizedSum = 0;
+      let pairsConsidered = 0;
       const violations = [];
       dims.forEach(({ reelIndex: r, symbol: a }) => {
         const bias = orderingBiasFor(r);
         if (bias === 0) return;
         const tierOf = tierOfByReel[r];
+        const share = equalShareByReel[r];
         dims.forEach(({ reelIndex: r2, symbol: b }) => {
           if (r !== r2 || a === b || tierOf[a] >= tierOf[b]) return;
+          pairsConsidered++;
           const diff = bias * (reelTables[r].symbols[b].frequency - reelTables[r].symbols[a].frequency);
           if (diff > 0) {
             total += diff;
+            if (share > 0) normalizedSum += diff / share;
             violations.push({ reel: r, higherPaySymbol: a, lowerPaySymbol: b, amount: diff, bias });
           }
         });
       });
-      return { total, violations };
+      return { total, normalized: pairsConsidered > 0 ? normalizedSum / pairsConsidered : 0, violations };
     }
 
     // Soft per-symbol frequency limits: each dim optionally carries its own `min`/`max`
@@ -2158,21 +2174,27 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // silently prevented.
     function limitPenaltyOf(reelTables) {
       let total = 0;
+      // Each overshoot as a fraction of the bound it crossed, averaged over the violations. "20%
+      // past its limit" carries the same weight whether the limit was 0.5 or 50, which the raw
+      // difference does not.
+      let normalizedSum = 0;
       const violations = [];
       dims.forEach(({ reelIndex: r, symbol: s, min, max }) => {
         const freq = reelTables[r].symbols[s].frequency;
         if (min != null && freq < min) {
           const amount = min - freq;
           total += amount;
+          if (min > 0) normalizedSum += amount / min;
           violations.push({ reel: r, symbol: s, bound: 'min', limit: min, amount });
         }
         if (max != null && freq > max) {
           const amount = freq - max;
           total += amount;
+          if (max > 0) normalizedSum += amount / max;
           violations.push({ reel: r, symbol: s, bound: 'max', limit: max, amount });
         }
       });
-      return { total, violations };
+      return { total, normalized: violations.length > 0 ? normalizedSum / violations.length : 0, violations };
     }
 
     // Soft uniformity penalty: discourages any one tunable symbol's frequency on a reel from
@@ -2189,14 +2211,19 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // perfectly ordered and still have one symbol drastically more/less frequent than the rest.
     function uniformityPenaltyOf(reelTables) {
       let total = 0;
+      // Already a relative deviation per symbol, so the only thing the raw sum carries that it
+      // should not is the DIMENSION COUNT: the same lopsidedness scores 7x higher on Candy
+      // Frenzy's 84 dims than on a 12-dim line game. Averaging removes that.
+      let counted = 0;
       dims.forEach(({ reelIndex: r, symbol: s }) => {
         if (paytable[s]?.type === 'scatter') return;
         const target = uniformityTargetsByReel[r]?.[s];
         if (!(target > 0)) return;
         const freq = reelTables[r].symbols[s].frequency;
         total += Math.abs(freq - target) / target;
+        counted++;
       });
-      return total;
+      return { total, normalized: counted > 0 ? total / counted : 0 };
     }
 
     // Soft penalty on reel-SPACING constraints the generated strip fails to honor - measured on
@@ -2226,6 +2253,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
     function spacingPenaltyOf(reelTables) {
       let total = 0;
+      // Violations as a fraction of the runs that COULD have violated. This is the term the raw
+      // scale hurt worst: measured on Candy Frenzy the shipped tables carry 301 violations, so at
+      // spacingPenaltyWeight 0.25 the term contributes 75 against an RTP error term of about 21 -
+      // the search stops optimizing RTP and nothing says so. As a fraction it is bounded by 1 per
+      // symbol-reel, so a weight of 1 buys about one RTP point per fully-broken reel.
+      let violatingRuns = 0;
+      let totalRuns = 0;
       const violations = [];
       const strips = buildReelStrips(reelTables);
       strips.forEach((strip, r) => {
@@ -2245,6 +2279,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
             runs.push({ start: i, len });
           }
           if (runs.length === 0) return;
+          totalRuns += runs.length;
           let gapViolations = 0;
           if (runs.length > 1 && minGap > 1) {
             for (let x = 0; x < runs.length; x++) {
@@ -2257,11 +2292,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
             : runs.reduce((sum, run) => sum + Math.max(0, run.len - maxStack), 0);
           if (gapViolations > 0 || stackExcess > 0) {
             total += gapViolations + stackExcess;
+            violatingRuns += gapViolations + stackExcess;
             violations.push({ reel: r, symbol: s, gapViolations, stackExcess, runs: runs.length, minGap, maxStack });
           }
         });
       });
-      return { total, violations };
+      return { total, normalized: totalRuns > 0 ? violatingRuns / totalRuns : 0, totalRuns, violations };
     }
 
     // Base seed for Phase 2's common-random-numbers comparability - every point evaluated
@@ -2296,14 +2332,17 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
           ? nmSeed + generation * 65537
           : nmSeed;
         const measured = await measure(reelTables, seedForThisPoint);
-        const { total: orderPenalty, violations: orderingViolations } = orderingPenaltyOf(reelTables);
-        const { total: boundsPenalty, violations: limitViolations } = limitPenaltyOf(reelTables);
-        const uniformityPenalty = uniformityPenaltyOf(reelTables);
+        const { total: orderPenalty, normalized: orderNorm, violations: orderingViolations } = orderingPenaltyOf(reelTables);
+        const { total: boundsPenalty, normalized: boundsNorm, violations: limitViolations } = limitPenaltyOf(reelTables);
+        const { total: uniformityPenalty, normalized: uniformityNorm } = uniformityPenaltyOf(reelTables);
         // Skipped entirely at weight 0 - this regenerates every reel strip, which is cheap
         // beside a Monte Carlo run but pointless when it cannot affect `loss`.
-        const { total: spacingPenalty, violations: spacingViolations } = spacingPenaltyWeight > 0
+        const { total: spacingPenalty, normalized: spacingNorm, violations: spacingViolations } = spacingPenaltyWeight > 0
           ? spacingPenaltyOf(reelTables)
-          : { total: 0, violations: [] };
+          : { total: 0, normalized: 0, violations: [] };
+        // Which denomination the LOSS is built from. Both are always reported either way, so a
+        // weight tuned in one mode can be translated into the other instead of guessed at.
+        const norm = penaltyNormalization === 'normalized';
         const error = Math.abs(measured.rtp - targetRtp);
         if (measured.rtp < rtpMin) rtpMin = measured.rtp;
         if (measured.rtp > rtpMax) rtpMax = measured.rtp;
@@ -2312,12 +2351,18 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // trigger-rate differences that were already acceptable.
         const triggerPenalty = Math.max(0, Math.abs(measured.triggerRate - targetTriggerRatePct) - triggerRateTolerancePct);
         return {
-          loss: error + orderingPenaltyWeight * orderPenalty + limitPenaltyWeight * boundsPenalty + uniformityPenaltyWeight * uniformityPenalty
+          loss: error
+            + orderingPenaltyWeight * (norm ? orderNorm : orderPenalty)
+            + limitPenaltyWeight * (norm ? boundsNorm : boundsPenalty)
+            + uniformityPenaltyWeight * (norm ? uniformityNorm : uniformityPenalty)
+            // Already in RTP percentage points, so normalization leaves them alone - the whole
+            // point is to bring the others onto THIS scale, not to invent a third one.
             + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0)
             + triggerRatePenaltyWeight * triggerPenalty
-            + spacingPenaltyWeight * spacingPenalty,
+            + spacingPenaltyWeight * (norm ? spacingNorm : spacingPenalty),
           triggerRatePenalty: triggerPenalty,
           spacingPenalty,
+          spacingPenaltyNormalized: spacingNorm,
           spacingViolations,
           rtp: measured.rtp,
           triggerRate: measured.triggerRate,
@@ -2327,8 +2372,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
           trialRtpStdError: measured.trialRtpStdError,
           error,
           orderingPenalty: orderPenalty,
+          orderingPenaltyNormalized: orderNorm,
           limitPenalty: boundsPenalty,
+          limitPenaltyNormalized: boundsNorm,
           uniformityPenalty,
+          uniformityPenaltyNormalized: uniformityNorm,
           orderingViolations,
           limitViolations,
           trial: reelTables,
@@ -2779,6 +2827,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     trialSpins, trialsPerPoint, maxIterations,
     orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
     triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
+    penaltyNormalization,
     reelCoupling, maxReelDeviation,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
@@ -2914,6 +2963,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         limitViolations: rtpPhaseResult.limitViolations,
         limitPenaltyRemaining: rtpPhaseResult.limitPenaltyRemaining,
         uniformityPenaltyRemaining: rtpPhaseResult.uniformityPenaltyRemaining,
+        // The same four penalties in their scale-free denomination, reported in BOTH modes
+        // (see `penaltyNormalization`). Always present, whichever one the loss was built from,
+        // so a weight tuned in one mode can be translated into the other rather than guessed at.
+        // These come from the winning candidate rather than the run-wide minimum above, because a
+        // ratio of two different candidates' bests is not a quantity that describes anything.
+        orderingPenaltyNormalized: rtpPhaseResult.orderingPenaltyNormalized ?? 0,
+        limitPenaltyNormalized: rtpPhaseResult.limitPenaltyNormalized ?? 0,
+        uniformityPenaltyNormalized: rtpPhaseResult.uniformityPenaltyNormalized ?? 0,
+        spacingPenaltyNormalized: rtpPhaseResult.spacingPenaltyNormalized ?? 0,
+        penaltyNormalization,
         // Reel-SPACING constraints the winning candidate's generated strip still fails to honor
         // (minGap between runs of a symbol, maxStack run length) - measured on the real strip,
         // since generateReel enforces both best-effort and silently gives up on a strip too dense

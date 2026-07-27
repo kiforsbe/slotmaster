@@ -2095,3 +2095,87 @@ test('the structural recommendation reaches a diagnosis too, without any search'
   assert.deepEqual(seen.filter(p => p === 'scatter' || p === 'shape'), [],
     'a diagnosis must never run Phase 1 or Phase 2');
 });
+
+// ---- Package 2.1: penalties denominated in something ---------------------------------------
+// The loss terms are incommensurable. Ordering is in raw frequency units; spacing is a raw
+// violation COUNT. Measured on Candy Frenzy: 301 spacing violations on the shipped tables, so at
+// the panel's spacingPenaltyWeight of 0.25 that term contributes 75 to a loss whose RTP error term
+// is about 21 - the search quietly abandons RTP to chase spacing, and nothing in the UI hints that
+// it would. Normalizing makes a weight mean the same thing on every game and every term.
+
+// Same SHAPE, ten times apart in absolute frequency scale. Every normalized penalty must be
+// identical across the two; every raw one must differ. That is the whole property.
+// `hi` pays more than `lo` and is deliberately the MORE frequent of the two, which violates the
+// default ordering preference (higher pay rarer) - and sits above its own maxFrequency, which
+// violates its limit. Both penalties have to be non-zero for the scale comparison to test
+// anything at all; the first version of this fixture had hi rarer than lo, so both raw totals
+// were 0 and "raw depends on scale" compared 0 against 0.
+const scaleTable = (k) => ({
+  defaults: {},
+  symbols: {
+    hi:   { frequency: 6 * k, minFrequency: 1 * k, maxFrequency: 2 * k },
+    lo:   { frequency: 3 * k },
+    scat: { frequency: 1 * k },
+  },
+});
+const scaleOptions = {
+  reelsCount: 2, rowsCount: 3, reelLength: 100, reelSeeds: [11, 22],
+  paylines: [[0, 0]], linesCount: 1, betPerLine: 1,
+  trialSpins: 500, trialsPerPoint: 1, maxIterations: 1, searchSeed: 7,
+  targetRtp: 96, orderingPenaltyWeight: 1, limitPenaltyWeight: 1, uniformityPenaltyWeight: 1,
+};
+
+test('normalized penalties are scale-free, so the same weight means the same thing on any game', async () => {
+  const run = async (k) => {
+    const out = await tuneFrequencies(couplingPaytable, [scaleTable(k), scaleTable(k)], {
+      ...scaleOptions, penaltyNormalization: 'normalized',
+    });
+    return out.diagnostics.rtpPhase;
+  };
+  const small = await run(1);
+  const large = await run(10);
+
+  assert.ok(Math.abs(small.orderingPenaltyNormalized - large.orderingPenaltyNormalized) < 1e-9,
+    `normalized ordering must not depend on the absolute frequency scale (${small.orderingPenaltyNormalized} vs ${large.orderingPenaltyNormalized})`);
+  assert.ok(Math.abs(small.limitPenaltyNormalized - large.limitPenaltyNormalized) < 1e-9,
+    `normalized limits must not depend on the absolute frequency scale (${small.limitPenaltyNormalized} vs ${large.limitPenaltyNormalized})`);
+  assert.ok(Math.abs(small.uniformityPenaltyNormalized - large.uniformityPenaltyNormalized) < 1e-9,
+    'normalized uniformity must not depend on the absolute frequency scale');
+  // And the raw versions DO depend on it - which is the bug being fixed, so it is asserted rather
+  // than assumed. Without this the test would still pass if normalization were a no-op.
+  assert.ok(Math.abs(small.orderingPenaltyRemaining - large.orderingPenaltyRemaining) > 1e-3,
+    'raw ordering depends on the frequency scale - that is precisely the problem');
+});
+
+test('penaltyNormalization defaults to raw and leaves existing losses byte-identical', async () => {
+  const opts = { ...scaleOptions, searchSeed: 21 };
+  const omitted = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], opts);
+  const explicit = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], { ...opts, penaltyNormalization: 'raw' });
+  assert.deepEqual(omitted.reelFrequencyTables, explicit.reelFrequencyTables);
+  assert.equal(omitted.diagnostics.rtpPhase.loss, explicit.diagnostics.rtpPhase.loss);
+});
+
+test('both denominations are always reported, so a weight can be translated between them', async () => {
+  // A developer switching modes needs to know what their old weight was worth. Reporting only the
+  // active one makes that a guess.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, penaltyNormalization: 'normalized', searchSeed: 33,
+  });
+  const rp = out.diagnostics.rtpPhase;
+  for (const field of ['orderingPenaltyRemaining', 'orderingPenaltyNormalized', 'limitPenaltyRemaining', 'limitPenaltyNormalized']) {
+    assert.equal(typeof rp[field], 'number', `${field} must be reported in both modes`);
+  }
+});
+
+test('a normalized spacing penalty is a FRACTION of runs, so it cannot dwarf the RTP term', async () => {
+  // The concrete Candy Frenzy failure: raw count 301 against an RTP error of ~21. A fraction is
+  // bounded by 1 per symbol-reel, so weight 1 buys at most ~1pp of RTP error per fully-broken reel
+  // rather than several hundred.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, penaltyNormalization: 'normalized', spacingPenaltyWeight: 1, searchSeed: 44,
+  });
+  const rp = out.diagnostics.rtpPhase;
+  assert.ok(rp.spacingPenaltyNormalized >= 0 && rp.spacingPenaltyNormalized <= dims2Count(),
+    `a normalized spacing penalty must be a bounded fraction, got ${rp.spacingPenaltyNormalized}`);
+});
+function dims2Count() { return 2 * 3; } // reels x symbols - the loosest possible bound on summed fractions
