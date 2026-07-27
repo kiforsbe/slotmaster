@@ -55,9 +55,28 @@ const MECHANICS = { line: LineMechanic, cascade: CascadeSpinMechanic };
 // see FreeSpinsModes.js's own doc - so reconstructing with defaults here is exact, not lossy.
 const FREE_SPINS_MODE_BUILDERS = { flatMultiplier: () => createFlatMultiplierMode(), multiplierTiles: () => createMultiplierTilesMode() };
 
+// What each builder cannot be reconstructed without. A missing one is a config that forgot to
+// carry something across postMessage, and the failure it produces without this check is a
+// TypeError thrown deep inside a Worker on the first trial ("Cannot read properties of undefined
+// (reading 'length')"), surfacing with a stack that points at the pool's own settle function and
+// names neither the game, the evaluator, nor the field. Mayan Tumble shipped without `paylines`
+// in its tuneConfig and that is all the tuner would say.
+const REQUIRED_BY_BUILDER = {
+  checkLineCascadeWins: ['paylines'],
+};
+
 export function resolveWinEvaluator(winEvaluatorName, paytable, scatterSymbol, minClusterSize, scatterTriggerCount, paylines, wildSymbol) {
   if (!winEvaluatorName) return undefined;
   if (CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName]) {
+    const available = { paytable, scatterSymbol, minClusterSize, scatterTriggerCount, paylines, wildSymbol };
+    const missing = (REQUIRED_BY_BUILDER[winEvaluatorName] ?? []).filter(k => available[k] == null);
+    if (missing.length > 0) {
+      throw new Error(
+        `winEvaluator '${winEvaluatorName}' cannot be rebuilt without ${missing.join(', ')}. `
+        + `Add ${missing.map(k => `\`${k}\``).join(' and ')} to the config this trial was dispatched with `
+        + `(a game's tuneConfig, or the simulation config) - a win evaluator is rebuilt from names and `
+        + `primitives on the worker side, so anything it closes over has to travel with it.`);
+    }
     return CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName](paytable, scatterSymbol, minClusterSize, scatterTriggerCount, paylines, wildSymbol);
   }
   return WIN_EVALUATORS[winEvaluatorName];

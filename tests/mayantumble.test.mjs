@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins } from '../core/SpinSimulator.js';
+import { createSeededRng } from '../core/SlotMath.js';
 import { CascadeSpinMechanic } from '../core/CascadeSpinMechanic.js';
+import { resolveWinEvaluator } from '../core/mechanicRegistry.js';
 import {
   REELS_COUNT, ROWS_COUNT, PAYTABLE, PAYLINES, REEL_STRIPS, REEL_LENGTH, BET_AMOUNT, SCATTER_TRIGGER_COUNT, FREE_SPINS_AWARD, checkLineCascadeWins,
 } from '../games/mayantumble/game.js';
@@ -32,6 +34,41 @@ test('mayan tumble reels space the gold scatter at least ROWS_COUNT apart (minGa
       }
     }
   });
+});
+
+// ---- The worker-side rebuild of this game's evaluator -------------------------------------
+// Tuning runs its trials in Worker threads, and a closure cannot cross postMessage. The worker
+// gets `winEvaluatorName` plus loose primitives and rebuilds an equivalent evaluator from them
+// (core/mechanicRegistry.js). That makes a game's tuneConfig responsible for carrying everything
+// its evaluator closes over - and nothing checked that it did.
+
+test('rebuilding this game\'s evaluator without paylines fails by name, not as a TypeError', () => {
+  // What shipped: tuneConfig omitted `paylines`, so the first trial threw "Cannot read properties
+  // of undefined (reading 'length')" from inside a Worker, with a stack pointing at the pool's
+  // settle function - naming neither the game, the evaluator, nor the missing field. START TUNING
+  // simply stopped, which is all the panel could say.
+  assert.throws(
+    () => resolveWinEvaluator('checkLineCascadeWins', PAYTABLE, 'gold', 3, SCATTER_TRIGGER_COUNT, undefined, null),
+    (err) => /checkLineCascadeWins/.test(err.message) && /paylines/.test(err.message),
+    'the error must name both the evaluator and the field that is missing');
+});
+
+test('the rebuilt evaluator measures identically to the in-process closure', () => {
+  // Equivalence is the whole contract. A rebuild that merely runs, but scores differently from
+  // the evaluator the game plays with, produces a tuned result for a game nobody ships.
+  const base = {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paytable: PAYTABLE, reelStrips: REEL_STRIPS,
+    paylines: PAYLINES, scatterSymbol: 'gold', mechanic: CascadeSpinMechanic,
+  };
+  const inProcess = simulateSpins(
+    { ...base, winEvaluator: (grid) => checkLineCascadeWins(grid, PAYTABLE, 'gold', SCATTER_TRIGGER_COUNT, PAYLINES, null) },
+    2000, BET_AMOUNT / PAYLINES.length, PAYLINES.length, createSeededRng(4242));
+  const rebuilt = simulateSpins(
+    { ...base, winEvaluator: resolveWinEvaluator('checkLineCascadeWins', PAYTABLE, 'gold', 3, SCATTER_TRIGGER_COUNT, PAYLINES, null) },
+    2000, BET_AMOUNT / PAYLINES.length, PAYLINES.length, createSeededRng(4242));
+
+  assert.equal(rebuilt.rtpRaw, inProcess.rtpRaw);
+  assert.equal(rebuilt.freeSpinsTriggered, inProcess.freeSpinsTriggered);
 });
 
 test('mayan tumble simulated RTP is a finite, sane number', () => {
