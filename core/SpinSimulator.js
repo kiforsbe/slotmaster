@@ -374,6 +374,63 @@ export function computeValueRanks(paytable, symbols, payoutOf = LineMechanic.def
 // Scales any positive per-symbol raw-weight map so it sums to valueBudget - used both to
 // project Phase 2's Nelder-Mead candidates back onto each reel's fixed budget, and (via
 // Phase 1) to keep the scatter-symbol scaling on the same footing.
+/**
+ * Scales `raw` to sum to `valueBudget` while keeping every entry inside its own [min, max].
+ *
+ * Plain `renormalizeWeights` cannot do this, and the gap is not academic. `minFrequency`/
+ * `maxFrequency` are enforced (limitPenaltyOf) and displayed against the RENORMALIZED frequency,
+ * but `initialWeightStrategy` sampled them as RAW weights and then renormalized - so asking for
+ * "random between 0.005 and 0.5" on Candy Frenzy reliably produced values between 0.00125 and
+ * 0.26: below the configured minimum at one end, nowhere near the maximum at the other, and
+ * clustered around budget/N. The setting did not do what its label said, which is exactly the
+ * complaint that "random ends up being like the overall average".
+ *
+ * Clamp-and-redistribute: scale the unclamped entries to absorb the budget, clamp whatever leaves
+ * its bounds, repeat. Converges in a handful of passes because each one clamps at least one more
+ * entry. Returns plain renormalization unchanged when the budget simply cannot be met inside the
+ * bounds (sum of minima above it, or sum of maxima below it) - that is a config contradiction for
+ * TuningValidation to report, not something to silently paper over here.
+ */
+export function renormalizeWithinBounds(raw, valueBudget, boundsOf) {
+  const keys = Object.keys(raw);
+  if (keys.length === 0 || !(valueBudget > 0)) return renormalizeWeights(raw, valueBudget);
+
+  const lo = {}, hi = {};
+  let sumLo = 0, sumHi = 0;
+  keys.forEach(k => {
+    const b = boundsOf(k) ?? {};
+    lo[k] = b.min != null ? b.min : 0;
+    hi[k] = b.max != null ? b.max : Infinity;
+    sumLo += lo[k];
+    sumHi += hi[k];
+  });
+  // Infeasible either way - no assignment inside the bounds sums to the budget.
+  if (sumLo > valueBudget || sumHi < valueBudget) return renormalizeWeights(raw, valueBudget);
+
+  const out = {};
+  const clamped = new Set();
+  keys.forEach(k => { out[k] = raw[k]; });
+
+  for (let pass = 0; pass < keys.length + 2; pass++) {
+    const free = keys.filter(k => !clamped.has(k));
+    if (free.length === 0) break;
+    const fixedTotal = keys.filter(k => clamped.has(k)).reduce((s, k) => s + out[k], 0);
+    const freeRaw = free.reduce((s, k) => s + raw[k], 0);
+    const remaining = valueBudget - fixedTotal;
+    // Every free entry is zero-weighted: spread what is left evenly rather than dividing by zero.
+    const scale = freeRaw > 0 ? remaining / freeRaw : 0;
+    free.forEach(k => { out[k] = freeRaw > 0 ? raw[k] * scale : remaining / free.length; });
+
+    let newlyClamped = false;
+    free.forEach(k => {
+      if (out[k] < lo[k]) { out[k] = lo[k]; clamped.add(k); newlyClamped = true; }
+      else if (out[k] > hi[k]) { out[k] = hi[k]; clamped.add(k); newlyClamped = true; }
+    });
+    if (!newlyClamped) break;
+  }
+  return out;
+}
+
 export function renormalizeWeights(raw, valueBudget) {
   const rawTotal = Object.values(raw).reduce((a, b) => a + b, 0);
   const scale = valueBudget / rawTotal;
@@ -1663,6 +1720,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return Math.min(max, Math.max(min, mean + z * std));
     };
     const previewTrial = baseReelTables.map(rt => JSON.parse(JSON.stringify(rt)));
+    // Under any LINKED coupling Phase 2 samples ONE value per symbol and applies it to every reel,
+    // so sampling per (reel, symbol) here would both consume the shared RNG at a different rate
+    // and show per-reel variation the search will never produce. Measured before this cache
+    // existed: the preview reported `crystal` varying 44x across reels while the search actually
+    // started them within 1.8x of each other - the preview was describing a different run, which
+    // is precisely what its own comment promised could never happen.
+    const previewShared = (reelCoupling !== 'independent') ? new Map() : null;
     baseReelTables.forEach((reelTable, r) => {
       const symbolsTable = reelTable.symbols;
       const nonScatterSymbols = Object.keys(symbolsTable).filter(s => !triggerSymbols.includes(s) && symbolsTable[s].frequency > 0);
@@ -1679,14 +1743,24 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         const provided = symbolsTable[s].frequency;
         if (initialWeightStrategy === 'provided' || bounds.minFrequency == null || bounds.maxFrequency == null) {
           raw[s] = provided;
+        } else if (previewShared?.has(s)) {
+          raw[s] = previewShared.get(s);
         } else {
           const sampled = initialWeightStrategy === 'normal'
             ? previewSampleNormal(bounds.minFrequency, bounds.maxFrequency)
             : previewSampleUniform(bounds.minFrequency, bounds.maxFrequency);
           raw[s] = Math.max(sampled, Number.MIN_VALUE);
+          previewShared?.set(s, raw[s]);
         }
       });
-      const renormalized = renormalizeWeights(raw, valueBudget);
+      // Bounds-aware, so what the preview shows actually lies inside the min/max the developer
+      // configured - see renormalizeWithinBounds for why plain renormalization does not.
+      const renormalized = initialWeightStrategy === 'provided'
+        ? renormalizeWeights(raw, valueBudget)
+        : renormalizeWithinBounds(raw, valueBudget, (s) => {
+            const b = resolveFrequencyBounds(reelTable, s);
+            return { min: b.minFrequency, max: b.maxFrequency };
+          });
       Object.keys(renormalized).forEach(s => { previewTrial[r].symbols[s].frequency = renormalized[s]; });
     });
     await onProgress('initial', 0, null, { trial: previewTrial }, null);
@@ -2250,16 +2324,37 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // here uses, and a reasonable anchor otherwise since the first projection renormalizes each
     // reel against its own budget anyway.
     const baselineReelOf = (d) => d.reelIndex ?? 0;
-    const initialPoint = activeDims.map(d => {
+    const rawSampled = activeDims.map(d => {
       const provided = currentReelTables[baselineReelOf(d)].symbols[d.symbol].frequency;
-      if (initialWeightStrategy === 'provided' || d.min == null || d.max == null) {
-        return Math.log(provided);
-      }
+      if (initialWeightStrategy === 'provided' || d.min == null || d.max == null) return provided;
       const sampled = initialWeightStrategy === 'normal'
         ? sampleNormalFrequency(d.min, d.max)
         : sampleUniformFrequency(d.min, d.max);
-      return Math.log(Math.max(sampled, Number.MIN_VALUE));
+      return Math.max(sampled, Number.MIN_VALUE);
     });
+    // Projected onto the reel's budget WITHIN each symbol's own bounds before being handed to the
+    // search. Without this the sampled values are renormalized by projectPoint against a fixed
+    // budget, which drags them toward budget/N and routinely outside the very bounds they were
+    // drawn from - measured on Candy Frenzy, a request for [0.005, 0.5] produced 0.00125.
+    //
+    // Anchored to the baseline reel: under linked coupling one shared weight serves every reel and
+    // the reels have different budgets, so no single vector can sit inside the bounds after each
+    // reel's own renormalization. Being in-bounds for the reel it was drawn against is the most
+    // that is available, and any residual crossing is real and correctly charged by limitPenaltyOf
+    // rather than hidden.
+    let initialFrequencies = rawSampled;
+    if (initialWeightStrategy !== 'provided') {
+      const anchorReel = baselineReelOf(activeDims[0] ?? { reelIndex: 0 });
+      const budget = valueBudgetByReel[anchorReel];
+      if (budget > 0) {
+        const rawByKey = {};
+        activeDims.forEach((d, i) => { rawByKey[i] = rawSampled[i]; });
+        const projected = renormalizeWithinBounds(rawByKey, budget,
+          (i) => ({ min: activeDims[i].min, max: activeDims[i].max }));
+        initialFrequencies = activeDims.map((d, i) => projected[i]);
+      }
+    }
+    const initialPoint = initialFrequencies.map(f => Math.log(Math.max(f, Number.MIN_VALUE)));
     // Generous per-dimension bounds (relative to that dimension's own starting frequency,
     // not a shared absolute range) - wide enough to not artificially constrain the search,
     // just enough to keep the simplex from drifting to a degenerate near-zero or runaway

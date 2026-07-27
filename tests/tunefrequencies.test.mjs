@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent, describePayoutScaleVerification } from '../core/SpinSimulator.js';
+import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent, describePayoutScaleVerification, renormalizeWithinBounds } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -2320,4 +2320,92 @@ test('a named volatility band converts to the same sigma the panel shows', async
   assert.equal(v.target, 'low');
   assert.ok(v.targetSigma.min === 0 && v.targetSigma.max === 3, `expected the low band, got ${JSON.stringify(v.targetSigma)}`);
   assert.equal(typeof v.achieved, 'number');
+});
+
+// ---- initialWeightStrategy: the random start must mean what its label says -------------------
+
+test('renormalizeWithinBounds keeps every value inside its own bounds while hitting the budget', () => {
+  // Plain renormalization cannot: measured on Candy Frenzy's shape, asking for [0.005, 0.5] and
+  // renormalizing to a 0.9 budget across 12 symbols produced values down to 0.00125 - a quarter of
+  // the configured MINIMUM - all clustered around budget/N. That is why "random" looked like
+  // "average" and why a sampled start could violate the very limits it was drawn from.
+  const raw = {};
+  for (let i = 0; i < 12; i++) raw[i] = 0.005 + (i / 11) * 0.495;
+  const out = renormalizeWithinBounds(raw, 0.9, () => ({ min: 0.005, max: 0.5 }));
+  const vals = Object.values(out);
+  assert.ok(Math.abs(vals.reduce((a, b) => a + b, 0) - 0.9) < 1e-9, 'must sum to the budget');
+  vals.forEach(v => {
+    assert.ok(v >= 0.005 - 1e-12, `${v} is below the configured minimum`);
+    assert.ok(v <= 0.5 + 1e-12, `${v} is above the configured maximum`);
+  });
+});
+
+test('renormalizeWithinBounds falls back rather than papering over an impossible budget', () => {
+  // 12 symbols each needing at least 0.2 cannot share a budget of 0.9. That is a config
+  // contradiction for TuningValidation to report, not something to silently fake here.
+  const raw = {};
+  for (let i = 0; i < 12; i++) raw[i] = 0.3;
+  const out = renormalizeWithinBounds(raw, 0.9, () => ({ min: 0.2, max: 0.5 }));
+  const sum = Object.values(out).reduce((a, b) => a + b, 0);
+  assert.ok(Math.abs(sum - 0.9) < 1e-9, 'still hits the budget');
+  assert.ok(Object.values(out).some(v => v < 0.2), 'and does not pretend the bounds were met');
+});
+
+test('a random initial strategy actually spans its configured range instead of collapsing to the mean', async () => {
+  const bounded = () => ({
+    defaults: { minFrequency: 0.005, maxFrequency: 0.5 },
+    symbols: {
+      a: { frequency: 0.1 }, b: { frequency: 0.1 }, c: { frequency: 0.1 },
+      d: { frequency: 0.1 }, e: { frequency: 0.1 }, scat: { frequency: 0.02 },
+    },
+  });
+  const paytable = {
+    a: { payout: [0, 0, 10], type: 'regular' }, b: { payout: [0, 0, 9], type: 'regular' },
+    c: { payout: [0, 0, 8], type: 'regular' }, d: { payout: [0, 0, 7], type: 'regular' },
+    e: { payout: [0, 0, 6], type: 'regular' },
+    scat: { payout: [0, 0, 2], type: 'scatter', triggerFreeSpins: true },
+  };
+  let initial = null;
+  await tuneFrequencies(paytable, [bounded(), bounded(), bounded()], {
+    reelsCount: 3, rowsCount: 3, reelLength: 100, reelSeeds: [11, 22, 33],
+    paylines: [[0, 0, 0]], linesCount: 1, betPerLine: 1,
+    trialSpins: 300, trialsPerPoint: 1, maxIterations: 1, searchSeed: 5,
+    initialWeightStrategy: 'uniform', measureHeadroom: false,
+    onProgress: (phase, i, m, r) => { if (phase === 'initial' && !initial) initial = r.trial; },
+  });
+  const vals = ['a', 'b', 'c', 'd', 'e'].map(s => initial[0].symbols[s].frequency);
+  vals.forEach(v => assert.ok(v >= 0.005 - 1e-9, `sampled ${v} is below the configured minFrequency`));
+  assert.ok(Math.max(...vals) / Math.min(...vals) > 2,
+    `a random start must actually vary - got ${vals.map(v => v.toFixed(4)).join(', ')}`);
+});
+
+test('the starting-point preview matches what the search really starts from under linked coupling', async () => {
+  // These were two implementations kept in step by a comment promising they agreed. Under linked
+  // coupling they did not: the preview sampled per (reel, symbol) while the search samples ONE
+  // value per symbol, so the preview showed `crystal` varying 44x across reels for a search that
+  // would start them within 1.8x. A preview that describes a different run is worse than none.
+  const bounded = () => ({
+    defaults: { minFrequency: 0.005, maxFrequency: 0.5 },
+    symbols: { a: { frequency: 0.1 }, b: { frequency: 0.2 }, c: { frequency: 0.3 }, scat: { frequency: 0.02 } },
+  });
+  const paytable = {
+    a: { payout: [0, 0, 10], type: 'regular' }, b: { payout: [0, 0, 8], type: 'regular' },
+    c: { payout: [0, 0, 6], type: 'regular' },
+    scat: { payout: [0, 0, 2], type: 'scatter', triggerFreeSpins: true },
+  };
+  let initial = null;
+  await tuneFrequencies(paytable, [bounded(), bounded(), bounded()], {
+    reelsCount: 3, rowsCount: 3, reelLength: 100, reelSeeds: [11, 22, 33],
+    paylines: [[0, 0, 0]], linesCount: 1, betPerLine: 1,
+    trialSpins: 300, trialsPerPoint: 1, maxIterations: 1, searchSeed: 5,
+    initialWeightStrategy: 'uniform', reelCoupling: 'linked', measureHeadroom: false,
+    onProgress: (phase, i, m, r) => { if (phase === 'initial' && !initial) initial = r.trial; },
+  });
+  // Identical reels here, so a linked start must give every reel the same value for a symbol.
+  ['a', 'b', 'c'].forEach(s => {
+    const per = initial.map(rt => rt.symbols[s].frequency);
+    const ratio = Math.max(...per) / Math.min(...per);
+    assert.ok(ratio < 1.001,
+      `${s} varies ${ratio.toFixed(2)}x across reels in the preview, but a linked search shares one value`);
+  });
 });

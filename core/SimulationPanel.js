@@ -1005,32 +1005,11 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
             <span id="tune-volatility-echo" style="display: block; font-size: 0.85em; color: #888; margin-top: 3px;">&nbsp;</span>
           </label>
         </div>
-        <!-- Sits with Target RTP because it is a way of REACHING Target RTP, not a search knob:
-             RTP is strictly proportional to a global payout multiplier, so the value that lands
-             exactly on target is closed-form. Off by default - it rewrites the game's paytable,
-             which is a design artifact nobody should have changed for them by a checkbox they
-             didn't tick. -->
-        <label title="After the frequency search finishes, compute the single multiplier that would put RTP exactly on target if applied to every payout value, and report it (plus a verification measurement and a paste-ready scaled paytable). Nothing is changed for you - this only ever produces a suggestion, exactly like the frequency tables. Worth knowing why this is different from everything else here: frequencies are a poor RTP lever, which is precisely why the search has to torture them into the over-abundance that then breaks reel spacing and cluster behavior. Payout values are an EXACT lever - k = target / measured, verified linear to 5 significant figures. Using it frees the frequency search to do what it is actually good at: ordering, uniformity, spacing and trigger rate." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 10px;">
-          <input id="tune-solve-payout-scale" type="checkbox" checked style="vertical-align: middle; margin-right: 6px;">
-          Also work out the exact payout multiplier that hits this RTP
-          <span style="color: #888;">&mdash; suggestion only, your paytable is never changed</span>
-        </label>
-        <!-- The other half of the same idea, and the one that answers "what do I actually set
-             these to". Phase 0c ranks the structural knobs one at a time; this searches them
-             together, because they interact - maxStack caps vertical runs that stackChance has to
-             be high enough to produce in the first place, so the best combination is not the best
-             of each knob chosen separately. Cheap because the grid is RANKED from Phase 0c's
-             already-paid-for ladders and only a handful of cells are ever simulated. -->
-        <label title="After checking which knobs matter, search them TOGETHER for one combination of stackChance / maxStack / minStack / minGap that reaches your target RTP at even symbol frequencies - and report it for you to accept or reject. Nothing is applied. Knobs the sweep found no measurable effect for are left out rather than multiplying the search for nothing. Among combinations that hit the target it prefers the SMALLEST change from what you already chose, so the answer is a tweak you can judge rather than a redesign you have to argue with. This matters most when even frequencies pay nowhere near target: the frequency search's only way to close that gap is concentrating symbols, which is exactly the over-abundance complaint - fixing it structurally means the search never has to." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 6px;">
-          <input id="tune-tune-structural" type="checkbox" checked style="vertical-align: middle; margin-right: 6px;">
-          Also suggest what to set the stacking/spacing settings to
-          <span style="color: #888;">&mdash; searched together, not one at a time</span>
-        </label>
       </div>
 
       <!-- 2. HOW THE REELS SHOULD LOOK - shaping preferences and per-reel ordering. Opened
            occasionally: these are design choices, not search mechanics. -->
-      <details id="tune-section-shape" style="margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
+      <details id="tune-section-shape" open style="margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
         <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">How the reels should look <span id="tune-summary-shape" style="color: #888; font-size: 0.85em;"></span></summary>
         <div style="margin-top: 10px;">
           <label title="On a CLUSTER-pays game reel index carries no meaning - a cluster forms from grid-adjacent cells, not from a position in a payline - so giving each reel its own free weight per symbol hands the search degrees of freedom nothing in the design asked for and nothing in the loss can justify. That spread IS the over-abundance problem. Measured on Candy Frenzy at 849bc8a: chewy landed at 0.4105 on reel 2 against 0.0056 on reel 3, and those tables paid 74.70% RTP - 27pp WORSE than giving every candy the same frequency (101.48%). 'Same mix' searches one weight per symbol shared across every reel, which makes that spread unrepresentable rather than merely penalized, and cuts Candy Frenzy from 84 search dimensions to 12. 'Same mix, then vary slightly' runs that first and then reopens per-reel weights, bounded to a small deviation around the shared answer, so a deliberate per-reel tilt is still expressible. Line-pay games want 'Different mix' - reel position genuinely does mean something there." style="font-size: 0.8em; color: #ccc;">Should every reel use the same symbol mix?<br>
@@ -1108,7 +1087,7 @@ ${PENALTY_INTENTS.map(p => `
 
       <!-- 3. SEARCH SETTINGS - how hard and how carefully to look. Rarely touched. -->
       <details id="tune-section-search" style="margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
-        <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">Search settings <span id="tune-summary-search" style="color: #888; font-size: 0.85em;"></span></summary>
+        <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">How hard to look <span id="tune-summary-search" style="color: #888; font-size: 0.85em;"></span></summary>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px;">
           <label title="Which algorithm searches the per-symbol reel weights (Phase 2). CMA-ES (default in this panel) is a population-based search that scales better to many tunable symbols at once and is more tolerant of noisy RTP measurements (e.g. Candy Frenzy's cascade multiplier bonus), at the cost of evaluating a whole population of candidates every generation instead of one or two. Nelder-Mead is a simpler simplex search - cheaper for a small number of tunable symbols, and still tuneFrequencies' own library-level default when this option is omitted entirely." style="font-size: 0.8em; color: #ccc;">Search Algorithm<br>
             <select id="tune-search-algorithm" style="width: 100%; margin-top: 4px;">
@@ -1127,6 +1106,9 @@ ${PENALTY_INTENTS.map(p => `
           </label>
           <label title="Virtual reel strip length used to build each candidate's reel strips - defaults to this game's own REEL_LENGTH. Longer reels let low frequencies round to more distinct symbol counts (which is what makes a trigger-rate target reachable when it currently sits in a lattice gap), at the cost of a slower simulation per candidate. Whatever you set here is emitted as REEL_LENGTH in the copyable output, since a result tuned at one length does not reproduce at another." style="font-size: 0.8em; color: #ccc;">Reel Length<br>
             <input id="tune-reel-length" type="number" value="${tuneConfig.reelLength}" step="10" min="30" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="How many spins each point of the Phase 0c knob sweep and the Phase 0d structural grid is measured over. This is the setting that decides whether CHECK MY CONFIG can tell two structural settings apart: its measured noise floor scales as 1/sqrt(this). Measured on Candy Frenzy - 10,000 spins gives a noise floor of ±17.9pp, 150,000 gives ±2.9pp. Ranking knobs by leverage survives a lot of noise (the top knobs measure in the hundreds of pp per unit), but deciding WHICH COMBINATION hits your target does not, which is why Phase 0d refuses to name a winner when the floor is wider than your RTP tolerance and tells you to raise this. Lower is faster: the whole point of CHECK MY CONFIG is that it answers in seconds." style="font-size: 0.8em; color: #ccc;">Diagnosis Spins / Point<br>
+            <input id="tune-sensitivity-spins" type="number" value="500000" step="10000" min="1000" style="width: 100%; margin-top: 4px;">
           </label>
           <label title="How each tunable symbol's STARTING frequency is chosen before the search begins. 'Use configured baseline' starts every symbol exactly where FREQUENCY_REELn already had it (default - unchanged behavior). The two random options instead pick a starting value between that symbol's own minFrequency and maxFrequency - only symbols with BOTH bounds set are affected, everything else always starts at its baseline regardless of this setting. Useful for checking whether the search reliably reaches the same answer from a meaningfully different starting shape, or gets stuck depending on where it started." style="font-size: 0.8em; color: #ccc;">Initial Frequency Strategy<br>
             <select id="tune-initial-weight-strategy" style="width: 100%; margin-top: 4px;">
@@ -1150,9 +1132,6 @@ ${PENALTY_INTENTS.map(p => `
           </label>
           <label title="Base PRNG seed for the whole search. A given seed always explores the same sequence, so a run is reproducible end to end - the copyable output records whichever seed produced it. Change it to explore a different path through the same search space without changing any other setting." style="font-size: 0.8em; color: #ccc;">Search Seed<br>
             <input id="tune-search-seed" type="number" value="12345" step="1" min="0" style="width: 100%; margin-top: 4px;">
-          </label>
-          <label title="How many spins each point of the Phase 0c knob sweep and the Phase 0d structural grid is measured over. This is the setting that decides whether CHECK MY CONFIG can tell two structural settings apart: its measured noise floor scales as 1/sqrt(this). Measured on Candy Frenzy - 10,000 spins gives a noise floor of ±17.9pp, 150,000 gives ±2.9pp. Ranking knobs by leverage survives a lot of noise (the top knobs measure in the hundreds of pp per unit), but deciding WHICH COMBINATION hits your target does not, which is why Phase 0d refuses to name a winner when the floor is wider than your RTP tolerance and tells you to raise this. Lower is faster: the whole point of CHECK MY CONFIG is that it answers in seconds." style="font-size: 0.8em; color: #ccc;">Diagnosis Spins / Point<br>
-            <input id="tune-sensitivity-spins" type="number" value="50000" step="10000" min="1000" style="width: 100%; margin-top: 4px;">
           </label>
           <label title="Which denomination the loss weights are expressed in. NORMALIZED re-denominates every penalty into a scale-free fraction, so a weight of 1 is worth roughly one RTP percentage point on any game and any term - which is what makes the named levels above mean anything. RAW uses the penalties' own units, which are incommensurable: ordering is in frequency units, spacing is a violation COUNT. Measured on Candy Frenzy, a raw spacing weight of 0.25 contributes 43.75 to a loss whose RTP error term is 1.76, so the search spends 96% of its effort on spacing while appearing to tune RTP. Raw is the library default and is kept here for reproducing older runs exactly." style="font-size: 0.8em; color: #ccc;">Penalty Denomination<br>
             <select id="tune-penalty-normalization" style="width: 100%; margin-top: 4px;">
@@ -1178,15 +1157,35 @@ ${PENALTY_INTENTS.map(p => `
           </div>
         </div>
       </details>
-      <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-        <!-- Deliberately FIRST, and deliberately not a tune. What it produces - broken config,
-             what an even distribution pays, which knob actually moves RTP - is the sort of thing
-             that should change the settings above before a search is started, which is the wrong
-             order if it only ever appears as the opening act of a search already committed to.
-             Costs ~30 cheap measurements against a 150-iteration tune. -->
-        <button id="tune-diagnose-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.9em; background: rgba(127,191,255,0.18); border-color: #7fbfff;" title="Runs the diagnosis only - config validation, structural headroom, and a sweep of every structural knob to see which one actually moves RTP. No search is started and nothing is changed. Takes seconds rather than the minutes a full tune does, and what it tells you will usually change what you type into the settings above.">CHECK MY CONFIG</button>
-        <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
-        <button id="tune-stop-btn" class="btn-icon btn-sim-btn" style="display: none; padding: 6px 14px; font-size: 0.9em; background: rgba(255,90,90,0.2); border-color: #ff8080;">STOP</button>
+      <!-- Extra answers to compute while checking. Beside the buttons, not with the targets. -->
+        <!-- What CHECK MY CONFIG should also work out. They live beside the buttons rather than
+             with the targets because they are not things you want - they are extra answers to
+             compute while looking, and both are suggestions that change nothing. -->
+        <label title="After the frequency search finishes, compute the single multiplier that would put RTP exactly on target if applied to every payout value, and report it (plus a verification measurement and a paste-ready scaled paytable). Nothing is changed for you - this only ever produces a suggestion, exactly like the frequency tables. Worth knowing why this is different from everything else here: frequencies are a poor RTP lever, which is precisely why the search has to torture them into the over-abundance that then breaks reel spacing and cluster behavior. Payout values are an EXACT lever - k = target / measured, verified linear to 5 significant figures. Using it frees the frequency search to do what it is actually good at: ordering, uniformity, spacing and trigger rate." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 10px;">
+          <input id="tune-solve-payout-scale" type="checkbox" checked style="vertical-align: middle; margin-right: 6px;">
+          Also work out the exact payout multiplier that hits this RTP
+          <span style="color: #888;">&mdash; suggestion only, your paytable is never changed</span>
+        </label>
+        <!-- The other half of the same idea, and the one that answers "what do I actually set
+             these to". Phase 0c ranks the structural knobs one at a time; this searches them
+             together, because they interact - maxStack caps vertical runs that stackChance has to
+             be high enough to produce in the first place, so the best combination is not the best
+             of each knob chosen separately. Cheap because the grid is RANKED from Phase 0c's
+             already-paid-for ladders and only a handful of cells are ever simulated. -->
+        <label title="After checking which knobs matter, search them TOGETHER for one combination of stackChance / maxStack / minStack / minGap that reaches your target RTP at even symbol frequencies - and report it for you to accept or reject. Nothing is applied. Knobs the sweep found no measurable effect for are left out rather than multiplying the search for nothing. Among combinations that hit the target it prefers the SMALLEST change from what you already chose, so the answer is a tweak you can judge rather than a redesign you have to argue with. This matters most when even frequencies pay nowhere near target: the frequency search's only way to close that gap is concentrating symbols, which is exactly the over-abundance complaint - fixing it structurally means the search never has to." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 6px;">
+          <input id="tune-tune-structural" type="checkbox" checked style="vertical-align: middle; margin-right: 6px;">
+          Also suggest what to set the stacking/spacing settings to
+          <span style="color: #888;">&mdash; searched together, not one at a time</span>
+        </label>
+      <!-- Two buttons, two jobs, no overlap. CHECK MY CONFIG measures the config and searches
+           nothing; START TUNING searches and no longer re-runs the check (it used to, silently,
+           every time - about 26 seconds of work before any searching began). Same size and shape
+           as each other so they read as siblings; only the emphasis differs, because only one of
+           them is the thing you came here to do. -->
+      <div id="tune-action-row" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px;">
+        <button id="tune-diagnose-btn" class="btn-icon tune-action" style="padding: 8px 16px; font-size: 0.85em; background: rgba(127,191,255,0.15); border-color: #7fbfff; color: #cfe6ff;" title="Measures your config and stops: what is broken, what an even symbol distribution pays, which structural knob actually moves RTP, what to set them to, and what the search would really be optimizing. No search is started and nothing is changed. Seconds rather than the minutes a tune takes, and what it tells you will usually change what you type above.">CHECK MY CONFIG</button>
+        <button id="tune-start-btn" class="btn-icon tune-action" style="padding: 8px 16px; font-size: 0.85em; background: rgba(255,214,0,0.9); border-color: #ffd600; color: #241c00; font-weight: bold;" title="Runs the frequency search against the targets above. Does NOT re-run CHECK MY CONFIG - that panel stays as you last left it.">START TUNING</button>
+        <button id="tune-stop-btn" class="btn-icon tune-action" style="display: none; padding: 8px 16px; font-size: 0.85em; background: rgba(255,90,90,0.2); border-color: #ff8080; color: #ffc9c9;">STOP</button>
       </div>
       <!-- BEFORE YOU TUNE. Config validation, structural headroom, and which knob actually moves
            RTP. All of it is produced without any search, and all of it is a RESULT rather than a
@@ -1660,7 +1659,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     volatilityPenaltyWeight: inputs.targetVolatility.value ? 1 : 0,
     // On in the panel, off in the library. ~30 extra measurements is right for a developer who
     // just clicked TUNE and wrong for every programmatic caller that never asked for it.
-    measureSensitivity: true,
+    // Only for a DIAGNOSIS. This used to be unconditionally true, so every START TUNING silently
+    // re-ran the whole Phase 0c sweep and Phase 0d grid - about 26 seconds of work you may have
+    // just done deliberately - before any searching began. The two buttons now do two jobs with no
+    // overlap, and the diagnosis panel simply stays on screen from the last check.
+    measureSensitivity: diagnoseOnly,
     // Explicit rather than the library's implicit trialSpins/4. How carefully candidates are
     // measured and how carefully the structural KNOBS are measured are different questions:
     // one wants a converged RTP, the other wants a ranking, and tying them together means you
@@ -1673,7 +1676,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // Unlike the payout solve, this one runs for a DIAGNOSIS too - it needs no search result, only
     // Phase 0c's ladders, and "here is a combination that hits your target" is precisely the sort
     // of answer that should change the settings you hand a search rather than arriving after one.
-    tuneStructural: inputs.tuneStructural.checked ? { respectDesignIntent: true } : false,
+    tuneStructural: (diagnoseOnly && inputs.tuneStructural.checked) ? { respectDesignIntent: true } : false,
     winEvaluatorFactory: tuneConfig.winEvaluatorFactory ?? null,
     // Number.isFinite rather than `|| 0.25`, so an explicit 0 - "pin the refinement to the linked
     // answer entirely" - survives instead of being silently replaced by the default.
@@ -1690,7 +1693,14 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     }),
   };
 
-  Object.values(inputs).forEach(el => { el.disabled = true; });
+  // Every control in the panel, not a hand-maintained list. `inputs` only ever held the ones
+  // readTuneOptions reads, so anything added beside them stayed live mid-run - the intent
+  // dropdowns did exactly that, and changing one during a search silently rewrote the raw weight
+  // the run was already using. Buttons are excluded (STOP has to stay clickable) and so is the
+  // readonly output textarea, which must stay selectable to be copied from.
+  const formControls = () => Array.from(tuneContainer.querySelectorAll('input, select'))
+    .filter(el => el.type !== 'button' && el.id !== 'tune-paytable-output');
+  formControls().forEach(el => { el.disabled = true; });
   biasSelects.forEach(el => { el.disabled = true; });
   biasStrengthInputs.forEach(el => { el.disabled = true; });
   startBtn.disabled = true;
@@ -2642,8 +2652,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // the panel to copy-paste back into game.js and reload each time.
     const continueBtn = document.createElement('button');
     continueBtn.id = 'tune-continue-btn';
-    continueBtn.className = 'btn-icon btn-sim-btn tune-result-action';
-    continueBtn.style.cssText = 'padding: 6px 14px; font-size: 0.8em;';
+    continueBtn.className = 'btn-icon tune-result-action';
+    continueBtn.style.cssText = 'padding: 8px 16px; font-size: 0.85em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.25); color: #ddd;';
     continueBtn.textContent = 'CONTINUE TUNING FROM THIS RESULT';
     continueBtn.addEventListener('click', () => {
       startTuning({
@@ -2658,8 +2668,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     if (reelFrequencyTables !== originalReelFrequencyTables) {
       const resetBtn = document.createElement('button');
       resetBtn.id = 'tune-reset-btn';
-      resetBtn.className = 'btn-icon btn-sim-btn tune-result-action';
-      resetBtn.style.cssText = 'padding: 6px 14px; font-size: 0.8em; opacity: 0.75;';
+      resetBtn.className = 'btn-icon tune-result-action';
+      resetBtn.style.cssText = 'padding: 8px 16px; font-size: 0.85em; background: rgba(255,255,255,0.05); border-color: rgba(255,255,255,0.18); color: #aaa;';
       resetBtn.textContent = 'RESET TO ORIGINAL BASELINE';
       resetBtn.addEventListener('click', () => {
         startTuning({ paytable, reelFrequencyTables: originalReelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables });
@@ -2715,7 +2725,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     console.error('Frequency tuning failed:', error);
     appendLog(`Error: ${error.message}`);
   } finally {
-    Object.values(inputs).forEach(el => { el.disabled = false; });
+    formControls().forEach(el => { el.disabled = false; });
     biasSelects.forEach(el => { el.disabled = false; });
     biasStrengthInputs.forEach(el => { el.disabled = false; });
     startBtn.disabled = false;
