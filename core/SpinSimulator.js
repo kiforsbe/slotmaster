@@ -3191,6 +3191,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         trialRtpMax: rtpPhaseResult.trialRtpMax,
         trialRtpStdDev: rtpPhaseResult.trialRtpStdDev,
         trialRtpStdError: rtpPhaseResult.trialRtpStdError,
+        // The winning candidate's own payout SHAPE - hit rate, percentiles, biggest round, how
+        // concentrated the payout is, volatility. Measured as part of evaluating it, so describing
+        // what the tuned game feels like costs no extra simulation. See roundStats in simulateSpins.
+        roundStats: rtpPhaseResult.roundStats ?? null,
         iterationsRun: rtpPhaseResult.iterations,
         iterationsBudget: maxIterations,
         restarts: rtpPhaseResult.restarts,

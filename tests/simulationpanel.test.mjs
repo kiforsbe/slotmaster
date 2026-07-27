@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
-  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow,
+  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow, renderTargetChipsHtml, renderPlayerExperienceHtml,
 } from '../core/SimulationPanel.js';
 import { scalePaytable } from '../core/SpinSimulator.js';
 
@@ -557,4 +557,41 @@ test('the reproducibility header records which denomination the weights were in'
     inputParameters: { reelLength: 500, reelSeeds: [1], orderingPenaltyWeight: 1, penaltyNormalization: 'normalized' },
   });
   assert.match(out, /loss weights \(normalized\)/);
+});
+
+// ---- Package 3.2: did I get what I asked for, and what does it feel like --------------------
+
+test('renderTargetChipsHtml passes a value inside tolerance and fails one outside', () => {
+  const pass = renderTargetChipsHtml({ rtp: 96.2, targetRtp: 96, rtpTolerancePct: 1.5 });
+  assert.match(pass, /96\.20%/);
+  assert.match(pass, /✓/);
+  const fail = renderTargetChipsHtml({ rtp: 101.4, targetRtp: 96, rtpTolerancePct: 1.5 });
+  assert.match(fail, /✗/);
+});
+
+test('renderTargetChipsHtml states the bonus rate in spins, the unit it is reasoned about in', () => {
+  const out = renderTargetChipsHtml({ triggerRatePct: 0.53, targetTriggerRatePct: 0.6, triggerRateTolerancePct: 0.15 });
+  assert.match(out, /1 in 189/);
+});
+
+test('renderTargetChipsHtml does not fail a volatility nobody set a target for', () => {
+  // With no target asked for there is nothing to pass or fail against - inventing a standard to
+  // judge it by would be a red cross for a requirement the developer never stated.
+  const out = renderTargetChipsHtml({ volatilityClass: 'high', targetVolatility: null });
+  assert.match(out, /HIGH/);
+  assert.ok(!/✗/.test(out));
+  const mismatched = renderTargetChipsHtml({ volatilityClass: 'high', targetVolatility: 'low' });
+  assert.match(mismatched, /✗/);
+});
+
+test('renderTargetChipsHtml renders nothing when there is nothing to compare', () => {
+  assert.equal(renderTargetChipsHtml({}), '');
+});
+
+test('renderPlayerExperienceHtml renders the lines it is given and escapes them', () => {
+  const out = renderPlayerExperienceHtml({ lines: ['Something pays on 52% of spins', 'A <script> tag'] });
+  assert.match(out, /52% of spins/);
+  assert.ok(!/<script>/.test(out), 'report text must be escaped like any other config-derived string');
+  assert.equal(renderPlayerExperienceHtml(null), '');
+  assert.equal(renderPlayerExperienceHtml({ lines: [] }), '');
 });

@@ -6,6 +6,7 @@ import { exportSpinLogCsv } from './SpinLog.js';
 import { tuneFrequencies } from './SpinSimulator.js';
 import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
 import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent } from './TuningUnits.js';
+import { describePlayerExperience } from './PlayerExperience.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -63,6 +64,51 @@ const PENALTY_INTENTS = [
     title: "How hard the search works to keep the trigger rate inside its target band. Phase 2 never tunes trigger symbols directly, so on a line-pay game this cannot move and can stay Off. On a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies swings the trigger rate from 0.75% to 2.04%.",
   },
 ];
+
+/**
+ * "Did I get what I asked for?", answered in one glance before any of the detail.
+ *
+ * Each chip pairs an ACHIEVED value with the target from *What do you want*, so the comparison is
+ * made for the reader rather than left to them. Pure - returns HTML.
+ */
+export function renderTargetChipsHtml({ rtp, targetRtp, rtpTolerancePct, triggerRatePct, targetTriggerRatePct, triggerRateTolerancePct, volatilityClass, targetVolatility }) {
+  const chip = (label, value, ok) => `
+    <span style="display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px; border-radius: 999px;
+                 background: ${ok ? 'rgba(127,217,127,0.14)' : 'rgba(230,184,0,0.14)'};
+                 border: 1px solid ${ok ? 'rgba(127,217,127,0.5)' : 'rgba(230,184,0,0.5)'};">
+      <span style="font-size: 0.7em; text-transform: uppercase; letter-spacing: 0.06em; color: #999;">${esc(label)}</span>
+      <span style="font-size: 0.9em; font-weight: bold; color: ${ok ? '#7fd97f' : '#e6b800'};">${esc(value)}</span>
+      <span style="font-size: 0.85em; color: ${ok ? '#7fd97f' : '#e6b800'};">${ok ? '✓' : '✗'}</span>
+    </span>`;
+
+  const chips = [];
+  if (rtp != null && targetRtp != null) {
+    chips.push(chip('RTP', `${rtp.toFixed(2)}%`, Math.abs(rtp - targetRtp) <= (rtpTolerancePct ?? 1.5)));
+  }
+  if (triggerRatePct != null && targetTriggerRatePct != null) {
+    const spins = pctToSpinsPerTrigger(triggerRatePct);
+    chips.push(chip('Bonus', spins == null ? 'never' : `1 in ${Math.round(spins)}`,
+      Math.abs(triggerRatePct - targetTriggerRatePct) <= (triggerRateTolerancePct ?? 0.15)));
+  }
+  if (volatilityClass) {
+    // With no volatility target asked for there is nothing to pass or fail against, so the chip
+    // reports the measured band as satisfied rather than inventing a standard to judge it by.
+    chips.push(chip('Volatility', volatilityClass.toUpperCase(), !targetVolatility || targetVolatility === volatilityClass));
+  }
+  if (chips.length === 0) return '';
+  return `<div style="display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px;">${chips.join('')}</div>`;
+}
+
+/**
+ * The plain-language player-experience report. Pure - returns HTML.
+ */
+export function renderPlayerExperienceHtml(experience) {
+  if (!experience?.lines?.length) return '';
+  return `<div style="background: rgba(255,255,255,0.05); border-left: 3px solid #c58fff; border-radius: 6px; padding: 10px 14px; margin-bottom: 12px;">
+      <div style="font-size: 0.72em; letter-spacing: 0.08em; text-transform: uppercase; color: #c58fff; margin-bottom: 6px;">What this game feels like to play</div>
+      ${experience.lines.map(l => `<div style="font-size: 0.84em; color: #ddd; margin-bottom: 5px; line-height: 1.5;">${esc(l)}</div>`).join('')}
+    </div>`;
+}
 
 /**
  * What each soft constraint currently COSTS, for the "now:" column beside its intent dropdown.
@@ -2316,7 +2362,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // banner further down - the point is that the variance figure travels WITH the RTP number
     // everywhere it's shown, not just in one dedicated spot a reader might skip past.
     const varianceColor = options.trialsPerPoint <= 1 ? '#888' : (isUnreliable ? '#ff8080' : '#7fd97f');
-    let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong><span style="color: ${varianceColor};">${varianceText}</span> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
+    // "Did I get what I asked for?" first, then "what does that actually feel like?", then the
+    // numbers. The diagnostics, the per-iteration table and the log are all still below - their
+    // job is reassurance during the wait, not the answer afterwards.
+    const roundStats = diagnostics.rtpPhase?.roundStats ?? null;
+    const experience = describePlayerExperience(roundStats, {
+      bet: (tuneConfig.betPerLine ?? 1) * (tuneConfig.linesCount ?? 1),
+      rtp, triggerRate: triggerRatePct, sessionSpins: 500,
+    });
+    let html = renderTargetChipsHtml({
+      rtp, targetRtp: options.targetRtp, rtpTolerancePct: options.rtpTolerancePct,
+      triggerRatePct, targetTriggerRatePct: options.targetTriggerRatePct,
+      triggerRateTolerancePct: options.triggerRateTolerancePct,
+      volatilityClass: experience.volatilityClass,
+      targetVolatility: options.targetVolatility ?? null,
+    });
+    html += renderPlayerExperienceHtml(experience);
+    html += `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong><span style="color: ${varianceColor};">${varianceText}</span> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
 
     // Directly under the achieved RTP, because it is a statement ABOUT that number: "this is what
     // the frequencies pay, and here is the exact multiplier that would put it on target". Empty
