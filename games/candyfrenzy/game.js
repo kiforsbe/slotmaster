@@ -346,6 +346,15 @@ async function initGame() {
           // widen the tolerance, or pick a target that exists - and only then raise this to stop
           // Phase 2 from undoing Phase 1's work.
           triggerRatePenaltyWeight: 0,
+          // Candy Frenzy is cluster-pays on a 7x7 grid: a cluster forms from grid-adjacent cells,
+          // so reel index carries no meaning and per-reel frequency spread is search noise rather
+          // than design. Measured at 849bc8a (40k spins, seed 4242), independent per-reel tuning
+          // produced `chewy` at 0.4105 on reel 2 against 0.0056 on reel 3, and those tables paid
+          // 74.70% RTP - 27pp WORSE than giving every candy the same frequency (101.48%). Linking
+          // makes that spread unrepresentable rather than merely penalized, and cuts the search
+          // from 84 dimensions to 12; the refine stage still allows a deliberate per-reel tilt,
+          // bounded to +/-maxReelDeviation around the shared answer.
+          reelCoupling: 'linked-then-refine',
         },
         domRefs: { simModal, simStats },
       });

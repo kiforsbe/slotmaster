@@ -371,6 +371,11 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     `//   target RTP ${p.targetRtp}% +/-${p.rtpTolerancePct}   target trigger ${p.targetTriggerRatePct}% +/-${p.triggerRateTolerancePct}`,
     `//   ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`,
     `//   initial weights: ${p.initialWeightStrategy}   max RTP std error ${p.maxRtpStdError}`,
+    // Coupling changes what the result MEANS, not just how it was found: the same frequencies
+    // reached with one shared weight per symbol and with one per (symbol, reel) came out of
+    // searches with very different degrees of freedom, and only the first guarantees the reels
+    // are not lopsided relative to each other.
+    p.reelCoupling ? `//   reelCoupling ${p.reelCoupling}   maxReelDeviation ${p.maxReelDeviation}` : null,
     weights ? `//   loss weights: ${weights}` : null,
     p.orderingBiasByReel ? `//   ordering bias by reel: [${p.orderingBiasByReel.join(', ')}]` : null,
     `//`,
@@ -478,6 +483,15 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
            occasionally: these are design choices, not search mechanics. -->
       <details id="tune-section-shape" style="margin-bottom: 8px; background: rgba(255,255,255,0.04); border-radius: 8px; padding: 8px 12px;">
         <summary style="font-size: 0.85em; color: #ddd; cursor: pointer; user-select: none;">How the reels should look <span id="tune-summary-shape" style="color: #888; font-size: 0.85em;"></span></summary>
+        <div style="margin-top: 10px;">
+          <label title="On a CLUSTER-pays game reel index carries no meaning - a cluster forms from grid-adjacent cells, not from a position in a payline - so giving each reel its own free weight per symbol hands the search degrees of freedom nothing in the design asked for and nothing in the loss can justify. That spread IS the over-abundance problem. Measured on Candy Frenzy at 849bc8a: chewy landed at 0.4105 on reel 2 against 0.0056 on reel 3, and those tables paid 74.70% RTP - 27pp WORSE than giving every candy the same frequency (101.48%). 'Same mix' searches one weight per symbol shared across every reel, which makes that spread unrepresentable rather than merely penalized, and cuts Candy Frenzy from 84 search dimensions to 12. 'Same mix, then vary slightly' runs that first and then reopens per-reel weights, bounded to a small deviation around the shared answer, so a deliberate per-reel tilt is still expressible. Line-pay games want 'Different mix' - reel position genuinely does mean something there." style="font-size: 0.8em; color: #ccc;">Should every reel use the same symbol mix?<br>
+            <select id="tune-reel-coupling" style="width: 100%; max-width: 420px; margin-top: 4px;">
+              <option value="independent"${(tuneConfig.reelCoupling ?? 'independent') === 'independent' ? ' selected' : ''}>Different mix per reel (line-pay games)</option>
+              <option value="linked"${tuneConfig.reelCoupling === 'linked' ? ' selected' : ''}>Same mix on every reel</option>
+              <option value="linked-then-refine"${tuneConfig.reelCoupling === 'linked-then-refine' ? ' selected' : ''}>Same mix, then vary slightly (cluster games)</option>
+            </select>
+          </label>
+        </div>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px;">
           <label title="How strongly each reel's ordering preference (below) is enforced as a soft penalty on the search's loss, relative to hitting Target RTP. Higher makes the search work harder to satisfy every reel's preference even at some cost to RTP accuracy." style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
             <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
@@ -578,6 +592,9 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
           <label title="Base PRNG seed for the whole search. A given seed always explores the same sequence, so a run is reproducible end to end - the copyable output records whichever seed produced it. Change it to explore a different path through the same search space without changing any other setting." style="font-size: 0.8em; color: #ccc;">Search Seed<br>
             <input id="tune-search-seed" type="number" value="12345" step="1" min="0" style="width: 100%; margin-top: 4px;">
           </label>
+          <label title="Only used by 'Same mix, then vary slightly'. How far each reel's own weight for a symbol may drift from the shared value the linked stage settled on, as a fraction - 0.25 means +/-25%. It exists to keep the refinement a refinement: without a bound, reopening per-reel weights hands back exactly the freedom the linked stage was there to remove, just from a better starting point. Set it to 0 to pin the refinement to the linked answer entirely." style="font-size: 0.8em; color: #ccc;">Max Reel Deviation<br>
+            <input id="tune-max-reel-deviation" type="number" value="${tuneConfig.maxReelDeviation ?? 0.25}" step="0.05" min="0" max="0.95" style="width: 100%; margin-top: 4px;">
+          </label>
         </div>
       </details>
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -654,7 +671,10 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         ['spacing', '#tune-spacing-weight'],
       ].filter(([, id]) => num(id) > 0).map(([label, id]) => `${label} ${num(id)}`);
       if (summaryEls.shape) {
-        summaryEls.shape.textContent = active.length ? `— ${active.join(' · ')}` : '— no shaping preferences set';
+        // Coupling leads, because it is the one setting in this section that changes what the
+        // search can express at all rather than how strongly it prefers something.
+        const coupling = { independent: 'per-reel mix', linked: 'same mix', 'linked-then-refine': 'same mix + refine' }[el('#tune-reel-coupling')?.value] ?? 'per-reel mix';
+        summaryEls.shape.textContent = `— ${[coupling, ...active].join(' · ')}`;
       }
       if (summaryEls.search) {
         const algo = el('#tune-search-algorithm')?.value === 'nelderMead' ? 'Nelder-Mead' : 'CMA-ES';
@@ -832,6 +852,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     spacingPenaltyWeight: tuneContainer.querySelector('#tune-spacing-weight'),
     initialWeightStrategy: tuneContainer.querySelector('#tune-initial-weight-strategy'),
     searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
+    reelCoupling: tuneContainer.querySelector('#tune-reel-coupling'),
+    maxReelDeviation: tuneContainer.querySelector('#tune-max-reel-deviation'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
   const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
@@ -904,6 +926,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     spacingPenaltyWeight: parseFloat(inputs.spacingPenaltyWeight.value) || 0,
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
+    reelCoupling: inputs.reelCoupling.value,
+    // Number.isFinite rather than `|| 0.25`, so an explicit 0 - "pin the refinement to the linked
+    // answer entirely" - survives instead of being silently replaced by the default.
+    maxReelDeviation: Number.isFinite(parseFloat(inputs.maxReelDeviation.value))
+      ? parseFloat(inputs.maxReelDeviation.value) : 0.25,
     // Direction (dropdown, -1/1/0) times this reel's own Strength input (default 1) - a
     // strength of 0 mutes the preference the same way "No preference" does, without losing
     // the dropdown's own selection; above 1 enforces it harder than the shared Ordering

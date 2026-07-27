@@ -143,3 +143,25 @@ test('the reproducibility header records the tolerances and seed the panel now c
   assert.match(output, /\+\/-2\.5/, 'the RTP tolerance actually used must be recorded, not assumed to be the default');
   assert.match(output, /\+\/-0\.2/);
 });
+
+test('formatReelFrequencyTablesForCopy records reelCoupling in the reproducibility header', () => {
+  // Coupling changes what the result MEANS - identical-looking frequencies from a linked run and
+  // an independent run came out of searches with very different degrees of freedom. Same class of
+  // omission as the dropped stackChance in 2548ac2: a setting the output leaves out is a setting
+  // the next run silently gets wrong.
+  const table = { defaults: {}, symbols: { bar: { frequency: 2 } } };
+  const output = formatReelFrequencyTablesForCopy([table], {
+    rtp: 96.0, triggerRatePct: 0.6,
+    inputParameters: {
+      searchSeed: 1, reelSeeds: [1], reelLength: 500, reelsCount: 1, rowsCount: 3,
+      targetRtp: 96, rtpTolerancePct: 1.5, targetTriggerRatePct: 0.6, triggerRateTolerancePct: 0.15,
+      trialSpins: 1000, trialsPerPoint: 1, searchAlgorithm: 'cmaes', maxIterations: 10,
+      initialWeightStrategy: 'provided', maxRtpStdError: 1,
+      orderingPenaltyWeight: 0.5, limitPenaltyWeight: 0.5, uniformityPenaltyWeight: 0,
+      stdErrorPenaltyWeight: 0, triggerRatePenaltyWeight: 0, spacingPenaltyWeight: 0,
+      reelCoupling: 'linked-then-refine', maxReelDeviation: 0.25,
+    },
+  });
+  assert.match(output, /reelCoupling linked-then-refine/);
+  assert.match(output, /maxReelDeviation 0\.25/);
+});

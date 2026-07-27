@@ -1633,21 +1633,35 @@ const couplingOptions = {
   trialSpins: 2000, trialsPerPoint: 1, maxIterations: 6, searchSeed: 7,
 };
 
-test('reelCoupling "linked" gives every reel identical tuned frequencies', async () => {
+test('reelCoupling "linked" gives every reel the same symbol MIX, whatever its own budget', async () => {
   // On a cluster game reel index means nothing - a cluster forms from grid-adjacent cells, not
   // from a payline position. Independent per-reel dims let the search invent a large spread
   // between reels for the same symbol, which is the "over-abundance" complaint: it is search
   // noise given one scalar objective and (on Candy Frenzy) 84 degrees of freedom, not a design
   // decision. Linking makes that spread unrepresentable rather than merely penalized.
-  const result = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+  //
+  // The invariant is equal SHARES, not equal frequency numbers, and the reels here deliberately
+  // start with different total weights to pin that down. projectPoint writes one shared raw
+  // weight to every reel and then renormalizes each against its own valueBudget, so a reel
+  // carrying twice the total weight ends up with twice the raw frequency for every symbol - a
+  // uniform per-reel scale, which generateReel divides straight back out when it converts
+  // frequencies to strip positions. An equal-frequency assertion would pass only for the
+  // accident of equal-budget reels and would quietly mislead on any real game (Candy Frenzy's
+  // shipped tables have unequal budgets on all seven reels).
+  const wide = () => ({ defaults: {}, symbols: { hi: { frequency: 6 }, lo: { frequency: 12 }, scat: { frequency: 2 } } });
+  const result = await tuneFrequencies(couplingPaytable, [couplingTable(), wide(), couplingTable()], {
     ...couplingOptions, reelCoupling: 'linked',
   });
 
   const out = result.reelFrequencyTables;
+  const shareOf = (rt, symbol) => {
+    const total = ['hi', 'lo'].reduce((sum, s) => sum + rt.symbols[s].frequency, 0);
+    return rt.symbols[symbol].frequency / total;
+  };
   for (const symbol of ['hi', 'lo']) {
-    const values = out.map(rt => rt.symbols[symbol].frequency);
-    values.forEach(v => assert.ok(Math.abs(v - values[0]) < 1e-9,
-      `${symbol} must be identical across reels under 'linked', got ${values.join(', ')}`));
+    const shares = out.map(rt => shareOf(rt, symbol));
+    shares.forEach(v => assert.ok(Math.abs(v - shares[0]) < 1e-9,
+      `${symbol}'s share must be identical across reels under 'linked', got ${shares.join(', ')}`));
   }
   assert.equal(result.diagnostics.rtpPhase.coupling.mode, 'linked');
   assert.equal(result.diagnostics.rtpPhase.coupling.dimsLinked, 2,

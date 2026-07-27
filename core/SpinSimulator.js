@@ -2411,6 +2411,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     trialSpins, trialsPerPoint, maxIterations,
     orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
     triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
+    reelCoupling, maxReelDeviation,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
