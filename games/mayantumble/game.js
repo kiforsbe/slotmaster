@@ -59,16 +59,22 @@ export function checkLineCascadeWins(grid, paytable, scatterSymbol, scatterTrigg
       symbol: lw.symbol,
       count: lw.count,
       payout: lw.payout / paylines.length, // payout relative to total bet
-      winningPositions: lw.winningPositions
+      winningPositions: lw.winningPositions,
+      // Carried through so the engine can draw WHICH line paid. A cluster game's win is its own
+      // shape and needs no such thing; here the winning positions alone are three or four cells
+      // that could sit on several paylines at once, and the player has no way to tell which one
+      // they were paid for. CascadeEngine draws a path for any win that carries this.
+      lineIndex: lw.lineIndex
     });
   });
-  
+
   if (results.scatterWin) {
     clusterWins.push({
       symbol: results.scatterWin.symbol,
       count: results.scatterWin.count,
       payout: results.scatterWin.payout, // scatter payout is already relative to total bet
       winningPositions: results.scatterWin.winningPositions
+      // No lineIndex - a scatter pays anywhere, so there is no line to draw.
     });
   }
   
@@ -247,6 +253,7 @@ async function initGame() {
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
     reelStrips: REEL_STRIPS,
+    paylines: PAYLINES,
     winEvaluator,
     scatterSymbol: 'gold',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),

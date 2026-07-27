@@ -30,7 +30,11 @@ const CLUSTER_WIN_EVALUATOR_BUILDERS = {
           symbol: lw.symbol,
           count: lw.count,
           payout: lw.payout / paylines.length,
-          winningPositions: lw.winningPositions
+          winningPositions: lw.winningPositions,
+          // Unused by the simulator, which only ever sums payouts - carried so this rebuild stays
+          // field-for-field identical to the game's own evaluator rather than a payout-equivalent
+          // approximation of it.
+          lineIndex: lw.lineIndex
         });
       });
       if (results.scatterWin) {

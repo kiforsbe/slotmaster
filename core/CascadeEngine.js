@@ -25,6 +25,13 @@ const CLEAR_VARIANTS = ['scaleFade', 'stretch', 'jump', 'spin'];
 // the next cascade step's grid appears.
 const CLEAR_DURATION_MS = { normal: 760, turbo: 300 };
 
+// One per payline, cycled if a game declares more. Only used by a line-pay cascade game (see
+// _renderWinLine); a cluster game never reaches this.
+const LINE_COLORS = [
+  '#ff003c', '#00ff66', '#00d2ff', '#ffcc00', '#ff00ff',
+  '#ff6600', '#00ffff', '#9933ff', '#d4af37', '#33ff33',
+];
+
 export class CascadeEngine {
   constructor(canvas, config = {}) {
     this.canvas = canvas;
@@ -683,8 +690,78 @@ export class CascadeEngine {
     this.ctx.restore();
 
     this._renderGridBorders();
+    // Outside the clip, like the popups: a payline's number tags sit just beyond the grid edge.
+    this._renderWinLine();
     this.renderParticles();
     this._renderClusterWinPopups();
+  }
+
+  // The payline currently being paid, drawn across the grid with its number at both ends.
+  //
+  // A cascade engine has no concept of paylines - a win is a set of cells and that is normally the
+  // whole story. It stops being the whole story for a line-pay cascade game (Mayan Tumble): three
+  // matching symbols on a 5x3 grid sit on several paylines at once, so the cells alone do not tell
+  // a player which line they were actually paid for, and the payout differs per line. Any win that
+  // carries a `lineIndex` gets its path drawn; a cluster win carries none and this is a no-op, so
+  // no cluster game pays for the feature.
+  //
+  // Only the cluster being cleared right now, because that is already how this engine presents a
+  // multi-win spin: one win at a time, in sequence, each with its own glow, particles and popup.
+  // Drawing every line at once would be a different presentation from the one the rest of the
+  // spin uses, and on ten paylines it is an unreadable tangle.
+  _renderWinLine() {
+    if (this.state !== 'clearing') return;
+    const paylines = this.config.paylines;
+    if (!paylines) return;
+    const win = this.currentClusterWins?.[this.currentClusterIndex];
+    if (!win || win.lineIndex == null) return;
+    const path = paylines[win.lineIndex];
+    if (!path) return;
+
+    const color = LINE_COLORS[win.lineIndex % LINE_COLORS.length];
+    const centerOf = (col) => ({
+      x: this.reelsX + (col + 0.5) * this.symbolWidth,
+      y: this.reelsY + (path[col] + 0.5) * this.symbolHeight,
+    });
+
+    this.ctx.save();
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 4;
+    this.ctx.lineCap = 'round';
+    this.ctx.lineJoin = 'round';
+    this.ctx.shadowColor = color;
+    this.ctx.shadowBlur = 12;
+    this.ctx.beginPath();
+    for (let col = 0; col < this.config.reelsCount; col++) {
+      const { x, y } = centerOf(col);
+      if (col === 0) this.ctx.moveTo(x, y);
+      else this.ctx.lineTo(x, y);
+    }
+    this.ctx.stroke();
+    this.ctx.restore();
+
+    // 1-based, because a paytable and a player both count lines from 1.
+    const label = win.lineIndex + 1;
+    this._renderLineTag(label, this.reelsX - 15, centerOf(0).y, color);
+    this._renderLineTag(label, this.reelsX + this.reelsWidth + 15, centerOf(this.config.reelsCount - 1).y, color);
+  }
+
+  _renderLineTag(num, x, y, color) {
+    this.ctx.save();
+    this.ctx.fillStyle = '#0f0f13';
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = 2;
+    this.ctx.beginPath();
+    this.ctx.arc(x, y, 12, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.stroke();
+
+    this.ctx.fillStyle = '#fff';
+    this.ctx.font = 'bold 11px Outfit, Inter, sans-serif';
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.fillText(num, x, y);
+    this.ctx.restore();
   }
 
   _renderLoading() {

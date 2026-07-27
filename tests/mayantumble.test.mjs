@@ -53,6 +53,38 @@ test('rebuilding this game\'s evaluator without paylines fails by name, not as a
     'the error must name both the evaluator and the field that is missing');
 });
 
+test('a line win carries which payline paid it, and a scatter carries none', () => {
+  // A cascade engine treats a win as a set of cells, which is the whole story for a cluster game.
+  // It is not the whole story here: three matching symbols on a 5x3 grid sit on several paylines
+  // at once, and the cells alone cannot tell a player which line they were paid for. Without
+  // lineIndex the engine has nothing to draw.
+  const gridAt = (offset) => REEL_STRIPS.map(strip =>
+    Array.from({ length: ROWS_COUNT }, (_, row) => strip[(offset + row) % strip.length]));
+  const evaluate = (grid) => checkLineCascadeWins(grid, PAYTABLE, 'gold', SCATTER_TRIGGER_COUNT, PAYLINES, null);
+
+  let lineWin = null;
+  for (let offset = 0; offset < REEL_LENGTH && !lineWin; offset++) {
+    const wins = evaluate(gridAt(offset)).clusterWins;
+    lineWin = wins.find(w => w.symbol !== 'gold') ?? null;
+  }
+  assert.ok(lineWin, 'expected at least one line win somewhere on these strips');
+  assert.equal(typeof lineWin.lineIndex, 'number');
+  assert.ok(lineWin.lineIndex >= 0 && lineWin.lineIndex < PAYLINES.length);
+
+  // Every cell it was paid for must sit on the line it claims - otherwise the drawn path and the
+  // highlighted symbols disagree, which is worse than drawing nothing.
+  const path = PAYLINES[lineWin.lineIndex];
+  lineWin.winningPositions.forEach(([col, row]) => assert.equal(row, path[col]));
+
+  // A scatter pays anywhere, so there is no line to draw and it must not claim one - a lineIndex
+  // of 0 here would draw payline 1 across a win that has nothing to do with it.
+  const scattered = gridAt(0).map(col => col.slice());
+  for (let col = 0; col < SCATTER_TRIGGER_COUNT; col++) scattered[col][0] = 'gold';
+  const scatterWin = evaluate(scattered).clusterWins.find(w => w.symbol === 'gold');
+  assert.ok(scatterWin, 'expected the forced gold symbols to pay as a scatter');
+  assert.equal(scatterWin.lineIndex, undefined);
+});
+
 test('the rebuilt evaluator measures identically to the in-process closure', () => {
   // Equivalence is the whole contract. A rebuild that merely runs, but scores differently from
   // the evaluator the game plays with, produces a tuned result for a game nobody ships.
@@ -69,6 +101,13 @@ test('the rebuilt evaluator measures identically to the in-process closure', () 
 
   assert.equal(rebuilt.rtpRaw, inProcess.rtpRaw);
   assert.equal(rebuilt.freeSpinsTriggered, inProcess.freeSpinsTriggered);
+
+  // Field-for-field, not merely payout-equivalent - the rebuild is meant to BE this game's
+  // evaluator, so anything the game reads off a win (lineIndex, say) has to survive it.
+  const grid = REEL_STRIPS.map(strip => Array.from({ length: ROWS_COUNT }, (_, row) => strip[row]));
+  assert.deepEqual(
+    resolveWinEvaluator('checkLineCascadeWins', PAYTABLE, 'gold', 3, SCATTER_TRIGGER_COUNT, PAYLINES, null)(grid),
+    checkLineCascadeWins(grid, PAYTABLE, 'gold', SCATTER_TRIGGER_COUNT, PAYLINES, null));
 });
 
 test('mayan tumble simulated RTP is a finite, sane number', () => {
