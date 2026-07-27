@@ -50,104 +50,104 @@ export const PAYTABLE = {
   star:       { payout: [0, 8, 20,  40,  800], type: 'scatter', paymode: 'any', wild: false, triggerFreeSpins: true, friendlyName: 'Star' },
 };
 
-// ---- Tuned 2026-07-26 ----
-// Achieved: RTP 96%  |  free-spin trigger 0.561%
+// ---- Tuned 2026-07-27 ----
+// Achieved: RTP 96.38%  |  free-spin trigger 0.56%
 //
 // To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
 // same reel geometry, since strips are generated from them:
 //   searchSeed 12345   reelSeeds [4231, 8765, 123, 9981, 5567]
 //   reelLength 500   reels 5 x 3 rows
 //   target RTP 96% +/-1.5   target trigger 0.6% +/-0.15
-//   100,000 spins x 4 trials   cmaes, max 150 iterations
-//   initial weights: uniform   max RTP std error 1
-//   loss weights: ordering 0.5, limit 0.5, uniformity 1, stdError 0.75, triggerRate 0, spacing 0
-//   ordering bias by reel: [1, 0.5, -0.5, -0.5, 0]
+//   300,000 spins x 2 trials   cmaes, max 150 iterations
+//   initial weights: provided   max RTP std error 1
+//   loss weights: ordering 0.5, limit 5, uniformity 5, stdError 5, triggerRate 0, spacing 0
+//   ordering bias by reel: [0.25, 0.25, -0.5, 0, 0]
 //
 // REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
 // against this length and do not reproduce the RTP above at any other.
 export const REEL_LENGTH = 500;
 
 export const FREQUENCY_REEL1 = {
-  defaults: { minFrequency: 0, maxFrequency: 1 },
+  defaults: { minFrequency: 0.1, maxFrequency: 1 },
   symbols: {
-    bar_triple: { frequency: 1.546 },
-    bar_double: { frequency: 0.4284 },
-    bar:        { frequency: 0.6199 },
-    bell:       { frequency: 0.8439 },
-    clover:     { frequency: 0.1413 },
-    strawberry: { frequency: 0.5091 },
-    plum:       { frequency: 0.2429 },
-    grapes:     { frequency: 0.5109 },
-    orange:     { frequency: 0.06866 },
-    melon:      { frequency: 0.08868 },
+    bar_triple: { frequency: 0.9139 },
+    bar_double: { frequency: 0.7212 },
+    bar:        { frequency: 0.563 },
+    bell:       { frequency: 0.6001 },
+    clover:     { frequency: 0.6131 },
+    strawberry: { frequency: 0.4322 },
+    plum:       { frequency: 0.4125 },
+    grapes:     { frequency: 0.2768 },
+    orange:     { frequency: 0.06278 },
+    melon:      { frequency: 0.4042 },
     star:       { frequency: 0.1422, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: { minFrequency: 0, maxFrequency: 1 },
+  defaults: { minFrequency: 0.1, maxFrequency: 1 },
   symbols: {
-    bar_triple: { frequency: 0.8269 },
-    bar_double: { frequency: 0.9722 },
-    bar:        { frequency: 1.011 },
-    bell:       { frequency: 0.2955 },
-    clover:     { frequency: 0.01175 },
-    strawberry: { frequency: 0.4431 },
-    plum:       { frequency: 0.3917 },
-    grapes:     { frequency: 0.634 },
-    orange:     { frequency: 0.2315 },
-    melon:      { frequency: 0.182 },
+    bar_triple: { frequency: 0.832 },
+    bar_double: { frequency: 0.9866 },
+    bar:        { frequency: 0.5828 },
+    bell:       { frequency: 0.5056 },
+    clover:     { frequency: 0.1259 },
+    strawberry: { frequency: 0.4292 },
+    plum:       { frequency: 0.4501 },
+    grapes:     { frequency: 0.37 },
+    orange:     { frequency: 0.3346 },
+    melon:      { frequency: 0.3828 },
     star:       { frequency: 0.1422, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: { minFrequency: 0, maxFrequency: 1 },
+  defaults: { minFrequency: 0.1, maxFrequency: 1 },
   symbols: {
-    bar_triple: { frequency: 0.3179 },
-    bar_double: { frequency: 0.2935 },
-    bar:        { frequency: 0.2937 },
-    bell:       { frequency: 0.5304 },
-    clover:     { frequency: 0.1708 },
-    strawberry: { frequency: 0.8762 },
-    plum:       { frequency: 0.589 },
-    grapes:     { frequency: 0.8466 },
-    orange:     { frequency: 0.4096 },
-    melon:      { frequency: 0.6726 },
+    bar_triple: { frequency: 0.2879 },
+    bar_double: { frequency: 0.4905 },
+    bar:        { frequency: 0.3253 },
+    bell:       { frequency: 0.3815 },
+    clover:     { frequency: 0.6043 },
+    strawberry: { frequency: 0.4987 },
+    plum:       { frequency: 0.2632 },
+    grapes:     { frequency: 0.6582 },
+    orange:     { frequency: 0.6322 },
+    melon:      { frequency: 0.8585 },
     star:       { frequency: 0.1422, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL4 = {
-  defaults: { minFrequency: 0, maxFrequency: 1 },
+  defaults: { minFrequency: 0.1, maxFrequency: 1 },
   symbols: {
-    bar_triple: { frequency: 0.6275 },
-    bar_double: { frequency: 0.1942 },
-    bar:        { frequency: 1.001 },
-    bell:       { frequency: 0.9288 },
-    clover:     { frequency: 0.5194 },
-    strawberry: { frequency: 1.175 },
-    plum:       { frequency: 0.3169 },
-    grapes:     { frequency: 0.02713 },
-    orange:     { frequency: 0.00552 },
-    melon:      { frequency: 0.2045 },
+    bar_triple: { frequency: 0.4984 },
+    bar_double: { frequency: 0.5559 },
+    bar:        { frequency: 0.8577 },
+    bell:       { frequency: 0.7165 },
+    clover:     { frequency: 0.5438 },
+    strawberry: { frequency: 0.4777 },
+    plum:       { frequency: 0.4677 },
+    grapes:     { frequency: 0.1538 },
+    orange:     { frequency: 0.01323 },
+    melon:      { frequency: 0.7154 },
     star:       { frequency: 0.1422, minGap: 3, maxStack: 1 },
   },
 };
 
 export const FREQUENCY_REEL5 = {
-  defaults: { minFrequency: 0, maxFrequency: 1 },
+  defaults: { minFrequency: 0.1, maxFrequency: 1 },
   symbols: {
-    bar_triple: { frequency: 0.1273 },
-    bar_double: { frequency: 0.8215 },
-    bar:        { frequency: 0.2504 },
-    bell:       { frequency: 2.398e-9 },
-    clover:     { frequency: 0.6104 },
-    strawberry: { frequency: 0.9759 },
-    plum:       { frequency: 0.925 },
-    grapes:     { frequency: 0.35 },
-    orange:     { frequency: 0.7701 },
-    melon:      { frequency: 0.1693 },
+    bar_triple: { frequency: 0.6301 },
+    bar_double: { frequency: 0.4208 },
+    bar:        { frequency: 0.5283 },
+    bell:       { frequency: 4.874e-9 },
+    clover:     { frequency: 0.7544 },
+    strawberry: { frequency: 0.5453 },
+    plum:       { frequency: 0.5708 },
+    grapes:     { frequency: 0.4833 },
+    orange:     { frequency: 0.4117 },
+    melon:      { frequency: 0.6553 },
     star:       { frequency: 0.1422, minGap: 3, maxStack: 1 },
   },
 };
