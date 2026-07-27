@@ -53,17 +53,17 @@ export const PAYTABLE = {
 };
 
 // ---- Tuned 2026-07-27 ----
-// Achieved: RTP 96.65%  |  free-spin trigger 0.568%
+// Achieved: RTP 96.01%  |  free-spin trigger 0.592%
 //
 // To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
 // same reel geometry, since strips are generated from them:
 //   searchSeed 12345   reelSeeds [101, 202, 303, 404, 505, 606, 707]
 //   reelLength 500   reels 7 x 7 rows
 //   target RTP 96% +/-1.5   target trigger 0.5988023952095808% +/-0.15
-//   25,000 spins x 4 trials   cmaes, max 150 iterations
-//   initial weights: uniform   max RTP std error 1
-//   reelCoupling linked-then-refine   maxReelDeviation 0.25
-//   loss weights: ordering 0.5, limit 0.5, uniformity 0, stdError 0, triggerRate 0, spacing 0
+//   250,000 spins x 2 trials   cmaes, max 75 iterations
+//   initial weights: provided   max RTP std error 1
+//   reelCoupling linked   maxReelDeviation 0.25
+//   loss weights (normalized): ordering 1, limit 1, uniformity 0, stdError 0, triggerRate 1, spacing 1
 //   ordering bias by reel: [0, 0, 0, 0, 0, 0, 0]
 //
 // REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
@@ -71,134 +71,134 @@ export const PAYTABLE = {
 export const REEL_LENGTH = 500;
 
 export const FREQUENCY_REEL1 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.08325 },
-    gum:         { frequency: 0.06154 },
-    crystal:     { frequency: 0.08792 },
-    rocket:      { frequency: 0.07173 },
-    crown:       { frequency: 0.08926 },
-    cake:        { frequency: 0.06484 },
-    mint:        { frequency: 0.06633 },
-    gummy:       { frequency: 0.06853 },
-    bean:        { frequency: 0.06723 },
-    chocolate:   { frequency: 0.08603 },
-    chewy:       { frequency: 0.07477 },
-    cherry:      { frequency: 0.07857 },
+    cottoncandy: { frequency: 0.06492 },
+    gum:         { frequency: 0.06674 },
+    crystal:     { frequency: 0.07414 },
+    rocket:      { frequency: 0.07578 },
+    crown:       { frequency: 0.07861 },
+    cake:        { frequency: 0.07342 },
+    mint:        { frequency: 0.07807 },
+    gummy:       { frequency: 0.07252 },
+    bean:        { frequency: 0.08659 },
+    chocolate:   { frequency: 0.07523 },
+    chewy:       { frequency: 0.07541 },
+    cherry:      { frequency: 0.07855 },
     bonus:       { frequency: 0.008265, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.08327 },
-    gum:         { frequency: 0.06155 },
-    crystal:     { frequency: 0.08793 },
-    rocket:      { frequency: 0.07174 },
-    crown:       { frequency: 0.08928 },
-    cake:        { frequency: 0.06485 },
-    mint:        { frequency: 0.06635 },
-    gummy:       { frequency: 0.06854 },
-    bean:        { frequency: 0.06724 },
-    chocolate:   { frequency: 0.08605 },
-    chewy:       { frequency: 0.07478 },
-    cherry:      { frequency: 0.07859 },
+    cottoncandy: { frequency: 0.06493 },
+    gum:         { frequency: 0.06675 },
+    crystal:     { frequency: 0.07416 },
+    rocket:      { frequency: 0.0758 },
+    crown:       { frequency: 0.07863 },
+    cake:        { frequency: 0.07343 },
+    mint:        { frequency: 0.07808 },
+    gummy:       { frequency: 0.07254 },
+    bean:        { frequency: 0.08661 },
+    chocolate:   { frequency: 0.07525 },
+    chewy:       { frequency: 0.07543 },
+    cherry:      { frequency: 0.07857 },
     bonus:       { frequency: 0.006188, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.04626 },
-    gum:         { frequency: 0.0342 },
-    crystal:     { frequency: 0.04885 },
-    rocket:      { frequency: 0.03986 },
-    crown:       { frequency: 0.0496 },
-    cake:        { frequency: 0.03603 },
-    mint:        { frequency: 0.03686 },
-    gummy:       { frequency: 0.03808 },
-    bean:        { frequency: 0.03736 },
-    chocolate:   { frequency: 0.0478 },
-    chewy:       { frequency: 0.04154 },
-    cherry:      { frequency: 0.04366 },
+    cottoncandy: { frequency: 0.03607 },
+    gum:         { frequency: 0.03708 },
+    crystal:     { frequency: 0.0412 },
+    rocket:      { frequency: 0.04211 },
+    crown:       { frequency: 0.04368 },
+    cake:        { frequency: 0.0408 },
+    mint:        { frequency: 0.04338 },
+    gummy:       { frequency: 0.0403 },
+    bean:        { frequency: 0.04812 },
+    chocolate:   { frequency: 0.0418 },
+    chewy:       { frequency: 0.0419 },
+    cherry:      { frequency: 0.04365 },
     bonus:       { frequency: 0.006917, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL4 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.08324 },
-    gum:         { frequency: 0.06153 },
-    crystal:     { frequency: 0.0879 },
-    rocket:      { frequency: 0.07172 },
-    crown:       { frequency: 0.08924 },
-    cake:        { frequency: 0.06483 },
-    mint:        { frequency: 0.06632 },
-    gummy:       { frequency: 0.06851 },
-    bean:        { frequency: 0.06722 },
-    chocolate:   { frequency: 0.08602 },
-    chewy:       { frequency: 0.07475 },
-    cherry:      { frequency: 0.07856 },
+    cottoncandy: { frequency: 0.06491 },
+    gum:         { frequency: 0.06673 },
+    crystal:     { frequency: 0.07413 },
+    rocket:      { frequency: 0.07577 },
+    crown:       { frequency: 0.0786 },
+    cake:        { frequency: 0.07341 },
+    mint:        { frequency: 0.07806 },
+    gummy:       { frequency: 0.07251 },
+    bean:        { frequency: 0.08658 },
+    chocolate:   { frequency: 0.07522 },
+    chewy:       { frequency: 0.0754 },
+    cherry:      { frequency: 0.07854 },
     bonus:       { frequency: 0.006186, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL5 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.08324 },
-    gum:         { frequency: 0.06154 },
-    crystal:     { frequency: 0.08791 },
-    rocket:      { frequency: 0.07172 },
-    crown:       { frequency: 0.08925 },
-    cake:        { frequency: 0.06483 },
-    mint:        { frequency: 0.06633 },
-    gummy:       { frequency: 0.06852 },
-    bean:        { frequency: 0.06722 },
-    chocolate:   { frequency: 0.08602 },
-    chewy:       { frequency: 0.07476 },
-    cherry:      { frequency: 0.07856 },
+    cottoncandy: { frequency: 0.06491 },
+    gum:         { frequency: 0.06673 },
+    crystal:     { frequency: 0.07413 },
+    rocket:      { frequency: 0.07578 },
+    crown:       { frequency: 0.0786 },
+    cake:        { frequency: 0.07341 },
+    mint:        { frequency: 0.07806 },
+    gummy:       { frequency: 0.07252 },
+    bean:        { frequency: 0.08658 },
+    chocolate:   { frequency: 0.07522 },
+    chewy:       { frequency: 0.0754 },
+    cherry:      { frequency: 0.07855 },
     bonus:       { frequency: 0.006186, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL6 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.08326 },
-    gum:         { frequency: 0.06155 },
-    crystal:     { frequency: 0.08793 },
-    rocket:      { frequency: 0.07174 },
-    crown:       { frequency: 0.08927 },
-    cake:        { frequency: 0.06485 },
-    mint:        { frequency: 0.06634 },
-    gummy:       { frequency: 0.06854 },
-    bean:        { frequency: 0.06724 },
-    chocolate:   { frequency: 0.08604 },
-    chewy:       { frequency: 0.07478 },
-    cherry:      { frequency: 0.07858 },
+    cottoncandy: { frequency: 0.06493 },
+    gum:         { frequency: 0.06675 },
+    crystal:     { frequency: 0.07415 },
+    rocket:      { frequency: 0.07579 },
+    crown:       { frequency: 0.07862 },
+    cake:        { frequency: 0.07343 },
+    mint:        { frequency: 0.07808 },
+    gummy:       { frequency: 0.07253 },
+    bean:        { frequency: 0.0866 },
+    chocolate:   { frequency: 0.07524 },
+    chewy:       { frequency: 0.07542 },
+    cherry:      { frequency: 0.07857 },
     bonus:       { frequency: 0.006187, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
 
 export const FREQUENCY_REEL7 = {
-  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.5, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.08326 },
-    gum:         { frequency: 0.06155 },
-    crystal:     { frequency: 0.08792 },
-    rocket:      { frequency: 0.07174 },
-    crown:       { frequency: 0.08927 },
-    cake:        { frequency: 0.06484 },
-    mint:        { frequency: 0.06634 },
-    gummy:       { frequency: 0.06853 },
-    bean:        { frequency: 0.06723 },
-    chocolate:   { frequency: 0.08604 },
-    chewy:       { frequency: 0.07477 },
-    cherry:      { frequency: 0.07858 },
+    cottoncandy: { frequency: 0.06493 },
+    gum:         { frequency: 0.06674 },
+    crystal:     { frequency: 0.07415 },
+    rocket:      { frequency: 0.07579 },
+    crown:       { frequency: 0.07862 },
+    cake:        { frequency: 0.07343 },
+    mint:        { frequency: 0.07808 },
+    gummy:       { frequency: 0.07253 },
+    bean:        { frequency: 0.0866 },
+    chocolate:   { frequency: 0.07524 },
+    chewy:       { frequency: 0.07542 },
+    cherry:      { frequency: 0.07856 },
     bonus:       { frequency: 0.006187, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -331,29 +331,43 @@ async function initGame() {
           minClusterSize: MIN_CLUSTER_SIZE,
           scatterTriggerCount: SCATTER_TRIGGER_COUNT,
           freeSpinsCount: FREE_SPINS_AWARD,
-          // Deliberately 0 for now, with a caveat worth reading before raising it.
+          // This IS a cascade game, so unlike a line-pay game its trigger rate is genuinely coupled
+          // to the NON-trigger symbols: candy weights govern how readily clusters form, which
+          // governs cascade depth, and every cascade refills the grid with fresh chances to draw
+          // `bonus`. Under deliberately extreme reweighting (bonus held byte-identical, every
+          // reel's candy budget preserved) that coupling spans a 0.75%-2.04% trigger range. At
+          // weight 0 the search cannot see any of that happening, which is exactly how a cascade
+          // tune ends up with a good RTP and a trigger rate nowhere near target - and Phase 2
+          // silently undoing Phase 1's work is what `diagnostics.triggerRateDrift` exists to catch.
           //
-          // This IS a cascade game, so unlike a line-pay game its trigger rate genuinely is
-          // coupled to the non-trigger symbols: candy weights govern how readily clusters form,
-          // which governs cascade depth, and every cascade refills the grid with fresh chances to
-          // draw `bonus`. Under deliberately extreme reweighting (bonus held byte-identical,
-          // every reel's candy budget preserved) that coupling spans a 0.75%-2.04% trigger range.
-          // So a non-zero weight here is the right tool IN PRINCIPLE.
+          // This was 0 for a long time, for a reason that has since stopped being true. The old
+          // blocker was reachability: at REEL_LENGTH 500 `bonus` landed only 2-6 times per strip,
+          // so one whole symbol was a huge relative step and the achievable rates near target went
+          // 0.207% -> 0.343% -> 0.368% -> 0.893%, straight over the 0.45%-0.75% band with nothing
+          // inside it. A non-zero weight then just traded RTP away for progress that could never
+          // arrive (measured at weight 2: RTP 94.88% -> 103.83% while the rate moved 0.353% ->
+          // 0.400%).
           //
-          // What blocks it today is upstream: at REEL_LENGTH 500 the default 0.6% +/-0.15 target
-          // is not reachable AT ALL. `bonus` lands only 2-6 times on a 500-position strip, so one
-          // whole symbol is a huge relative step and the achievable trigger rates near the target
-          // go 0.207% -> 0.343% -> 0.368% -> 0.893% - straight over the 0.45%-0.75% band with
-          // nothing inside it. Phase 1 now reports that honestly as reason 'lattice-gap' rather
-          // than burning its budget on it.
+          // Re-measured against the frequencies shipped today, the lattice is far finer: `bonus`
+          // now lands 27 times across the seven strips (3-7 per reel), with distinct reachable
+          // count vectors every ~4% of multiplier around 1.0 rather than every ~40%. Two tunes have
+          // since landed at 0.568% and 0.532%, both comfortably inside the band. The target is
+          // reachable, so the reason for holding this at 0 is gone.
           //
-          // With the target unreachable, a non-zero weight just trades RTP away for trigger-rate
-          // progress that can never arrive: measured at weight 2, RTP went 94.88% -> 103.83%
-          // while the trigger rate moved only 0.353% -> 0.400%. Fix the reachability first -
-          // REEL_LENGTH ~3000 puts several multipliers inside the band (0.458%/0.460%/0.713%), or
-          // widen the tolerance, or pick a target that exists - and only then raise this to stop
-          // Phase 2 from undoing Phase 1's work.
-          triggerRatePenaltyWeight: 0,
+          // 'Prefer' (1) rather than higher: the coupling is real but indirect, and a heavier
+          // weight buys trigger-rate accuracy with RTP on a game where RTP is the harder target.
+          triggerRatePenaltyWeight: 1,
+          // Cluster-pays games are where reel spacing actually costs money. generateReel enforces
+          // minGap/maxStack BEST-EFFORT and silently gives up on a strip too dense to satisfy them,
+          // so without a weight here the search sees no cost in pushing a symbol past what the
+          // strip can represent - and the resulting clumping is precisely what inflates cluster
+          // wins and RTP. Left at 0 previously because a RAW spacing weight is a violation COUNT
+          // and therefore incommensurable with everything else in the loss: measured on these
+          // tables, a raw 0.25 contributes 43.75 against an RTP error term of 1.76, so the search
+          // spends 96% of its effort on spacing while appearing to tune RTP. Under the panel's
+          // normalized denomination the same constraint at 'Prefer' costs a few percent of the
+          // loss, which is what it should have cost all along.
+          spacingPenaltyWeight: 1,
           // Candy Frenzy is cluster-pays on a 7x7 grid: a cluster forms from grid-adjacent cells,
           // so reel index carries no meaning and per-reel frequency spread is search noise rather
           // than design. Measured at 849bc8a (40k spins, seed 4242), independent per-reel tuning
