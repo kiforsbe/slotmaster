@@ -905,7 +905,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // give core/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
     'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
-    'validation', 'sensitivity',
+    'validation', 'sensitivity', 'structural',
   ]);
   const offenders = new Set();
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
@@ -916,6 +916,19 @@ test('every onProgress phase emitting a null `best` is a known informational pha
       if (best == null && !KNOWN_NULL_BEST_PHASES.has(phase)) offenders.add(phase);
     },
   });
+  // The run above never turns the diagnosis phases on, so on its own it would leave them declared
+  // but unexercised - a register nobody checks. A second pass with everything enabled is what
+  // actually holds the contract for 'validation'/'sensitivity'/'structural'.
+  const seenDiagnosisPhases = new Set();
+  await diagnoseConfig(couplingPaytable, [structuralTable(), structuralTable(), structuralTable()], {
+    ...couplingOptions, sensitivitySpins: 300,
+    tuneStructural: { knobs: ['stackChance'], maxMeasurements: 2 },
+    onProgress: (phase, i, mult, r, best) => {
+      seenDiagnosisPhases.add(phase);
+      if (best == null && !KNOWN_NULL_BEST_PHASES.has(phase)) offenders.add(phase);
+    },
+  });
+  assert.ok(seenDiagnosisPhases.has('structural'), 'the diagnosis pass must actually reach Phase 0d');
   assert.deepEqual([...offenders], [],
     'these phases emitted a null `best` without being declared informational - add them here AND give SimulationPanel.js\'s progress handler an early return for them');
 });
@@ -2015,4 +2028,70 @@ test('a scale already within tolerance of 1 cannot be diagnosed as "did not move
     rtpBeforeScaling: 96.5, verifiedRtp: 120, targetRtp: 96, stdError: 0.5, tolerance: 9.6,
   });
   assert.ok(!/winEvaluatorFactory/.test(note));
+});
+
+// ---- Phase 0d: structural recommendation --------------------------------------------------
+// Phase 0c ranks knobs one at a time. Phase 0d says what to set them all TO - which is not
+// answerable one knob at a time, because they interact: maxStack does nothing if stackChance is
+// too low to produce vertical runs for it to cap.
+
+const structuralTable = () => ({
+  defaults: { stackChance: 0.3, maxStack: 3, minStack: 1, minGap: 2 },
+  symbols: { hi: { frequency: 3 }, lo: { frequency: 6 }, scat: { frequency: 1 } },
+});
+const structuralOptions = {
+  ...couplingOptions, sensitivitySpins: 400, maxIterations: 3,
+};
+
+test('the structural search recommends without applying, and honors pinned knobs', async () => {
+  // A recommendation, not a mutation: which structural values a game ships is a design decision,
+  // and the whole point of this package is to put the developer in a position to accept or reject.
+  const tables = [structuralTable(), structuralTable(), structuralTable()];
+  const before = JSON.parse(JSON.stringify(tables[0].defaults));
+  const result = await tuneFrequencies(couplingPaytable, tables, {
+    ...structuralOptions,
+    tuneStructural: { knobs: ['stackChance'], respectDesignIntent: true, maxMeasurements: 4 },
+  });
+  const rec = result.diagnostics.structuralRecommendation;
+  assert.ok(rec, 'tuneStructural must produce a recommendation');
+  assert.ok(rec.knobs.stackChance != null);
+  assert.equal(rec.knobs.maxStack, undefined, 'a knob not listed must not be touched');
+  assert.equal(rec.appliedAutomatically, false);
+  assert.deepEqual(result.reelFrequencyTables[0].defaults, before,
+    'the returned tables must keep their original structural defaults');
+});
+
+test('tuneStructural turns on the sweep it needs rather than silently producing nothing', async () => {
+  // Phase 0d ranks its grid by composing Phase 0c's ladder ratios, so asking for one asks for the
+  // other. There is exactly one thing the caller can have meant.
+  const result = await tuneFrequencies(couplingPaytable, [structuralTable(), structuralTable(), structuralTable()], {
+    ...structuralOptions,
+    measureSensitivity: false,
+    tuneStructural: { knobs: ['stackChance'], maxMeasurements: 3 },
+  });
+  assert.ok(result.diagnostics.sensitivity, 'the sweep must have run even though measureSensitivity was false');
+  assert.ok(result.diagnostics.structuralRecommendation);
+});
+
+test('tuneStructural is off by default - no recommendation, no extra measurements', async () => {
+  const result = await tuneFrequencies(couplingPaytable, [structuralTable(), structuralTable(), structuralTable()], {
+    ...structuralOptions,
+  });
+  assert.equal(result.diagnostics.structuralRecommendation, null);
+});
+
+test('the structural recommendation reaches a diagnosis too, without any search', async () => {
+  // This is the interaction the whole package is for: "here is a combination that hits your
+  // target" is exactly the sort of answer that should change the settings you hand a search,
+  // which is the wrong order if it only ever arrives as the opening act of one.
+  const seen = [];
+  const out = await diagnoseConfig(couplingPaytable, [structuralTable(), structuralTable(), structuralTable()], {
+    ...structuralOptions,
+    tuneStructural: { knobs: ['stackChance'], maxMeasurements: 3 },
+    onProgress: (phase) => { seen.push(phase); },
+  });
+  assert.ok(out.structuralRecommendation);
+  assert.ok(seen.includes('structural'), 'Phase 0d must announce itself like every other phase');
+  assert.deepEqual(seen.filter(p => p === 'scatter' || p === 'shape'), [],
+    'a diagnosis must never run Phase 1 or Phase 2');
 });

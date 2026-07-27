@@ -380,3 +380,79 @@ test('renderPayoutScaleHtml says so loudly when the verification run could not c
 test('renderPayoutScaleHtml renders nothing at all when the solve was not requested', () => {
   assert.equal(renderPayoutScaleHtml(null, { targetRtp: 96 }), '');
 });
+
+// ---- Task 1.9: Phase 0d, the structural recommendation ------------------------------------
+
+const recFixture = (over = {}) => ({
+  knobs: { stackChance: 0.4, maxStack: 4 },
+  changed: { stackChance: 0.4 },
+  knobsSearched: ['stackChance', 'maxStack'],
+  current: { stackChance: 0.1, maxStack: 4 },
+  targetRtp: 96, predictedRtp: 94.1, measuredRtp: 95.8, measurementsUsed: 8,
+  reachedTarget: true, respectedDesignIntent: true, appliedAutomatically: false,
+  candidates: [], note: null, ...over,
+});
+
+test('renderDiagnosisHtml shows what changed and what stayed, not just the new values', () => {
+  // A recommendation that restates six settings with one of them different makes the reader find
+  // the difference themselves. Both directions matter: "leave maxStack alone" is advice too.
+  const out = renderDiagnosisHtml({ structuralRecommendation: recFixture() });
+  assert.match(out, /0\.1/, 'the value being moved away from must be visible');
+  assert.match(out, /0\.4/);
+  assert.match(out, /95\.8/, 'the MEASURED rtp backs the recommendation');
+  assert.match(out, /→/, 'a moved knob is marked as moved');
+  assert.match(out, /=/, 'an unmoved knob is marked as unmoved');
+});
+
+test('renderDiagnosisHtml says plainly when the recommendation is to change nothing', () => {
+  const out = renderDiagnosisHtml({ structuralRecommendation: recFixture({
+    changed: {}, knobs: { stackChance: 0.1 }, current: { stackChance: 0.1 },
+    note: 'The current structural settings already reach 96% at even frequencies - nothing needs changing.',
+  }) });
+  assert.match(out, /no change needed/i);
+  assert.match(out, /nothing needs changing/i);
+  assert.ok(!/APPLY TO THE OUTPUT/.test(out),
+    'there is nothing to apply when nothing changed - offering the button would be a no-op that looks like an action');
+});
+
+test('renderDiagnosisHtml reports an unreachable target as unreachable rather than recommending the nearest miss', () => {
+  const out = renderDiagnosisHtml({ structuralRecommendation: recFixture({
+    reachedTarget: false, measuredRtp: 140,
+    note: 'The structural search could not reach 96% with these knobs: the closest combination measured 140.00%, off by 44.00pp.',
+  }) });
+  assert.match(out, /could not reach/i);
+});
+
+test('renderDiagnosisHtml renders nothing for a structural recommendation that was never run', () => {
+  assert.equal(renderDiagnosisHtml({ structuralRecommendation: null }), '');
+});
+
+test('formatReelFrequencyTablesForCopy applies recommended defaults only when asked, and says it did', () => {
+  // The measured RTP in the header describes the config that was SEARCHED. Emitting recommended
+  // structural defaults under it silently attaches that number to settings it was never measured
+  // against - which is exactly how a plausible-looking output describes a different game.
+  const table = { defaults: { stackChance: 0.1, maxStack: 4 }, symbols: { bar: { frequency: 2 } } };
+  const context = { rtp: 96, triggerRatePct: 0.6, inputParameters: { reelLength: 500, reelSeeds: [1] } };
+
+  const asSearched = formatReelFrequencyTablesForCopy([table], context);
+  assert.match(asSearched, /stackChance: 0\.1/);
+  assert.ok(!/NOTE: the structural recommendation/.test(asSearched));
+
+  const applied = formatReelFrequencyTablesForCopy([table], { ...context, structuralDefaults: { stackChance: 0.4 } });
+  assert.match(applied, /stackChance: 0\.4/);
+  assert.match(applied, /maxStack: 4/, 'a default the recommendation did not touch must survive');
+  assert.match(applied, /measured BEFORE that change/);
+});
+
+test('renderDiagnosisHtml does not dress an unresolvable recommendation as a confirmed one', () => {
+  // Observed live on Candy Frenzy before the noise guard: a ±17.89pp noise floor against a ±1.5pp
+  // tolerance produced "nothing needs changing" in confident green. The card must carry the
+  // caveat in its own heading, not bury it in a sentence under a green bar.
+  const out = renderDiagnosisHtml({ structuralRecommendation: recFixture({
+    resolvable: false, noiseFloorPct: 17.89, indistinguishable: 7, changed: {},
+    note: "These measurements cannot tell the combinations apart: the sweep's own noise floor is ±17.89pp.",
+  }) });
+  assert.match(out, /not resolvable at this sample size/i);
+  assert.match(out, /cannot tell the combinations apart/i);
+  assert.ok(!out.includes('#7fd97f'), 'an unresolvable result must not be drawn in the confirmed-green accent');
+});

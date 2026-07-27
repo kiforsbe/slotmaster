@@ -33,7 +33,7 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
  * number beside a large one reads as a weak-but-real lever, and that is the exact mistake this
  * report exists to prevent.
  */
-export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null, sensitivity = null } = {}) {
+export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null, sensitivity = null, structuralRecommendation = null } = {}) {
   const sections = [];
 
   const card = (title, accent, body) => `
@@ -144,6 +144,50 @@ export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null
       </div>
       <table style="border-collapse: collapse; font-size: 0.82em; width: 100%;">${knobs.map(knobRow).join('')}</table>
       ${routes}`));
+  }
+
+  // ---- What to set them to (Phase 0d) ----
+  // Deliberately LAST, under the per-knob table it is built from: the table explains why these
+  // values, and a recommendation read without that explanation is a number to obey rather than a
+  // proposal to judge. The whole point is that it can be rejected.
+  if (structuralRecommendation) {
+    const rec = structuralRecommendation;
+    const changed = Object.entries(rec.changed ?? {});
+    // Amber for an unresolvable run as much as for a missed target: a recommendation the
+    // measurements cannot support should not be wearing the same green as one they do.
+    const accent = (rec.reachedTarget && rec.resolvable !== false) ? '#7fd97f' : '#e6b800';
+    const rows = Object.entries(rec.knobs ?? {}).map(([knob, value]) => {
+      const from = rec.current?.[knob];
+      const moved = value !== from;
+      return `<tr>
+          <td style="padding: 3px 10px 3px 0; color: #ddd;">${esc(knob)}</td>
+          <td style="padding: 3px 10px 3px 0; text-align: right; color: #888;">${from}</td>
+          <td style="padding: 3px 6px 3px 0; color: #666;">${moved ? '→' : '='}</td>
+          <td style="padding: 3px 0; font-weight: bold; color: ${moved ? '#fff' : '#888'};">${value}</td>
+        </tr>`;
+    }).join('');
+
+    const verdict = rec.note
+      ? `<div style="font-size: 0.82em; color: ${rec.reachedTarget ? '#9ab' : '#e6b800'}; margin-top: 8px;">${esc(rec.note)}</div>`
+      : `<div style="font-size: 0.85em; color: #ddd; margin-top: 8px;">Measured <strong style="color:#fff;">${rec.measuredRtp.toFixed(2)}%</strong> against a ${rec.targetRtp}% target, at even symbol frequencies — so the frequency search would start from here rather than having to invent the difference by skewing symbols.</div>`;
+
+    sections.push(card(
+      rec.resolvable === false ? 'What to set them to — not resolvable at this sample size'
+        : changed.length ? 'What to set them to'
+        : 'What to set them to — no change needed',
+      accent,
+      `<div style="font-size: 0.78em; color: #9ab; margin-bottom: 8px;">
+         searched ${rec.knobsSearched.map(esc).join(', ') || 'nothing'} jointly ·
+         ${rec.measurementsUsed} combination${rec.measurementsUsed === 1 ? '' : 's'} measured
+         ${rec.respectedDesignIntent === false ? '· closest to target' : '· smallest change that hits target'}
+       </div>
+       ${rows ? `<table style="border-collapse: collapse; font-size: 0.85em;">${rows}</table>` : ''}
+       ${verdict}
+       ${changed.length ? `<div style="margin-top: 8px; font-family: monospace; font-size: 0.8em; color: #cfe6ff; background: rgba(0,0,0,0.3); border-radius: 4px; padding: 6px 8px; overflow-x: auto;">defaults: { ${changed.map(([k, v]) => `${esc(k)}: ${v}`).join(', ')}, … }</div>` : ''}
+       <div style="font-size: 0.75em; color: #888; margin-top: 6px;">A suggestion only — nothing has been changed. These go in each reel's <code>defaults</code> block.</div>
+       <!-- Revealed by the results block once there is a copyable output to apply it TO. Hidden
+            rather than conditionally rendered, so this formatter stays pure and DOM-free. -->
+       ${changed.length ? `<button id="tune-structural-apply" class="btn-icon btn-sim-btn" style="display: none; margin-top: 8px; padding: 4px 10px; font-size: 0.75em;">APPLY TO THE OUTPUT BELOW</button>` : ''}`));
   }
 
   return sections.join('');
@@ -588,7 +632,12 @@ export function renderPayoutScaleHtml(payoutScale, { targetRtp } = {}) {
 
 export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = null) {
   const tables = reelFrequencyTables.map((table, i) => {
-    const defaults = table.defaults || {};
+    // Phase 0d's recommendation, applied at EMIT time only. The running game, the tuned tables and
+    // the measured RTP above all still describe the config as it was searched - overwriting them
+    // would silently attach a number to settings it was never measured under. What this produces
+    // is a starting point to paste and re-tune from, which is what "accept the recommendation"
+    // actually means.
+    const defaults = { ...(table.defaults || {}), ...(context?.structuralDefaults ?? {}) };
     const symbolsTable = table.symbols || table;
     const symbols = Object.keys(symbolsTable);
     if (symbols.length === 0) return `export const FREQUENCY_REEL${i + 1} = {\n  defaults: {},\n  symbols: {},\n};`;
@@ -662,6 +711,15 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     `// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned`,
     `// against this length and do not reproduce the RTP above at any other.`,
     `export const REEL_LENGTH = ${p.reelLength};`,
+    // Applying the Phase 0d recommendation changes the reels these frequencies were searched
+    // against, so the RTP reported at the top of this header no longer describes what is below it.
+    // Said plainly rather than left for the reader to notice, because a header that silently
+    // misdescribes its own contents is worse than no header.
+    context.structuralDefaults
+      ? `\n// NOTE: the structural recommendation has been applied to the defaults below. The RTP at the\n`
+        + `// top of this header was measured BEFORE that change - re-tune from these settings to get a\n`
+        + `// figure that describes them.`
+      : null,
     ``,
   ].filter(l => l !== null).join('\n');
 
@@ -773,6 +831,17 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
           <input id="tune-solve-payout-scale" type="checkbox" style="vertical-align: middle; margin-right: 6px;">
           Also work out the exact payout multiplier that hits this RTP
           <span style="color: #888;">&mdash; suggestion only, your paytable is never changed</span>
+        </label>
+        <!-- The other half of the same idea, and the one that answers "what do I actually set
+             these to". Phase 0c ranks the structural knobs one at a time; this searches them
+             together, because they interact - maxStack caps vertical runs that stackChance has to
+             be high enough to produce in the first place, so the best combination is not the best
+             of each knob chosen separately. Cheap because the grid is RANKED from Phase 0c's
+             already-paid-for ladders and only a handful of cells are ever simulated. -->
+        <label title="After checking which knobs matter, search them TOGETHER for one combination of stackChance / maxStack / minStack / minGap that reaches your target RTP at even symbol frequencies - and report it for you to accept or reject. Nothing is applied. Knobs the sweep found no measurable effect for are left out rather than multiplying the search for nothing. Among combinations that hit the target it prefers the SMALLEST change from what you already chose, so the answer is a tweak you can judge rather than a redesign you have to argue with. This matters most when even frequencies pay nowhere near target: the frequency search's only way to close that gap is concentrating symbols, which is exactly the over-abundance complaint - fixing it structurally means the search never has to." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 6px;">
+          <input id="tune-tune-structural" type="checkbox" style="vertical-align: middle; margin-right: 6px;">
+          Also suggest what to set the stacking/spacing settings to
+          <span style="color: #888;">&mdash; searched together, not one at a time</span>
         </label>
       </div>
 
@@ -1184,6 +1253,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     reelCoupling: tuneContainer.querySelector('#tune-reel-coupling'),
     maxReelDeviation: tuneContainer.querySelector('#tune-max-reel-deviation'),
     solvePayoutScale: tuneContainer.querySelector('#tune-solve-payout-scale'),
+    tuneStructural: tuneContainer.querySelector('#tune-tune-structural'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
   const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
@@ -1207,7 +1277,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   // the log line by line. Held as data (not markup) so a later phase's findings can join an
   // earlier phase's without either having to know how the other is drawn.
   const diagnosisEl = tuneContainer.querySelector('#tune-diagnosis');
-  const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null };
+  const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null, structuralRecommendation: null };
   function renderDiagnosis() {
     if (!diagnosisEl) return;
     const html = renderDiagnosisHtml(diagnosis);
@@ -1304,6 +1374,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // solve runs AFTER the search, off the final frequencies. A diagnosis has no final
     // frequencies; the exact scale from HERE is already in the sensitivity report's routes.
     solvePayoutScale: !diagnoseOnly && inputs.solvePayoutScale.checked,
+    // Unlike the payout solve, this one runs for a DIAGNOSIS too - it needs no search result, only
+    // Phase 0c's ladders, and "here is a combination that hits your target" is precisely the sort
+    // of answer that should change the settings you hand a search rather than arriving after one.
+    tuneStructural: inputs.tuneStructural.checked ? { respectDesignIntent: true } : false,
     winEvaluatorFactory: tuneConfig.winEvaluatorFactory ?? null,
     // Number.isFinite rather than `|| 0.25`, so an explicit 0 - "pin the refinement to the linked
     // answer entirely" - survives instead of being silently replaced by the default.
@@ -1566,6 +1640,25 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             appendLog(top
               ? `✓ Sensitivity swept - highest leverage: ${top.knob} (${top.elasticityRtpPerUnit.toFixed(1)}pp per unit). Full report above.`
               : '✓ Sensitivity swept - see the report above.');
+          }
+          return;
+        }
+        if (phase === 'structural') {
+          if (r.event === 'point') {
+            const shown = Object.entries(r.knobs).map(([k, v]) => `${k}=${v}`).join(' ');
+            appendOrUpdateBusyLog('structural', `… trying ${shown} (${r.rtp.toFixed(1)}%)…`);
+            setPhaseBanner({
+              name: 'Phase 0d · What to set them to',
+              strategy: `measuring the combinations Phase 0c's ladders rank closest to target`,
+              why: 'the structural knobs interact - maxStack does nothing if stackChance is too low to make runs for it to cap - so the best combination is not the best of each knob picked separately',
+              progress: shown,
+            });
+          } else if (r.event === 'complete') {
+            diagnosis.structuralRecommendation = r;
+            renderDiagnosis();
+            appendLog(r.reachedTarget
+              ? `✓ Structural recommendation found (${r.measuredRtp.toFixed(2)}% measured, ${r.measurementsUsed} combinations tried). See the panel above.`
+              : `⚠ No structural combination reached target - closest ${r.measuredRtp != null ? `${r.measuredRtp.toFixed(2)}%` : 'n/a'}. See the panel above.`);
           }
           return;
         }
@@ -2255,16 +2348,37 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     }
 
     const paytableOutput = resultsEl.querySelector('#tune-paytable-output');
-    paytableOutput.value = formatReelFrequencyTablesForCopy(tunedReelTables, {
+    // Phase 0d's recommendation is applied to the EMITTED output only, and only on request - see
+    // formatReelFrequencyTablesForCopy. Held as state here so the button can toggle it.
+    let structuralApplied = false;
+    const refreshCopyOutput = () => { paytableOutput.value = buildCopyOutput(); };
+    const buildCopyOutput = () => formatReelFrequencyTablesForCopy(tunedReelTables, {
       inputParameters: diagnostics.inputParameters,
       rtp,
       triggerRatePct,
+      structuralDefaults: structuralApplied ? (diagnostics.structuralRecommendation?.knobs ?? null) : null,
       // Both, not just the table: the scaled ladders are the pasteable artifact, and
       // `payoutScale` is what lets the emitted header say where the number came from and
       // whether measurement actually confirmed it.
       scaledPaytable,
       payoutScale: diagnostics.payoutScale,
     });
+    refreshCopyOutput();
+
+    // The recommendation's APPLY button lives on the diagnosis panel (rendered during Phase 0d,
+    // long before this output existed), so it is revealed and wired here - the first moment there
+    // is something to apply it TO. Toggleable, because a developer who applies it and then wants
+    // the as-searched output back should not have to re-run anything to get it.
+    const structuralApplyBtn = tuneContainer.querySelector('#tune-structural-apply');
+    if (structuralApplyBtn && diagnostics.structuralRecommendation?.changed
+        && Object.keys(diagnostics.structuralRecommendation.changed).length > 0) {
+      structuralApplyBtn.style.display = 'inline-block';
+      structuralApplyBtn.onclick = () => {
+        structuralApplied = !structuralApplied;
+        structuralApplyBtn.textContent = structuralApplied ? 'APPLIED — CLICK TO UNDO' : 'APPLY TO THE OUTPUT BELOW';
+        refreshCopyOutput();
+      };
+    }
 
     const copyBtn = resultsEl.querySelector('#tune-copy-btn');
     copyBtn.addEventListener('click', async () => {

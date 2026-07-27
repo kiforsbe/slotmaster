@@ -7,6 +7,7 @@ import { LineMechanic } from './LineMechanic.js';
 import { cmaes } from './CMAES.js';
 import { validateTuningConfig } from './TuningValidation.js';
 import { buildLadders, summarize } from './StructuralSensitivity.js';
+import { structuralSearch } from './StructuralSearch.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis. Mechanic-agnostic: how one spin
@@ -1244,6 +1245,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     measureSensitivity = false,
     sensitivitySpins = null,
     sensitivityAt = 'uniform',
+    // Phase 0d. `false`, or `{ knobs?: string[], respectDesignIntent?: boolean, maxMeasurements?: number }`.
+    // Needs Phase 0c's ladders to seed its grid, so turning it on turns the sweep on too.
+    tuneStructural = false,
     skipValidation = false,
     diagnoseOnly = false,
     minClusterSize,
@@ -1641,7 +1645,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // for the same reels at even frequencies, so sweeping at the current shape would measure both
   // things at once and attribute the sum to the knob.
   let sensitivity = null;
-  if (measureSensitivity) {
+  // Kept in scope past the sweep block so Phase 0d can measure its grid cells under the EXACT same
+  // conditions the ladders were measured under. It composes those ladders' ratios to rank cells,
+  // so a cell measured at a different spin count or against different frequencies would be scored
+  // against a baseline it does not share.
+  let sweepContext = null;
+  // Phase 0d composes the ladders' ratios to rank its grid, so asking for it necessarily asks for
+  // them. Implied rather than validated as a conflicting-options error: there is exactly one thing
+  // the caller can have meant.
+  if (measureSensitivity || tuneStructural) {
     const sweepBase = sensitivityAt === 'current' ? baseReelTables : uniformizeTables(baseReelTables);
     const sweepSpins = sensitivitySpins ?? Math.max(1, Math.round(trialSpins / 4));
     // Trials are held at 1 and spins reduced: this ranks knobs by leverage, and a ranking survives
@@ -1693,6 +1705,52 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       ...summarize(baselinePoint, ladderResults, { targetRtp, noiseFloorPct }),
     };
     if (onProgress) await onProgress('sensitivity', 0, null, { event: 'complete', ...sensitivity }, null);
+    sweepContext = { sweepBase, sweepMeasure, sweepSpins };
+  }
+
+  // ---- Phase 0d: structural recommendation ----
+  // Phase 0c says which knob to turn, one at a time. This says what to set them all TO, which is
+  // the question that actually blocks a developer - and it is not answerable one knob at a time,
+  // because the knobs interact (maxStack does nothing if stackChance is too low to produce runs
+  // for it to cap).
+  //
+  // Off by default. It is a recommendation about design values, and a caller who did not ask for
+  // one should not pay for the measurements. See core/StructuralSearch.js for why a grid, and for
+  // why the grid is ranked for free and measured sparingly.
+  let structuralRecommendation = null;
+  if (tuneStructural && sensitivity && sweepContext) {
+    const opts = typeof tuneStructural === 'object' ? tuneStructural : {};
+    let pointsSeen = 0;
+    structuralRecommendation = await structuralSearch({
+      ladders: sensitivity.knobs,
+      baselineRtp: sensitivity.baseline.rtp,
+      targetRtp,
+      rtpTolerancePct,
+      // The sweep's own measured noise floor, so the search can tell a demonstrated winner from a
+      // lucky draw. Without it, ten cells measured at Candy Frenzy's ±17.89pp against a ±1.5pp
+      // tolerance guarantee a spurious "hit".
+      noiseFloorPct: sensitivity.noiseFloorPct ?? 0,
+      knobs: opts.knobs ?? null,
+      respectDesignIntent: opts.respectDesignIntent ?? true,
+      maxMeasurements: opts.maxMeasurements ?? 8,
+      signal,
+      // Every trial differs from the sweep baseline ONLY in the structural defaults under test -
+      // this is the call site withStructuralDefaults' own comment always anticipated.
+      measure: async (params) => {
+        const tables = withStructuralDefaults(sweepContext.sweepBase, params);
+        await yieldToEventLoop();
+        return sweepContext.sweepMeasure(tables, searchSeed + 770100);
+      },
+      onPoint: onProgress
+        ? async (point) => {
+          pointsSeen++;
+          await onProgress('structural', pointsSeen, null, { event: 'point', ...point }, null);
+        }
+        : null,
+    });
+    if (onProgress) {
+      await onProgress('structural', 0, null, { event: 'complete', ...structuralRecommendation }, null);
+    }
   }
 
   // ---- Diagnosis-only exit ----
@@ -1709,7 +1767,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return {
       reelFrequencyTables: baseReelTables,
       rtp: null, triggerRatePct: null, scaledPaytable: null,
-      diagnostics: { validation, structuralHeadroom, sensitivity, reelFeasibility, diagnoseOnly: true },
+      diagnostics: { validation, structuralHeadroom, sensitivity, structuralRecommendation, reelFeasibility, diagnoseOnly: true },
     };
   }
 
@@ -2726,7 +2784,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
     rotateSeedPerGeneration, measureHeadroom, skipValidation,
-    measureSensitivity, sensitivitySpins, sensitivityAt,
+    measureSensitivity, sensitivitySpins, sensitivityAt, tuneStructural,
   };
 
   return {
@@ -2752,6 +2810,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // `routesToTarget` gives the single-knob values that reach targetRtp from here, with
       // payoutScale exact and everything else interpolated between measured points.
       sensitivity,
+      // Phase 0d, when requested: one combination of structural settings to accept or reject,
+      // searched jointly rather than one knob at a time. `appliedAutomatically` is always false -
+      // the returned tables keep the structural defaults they came in with, because which values a
+      // game ships is a design decision and not the tuner's to make.
+      structuralRecommendation,
       // Closed-form payout-value solve, when requested: the exact multiplier applied to every
       // payout to hit targetRtp, plus a verification measurement under the scaled paytable.
       payoutScale: payoutScale

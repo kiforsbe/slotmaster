@@ -1071,7 +1071,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 
 There are currently **zero** references to `solvePayoutScale`, `payoutScale` or `scaledPaytable` anywhere in `SimulationPanel.js` — the exact RTP lever is entirely unreachable from the UI.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('formatReelFrequencyTablesForCopy emits the scaled paytable as real code when one was solved', () => {
@@ -1088,11 +1088,11 @@ test('formatReelFrequencyTablesForCopy emits the scaled paytable as real code wh
 });
 ```
 
-- [ ] **Step 2–4: Run, implement, run**
+- [x] **Step 2–4: Run, implement, run**
 
 Checkbox `#tune-solve-payout-scale` wired through `readTuneOptions`; results block rendering scale, `verifiedRtp`, and `verified`/`verificationNote`; scaled ladder emitted as pasteable code in the copy output.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/SimulationPanel.js tests/simulationpanel.test.mjs
@@ -1111,7 +1111,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Consumes: Task 1.5's ladder measurements as the coarse grid.
 - Produces: option `tuneStructural: false | { knobs: string[], respectDesignIntent: boolean }`; `diagnostics.structuralRecommendation = { knobs: {...}, predictedRtp, appliedAutomatically: false }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('the structural search recommends without applying, and honors pinned knobs', async () => {
@@ -1126,17 +1126,17 @@ test('the structural search recommends without applying, and honors pinned knobs
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Grid search, not CMA-ES — three of four knobs are small integers and the continuous one has a mode discontinuity, so a simplex or covariance method is the wrong tool. Seed the coarse grid from Task 1.5's already-measured ladder points (no re-measurement), pick the best cell by `|rtp - targetRtp|`, then refine locally with one bisection pass per continuous knob. Runs at uniform frequencies, at `sensitivitySpins`, before Phase 1. Use `withStructuralDefaults` to build each trial — this is the call site its comment always anticipated.
 
-- [ ] **Step 4: Panel accept/reject**
+- [x] **Step 4: Panel accept/reject**
 
 Render the recommendation with its predicted RTP and an "apply to the tables below" button that rewrites the `defaults` in the copyable output only. Never mutate the running game.
 
-- [ ] **Step 5: Run tests, verify live, commit**
+- [x] **Step 5: Run tests, verify live, commit**
 
 ```bash
 git add core/SpinSimulator.js core/SimulationPanel.js tests/tunefrequencies.test.mjs
@@ -1157,7 +1157,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `diagnoseConfig(paytable, reelFrequencyTables, options) -> { validation, structuralHeadroom, reelFeasibility, sensitivity }` — Phases 0a, 0b and 0c only. Shares every code path with `tuneFrequencies` (extracted, not duplicated), so the two can never disagree about what a config measures.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('diagnoseConfig runs the diagnosis phases and no search at all', async () => {
@@ -1185,29 +1185,29 @@ test('diagnoseConfig and tuneFrequencies agree on what a config measures', async
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
 Run: `node --test tests/tunefrequencies.test.mjs`
 Expected: FAIL — `diagnoseConfig` is not exported.
 
-- [ ] **Step 3: Extract and export**
+- [x] **Step 3: Extract and export**
 
 Lift Phases 0a/0b/0c out of `tuneFrequencies` into a shared internal function that both call. `tuneFrequencies`'s behavior must not change — run the full suite after the extraction and before wiring the button.
 
-- [ ] **Step 4: Wire the button**
+- [x] **Step 4: Wire the button**
 
 `CHECK MY CONFIG` sits beside `START TUNING`. It renders screen 2 and nothing else, leaves the results area untouched, and stays enabled while no tune is running. Errors from validation render the same way they would before a tune, minus the exception.
 
-- [ ] **Step 5: Assemble screen 2 from the pure formatters**
+- [x] **Step 5: Assemble screen 2 from the pure formatters**
 
 `formatValidationFindings` (Task 1.3) + `formatSensitivityReport` (Task 1.6) + the routes-to-target block with its `APPLY TO OUTPUT` action, in that order, matching the design doc's screen-2 layout. The elasticity bar is rendered from `elasticityRtpPerUnit` normalized against the highest-leverage knob, so leverage is visible before any number is read. A knob with `flat: true` renders "no effect", never a small misleading number.
 
-- [ ] **Step 6: Run tests and verify live**
+- [x] **Step 6: Run tests and verify live**
 
 Run: `npm test` — failures still exactly 4.
 Live: on Candy Frenzy, click `CHECK MY CONFIG` and confirm it returns in seconds, ranks `maxStack` above `stackChance` above `minGap`, flags the `stackChance` mode switch, and offers `payout ×0.946` as the exact route. Confirm no search started (the progress log stays empty).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add core/SpinSimulator.js core/SimulationPanel.js tests/
