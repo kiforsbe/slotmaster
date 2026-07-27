@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, simulateSpins, beatsIncumbent } from '../core/SpinSimulator.js';
+import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -1922,4 +1922,44 @@ test('winEvaluatorFactory rebuilds the evaluator so a rescaled paytable is actua
     `without the factory the ladder must be flat - that is the bug being demonstrated, got a span of ${measured[false]}`);
   assert.ok(measured[true] > 0,
     `with the factory the ladder must move, got a span of ${measured[true]}`);
+});
+
+// ---- diagnoseConfig: Phase 0 as its own entry point ----
+
+test('diagnoseConfig runs the diagnosis phases and no search at all', async () => {
+  // The point is that diagnosis SHAPES the inputs to a tune, which is backwards if it only ever
+  // runs as the opening act of a tune already committed to. It must therefore be impossible for
+  // this to start a search - asserted by watching which phases fire, not by timing it.
+  const seen = [];
+  const out = await diagnoseConfig(couplingPaytable, sensitivityTables(), {
+    ...sensitivityOptions, sensitivitySpins: 400,
+    onProgress: (phase) => seen.push(phase),
+  });
+  assert.ok(out.sensitivity, 'sensitivity is the main reason to call this, and defaults on here');
+  assert.ok(out.structuralHeadroom);
+  assert.deepEqual(seen.filter(p => p === 'scatter' || p === 'shape'), [],
+    `diagnoseConfig must never run Phase 1 or Phase 2, saw: ${[...new Set(seen)].join(', ')}`);
+});
+
+test('diagnoseConfig and tuneFrequencies agree about what a config measures', async () => {
+  // Shared code path, not a second implementation - a diagnosis that disagreed with the tune it
+  // precedes would be worse than no diagnosis.
+  const opts = { ...sensitivityOptions, sensitivitySpins: 400, searchSeed: 3, measureSensitivity: true };
+  const diag = await diagnoseConfig(couplingPaytable, sensitivityTables(), opts);
+  const tuned = await tuneFrequencies(couplingPaytable, sensitivityTables(), opts);
+  assert.equal(diag.structuralHeadroom.uniformRtp, tuned.diagnostics.structuralHeadroom.uniformRtp);
+  assert.deepEqual(diag.sensitivity.knobs.map(k => k.knob), tuned.diagnostics.sensitivity.knobs.map(k => k.knob));
+});
+
+test('diagnoseConfig still refuses a config with validation errors', async () => {
+  const paytable = {
+    prem: { type: 'premium', clusterPayout: [{ min: 5, multiplier: 2 }, { min: 7, multiplier: 0.5 }] },
+    reg:  { type: 'regular', clusterPayout: [{ min: 5, multiplier: 0.5 }] },
+  };
+  await assert.rejects(
+    () => diagnoseConfig(paytable, [{ defaults: {}, symbols: { prem: { frequency: 1 }, reg: { frequency: 1 } } }], {
+      reelsCount: 1, rowsCount: 3, reelLength: 100, minClusterSize: 5, paylines: [[0, 0, 0]], linesCount: 1,
+      trialSpins: 500, sensitivitySpins: 200, trialsPerPoint: 1,
+    }),
+    /pays LESS for a bigger cluster/);
 });

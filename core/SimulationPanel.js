@@ -9,70 +9,144 @@ import { spinsPerTriggerToPct, pctToSpinsPerTrigger } from './TuningUnits.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
+// Escapes text destined for an innerHTML string. Most of what goes through the diagnosis panel is
+// numbers and internal knob names, but validation messages carry symbol names straight out of a
+// game's own paytable - developer-authored strings that have no business being parsed as markup.
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 /**
- * The Phase 0c sensitivity sweep, rendered as the answer to "which knob do I turn?".
+ * The pre-tune diagnosis - config validation, structural headroom, and which knob actually moves
+ * RTP - rendered as a real UI panel.
  *
- * A pure function of the diagnostics object so it can be tested without a DOM, same as
- * `formatReelFrequencyTablesForCopy`. Returns a monospace text block; the panel only places it.
+ * This is a RESULT, not a progress event, which is why it does not belong in the scrolling log:
+ * it is the single most useful thing the tuner produces, it needs no search to produce it, and in
+ * a log it scrolls away under a hundred per-iteration lines seconds after appearing. It gets its
+ * own persistent section that stays readable for the whole run.
  *
- * The shape is deliberate. Knobs come in leverage order, each with a bar so the ranking is visible
+ * Pure: takes plain data, returns an HTML string, touches no DOM. Testable in node --test the same
+ * way `formatReelFrequencyTablesForCopy` is.
+ *
+ * The shape is deliberate. Knobs come in leverage order, each with a bar so the ranking registers
  * before a single number is read, and each with its own ladder so the SHAPE of the response is
- * visible too - "maxStack 5 pays 193%" matters more than any elasticity average. A knob inside the
- * noise floor says "no measurable effect" rather than printing a small number, because a small
- * number next to a large one reads as a weak-but-real lever and that is the exact mistake this
+ * visible too - "maxStack 6 pays 2205%" matters more than any elasticity average. A knob inside
+ * the noise floor says "no measurable effect" rather than printing a small number, because a small
+ * number beside a large one reads as a weak-but-real lever, and that is the exact mistake this
  * report exists to prevent.
  */
-export function formatSensitivityReport(sensitivity) {
-  if (!sensitivity || !sensitivity.knobs?.length) return '';
-  const { knobs, routesToTarget, noiseFloorPct, baseline, targetRtp, measuredAt, spinsPerPoint } = sensitivity;
+export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null, sensitivity = null } = {}) {
+  const sections = [];
 
-  const lines = [];
-  lines.push(`WHICH KNOB MATTERS`);
-  lines.push(`  measured at ${measuredAt === 'uniform' ? 'EVEN symbol frequencies' : 'the current frequencies'}`
-    + `, ${fmt(spinsPerPoint)} spins per point`);
-  lines.push(`  baseline ${baseline.rtp.toFixed(2)}%  |  target ${targetRtp}%  |  noise floor +/-${noiseFloorPct.toFixed(2)}pp`);
-  lines.push('');
+  const card = (title, accent, body) => `
+    <div style="background: rgba(255,255,255,0.05); border-left: 3px solid ${accent}; border-radius: 6px; padding: 10px 14px; margin-bottom: 10px;">
+      <div style="font-size: 0.72em; letter-spacing: 0.08em; text-transform: uppercase; color: ${accent}; margin-bottom: 6px;">${title}</div>
+      ${body}
+    </div>`;
 
-  // Bars are scaled against the strongest knob, so the first row is always full and every other
-  // row reads as a fraction of it. Absolute scaling would make a game whose knobs are all weak
-  // look identical to one whose knobs are all strong.
-  const strongest = Math.max(...knobs.map(k => k.elasticityRtpPerUnit), 0);
-  const nameWidth = Math.max(...knobs.map(k => k.knob.length));
-
-  knobs.forEach(k => {
-    const bar = strongest > 0 ? '█'.repeat(Math.max(0, Math.round((k.elasticityRtpPerUnit / strongest) * 12))) : '';
-    const lead = k.measurementUnreliable
-      ? 'MEASUREMENT FAILED'
-      : k.flat
-      ? 'no measurable effect'
-      : `${k.elasticityRtpPerUnit.toFixed(1)}pp per unit`;
-    const ladder = k.ladder
-      .map(p => (p.value === k.current ? `[${p.value}:${p.rtp.toFixed(0)}%]` : `${p.value}:${p.rtp.toFixed(0)}%`))
-      .join('  ');
-    lines.push(`  ${k.knob.padEnd(nameWidth)}  ${String(k.current).padStart(5)}  ${(bar || '·').padEnd(13)}${lead.padEnd(21)}${ladder}`);
-    if (k.measurementUnreliable && k.measurementNote) {
-      lines.push(`  ${' '.repeat(nameWidth)}         ${k.measurementNote}`);
-    }
-    // The one knob with a discontinuity in it. Worth saying at the point of use, not only in a
-    // tooltip: a developer reaching for "more stacking" will otherwise reach straight past 0.9.
-    if (k.knob === 'stackChance' && !k.flat) {
-      lines.push(`  ${' '.repeat(nameWidth)}         note: 1.0 is a MODE SWITCH, not more stacking - it pays far less than 0.7`);
-    }
-  });
-
-  if (routesToTarget?.length) {
-    lines.push('');
-    lines.push(`TO REACH ${targetRtp}% FROM HERE (one knob at a time, everything else unchanged)`);
-    routesToTarget.forEach(r => {
-      const detail = r.exact
-        ? 'exact - RTP is strictly proportional to payouts'
-        : `interpolated between ${r.interpolatedFrom.join(' and ')}`;
-      const verb = r.knob === 'payoutScale' ? 'scale every payout by' : `set ${r.knob} to`;
-      lines.push(`  - ${verb} ${r.value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}   (${detail})`);
-    });
+  // ---- Validation ----
+  const errors = validation.filter(f => f.severity === 'error');
+  const warnings = validation.filter(f => f.severity !== 'error');
+  if (errors.length || warnings.length) {
+    const row = (f) => `
+      <div style="margin-bottom: 6px;">
+        <div style="color: ${f.severity === 'error' ? '#ff9a9a' : '#ffcc66'}; font-size: 0.85em;">
+          ${f.severity === 'error' ? '✖' : '⚠'} ${esc(f.message)}
+        </div>
+        <div style="color: #9ab; font-size: 0.78em; padding-left: 1.2em;">→ ${esc(f.suggestion)}</div>
+      </div>`;
+    sections.push(card(
+      errors.length ? `${errors.length} problem${errors.length === 1 ? '' : 's'} must be fixed first` : `${warnings.length} warning${warnings.length === 1 ? '' : 's'}`,
+      errors.length ? '#ff8080' : '#ffcc66',
+      [...errors, ...warnings].map(row).join('')));
   }
 
-  return lines.join('\n');
+  // ---- Structural headroom ----
+  if (structuralHeadroom) {
+    const { uniformRtp, targetRtp, reachableWithEvenFrequencies } = structuralHeadroom;
+    const verdict = reachableWithEvenFrequencies
+      ? `Even frequencies already pay <strong>${uniformRtp.toFixed(2)}%</strong> against a ${targetRtp}% target — the search will not need to skew anything to reach it.`
+      : uniformRtp < targetRtp
+      ? `Even frequencies pay only <strong>${uniformRtp.toFixed(2)}%</strong> against a ${targetRtp}% target. The frequency search can only close that by CONCENTRATING symbols, which is where over-abundance comes from — it is the optimizer compensating for a structural setting, not misbehaving.`
+      : `Even frequencies pay <strong>${uniformRtp.toFixed(2)}%</strong>, above the ${targetRtp}% target. Frequencies alone can bring that down, but the structural knobs below do it without skewing anything.`;
+
+    // Headroom and the sweep both measure the SAME quantity - RTP at even frequencies - at
+    // different sample sizes, so they routinely disagree. Printed one above the other with no
+    // comment (148.43% then 133.96%, observed) that reads as one of them being wrong. It is not:
+    // it is the measurement noise being visible, and a gap wider than the sweep's own noise floor
+    // is a genuine signal that both numbers need more spins before anything is decided on them.
+    let reconciliation = '';
+    if (sensitivity?.baseline?.rtp != null && Number.isFinite(sensitivity.noiseFloorPct)) {
+      const gap = Math.abs(uniformRtp - sensitivity.baseline.rtp);
+      reconciliation = gap > sensitivity.noiseFloorPct
+        ? `<div style="font-size: 0.78em; color: #ffcc66; margin-top: 5px;">⚠ The sweep below measured the same thing at ${sensitivity.baseline.rtp.toFixed(2)}% — a ${gap.toFixed(1)}pp gap, wider than its own ±${sensitivity.noiseFloorPct.toFixed(2)}pp noise floor. Both numbers are under-sampled; raise Trial Spins before acting on either.</div>`
+        : `<div style="font-size: 0.78em; color: #9ab; margin-top: 5px;">The sweep below measures the same thing at ${sensitivity.baseline.rtp.toFixed(2)}% on a smaller sample — a ${gap.toFixed(1)}pp gap, within its ±${sensitivity.noiseFloorPct.toFixed(2)}pp noise floor.</div>`;
+    }
+    sections.push(card('Structural headroom', '#7fbfff', `<div style="font-size: 0.85em; color: #ddd;">${verdict}</div>${reconciliation}`));
+  }
+
+  // ---- Which knob matters ----
+  if (sensitivity?.knobs?.length) {
+    const { knobs, routesToTarget, noiseFloorPct, baseline, targetRtp, measuredAt, spinsPerPoint } = sensitivity;
+    // Bars scale against the strongest knob, so the top row is always full and every other row
+    // reads as a fraction of it. Absolute scaling would make a game whose knobs are all weak look
+    // identical to one whose knobs are all strong.
+    const strongest = Math.max(...knobs.map(k => k.elasticityRtpPerUnit), 0);
+
+    const knobRow = (k) => {
+      const pct = strongest > 0 ? (k.elasticityRtpPerUnit / strongest) * 100 : 0;
+      const lead = k.measurementUnreliable ? 'measurement failed'
+        : k.flat ? 'no measurable effect'
+        : `${k.elasticityRtpPerUnit.toFixed(1)}pp per unit`;
+      const leadColour = k.measurementUnreliable ? '#ff9a9a' : k.flat ? '#777' : '#cfe6ff';
+      const ladder = k.ladder.map(p => {
+        const isCurrent = p.value === k.current;
+        return `<span style="display: inline-block; padding: 1px 5px; margin: 1px; border-radius: 3px; ${
+          isCurrent ? 'background: rgba(127,191,255,0.25); border: 1px solid rgba(127,191,255,0.6); color: #fff;' : 'color: #aab;'
+        }">${p.value}: ${p.rtp.toFixed(0)}%</span>`;
+      }).join('');
+      const notes = [];
+      if (k.measurementUnreliable && k.measurementNote) notes.push(esc(k.measurementNote));
+      // The one knob with a discontinuity in it, flagged at the point of use rather than only in a
+      // tooltip: a developer reaching for "more stacking" would otherwise reach straight past 0.9.
+      if (k.knob === 'stackChance' && !k.flat) notes.push('1.0 is a MODE SWITCH, not more stacking — it pays far less than 0.7.');
+      return `
+        <tr>
+          <td style="padding: 3px 8px 3px 0; white-space: nowrap; color: #ddd;">${esc(k.knob)}</td>
+          <td style="padding: 3px 8px 3px 0; text-align: right; color: #fff; font-weight: bold;">${k.current}</td>
+          <td style="padding: 3px 8px 3px 0; width: 90px;">
+            <div style="height: 8px; border-radius: 4px; background: rgba(255,255,255,0.1); overflow: hidden;">
+              <div style="height: 100%; width: ${pct.toFixed(0)}%; background: linear-gradient(90deg,#7fbfff,#c58fff);"></div>
+            </div>
+          </td>
+          <td style="padding: 3px 10px 3px 0; white-space: nowrap; color: ${leadColour};">${lead}</td>
+          <td style="padding: 3px 0;">${ladder}${notes.map(n => `<div style="color: #ffcc66; font-size: 0.92em; margin-top: 2px;">${n}</div>`).join('')}</td>
+        </tr>`;
+    };
+
+    const routes = routesToTarget?.length ? `
+      <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.12);">
+        <div style="font-size: 0.78em; color: #8fb8ff; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 4px;">To reach ${targetRtp}% from here — one knob at a time</div>
+        ${routesToTarget.map(r => {
+          const verb = r.knob === 'payoutScale' ? 'scale every payout by' : `set ${esc(r.knob)} to`;
+          const value = r.value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+          const detail = r.exact ? 'exact — RTP is strictly proportional to payouts'
+            : `interpolated between ${r.interpolatedFrom.join(' and ')}`;
+          return `<div style="font-size: 0.85em; color: #ddd;">• ${verb} <strong style="color:#fff;">${value}</strong>
+            <span style="color: #9ab; font-size: 0.9em;">(${detail})</span></div>`;
+        }).join('')}
+      </div>` : '';
+
+    sections.push(card('Which knob matters', '#c58fff', `
+      <div style="font-size: 0.78em; color: #9ab; margin-bottom: 8px;">
+        measured at ${measuredAt === 'uniform' ? 'EVEN symbol frequencies' : 'the current frequencies'},
+        ${fmt(spinsPerPoint)} spins per point ·
+        baseline ${baseline.rtp.toFixed(2)}% · target ${targetRtp}% ·
+        noise floor ±${noiseFloorPct.toFixed(2)}pp
+      </div>
+      <table style="border-collapse: collapse; font-size: 0.82em; width: 100%;">${knobs.map(knobRow).join('')}</table>
+      ${routes}`));
+  }
+
+  return sections.join('');
 }
 
 // Shared symbol-type -> color mapping, used anywhere a symbol name is listed next to others of
@@ -130,6 +204,12 @@ async function runTuneFrequenciesWithPool(paytable, reelFrequencyTables, options
   try {
     return await tuneFrequencies(paytable, reelFrequencyTables, {
       ...tuneOptions,
+      // Passed through as well as being used for pool dispatch below. These stopped being purely
+      // dispatch metadata once Phase 0a validation started reading them: without them the
+      // cluster-size-reachable and payout-ladder-floor checks silently never fire from the panel,
+      // which is exactly the kind of "the feature is there but reaches nothing" gap this package
+      // exists to close.
+      minClusterSize, scatterTriggerCount,
       onProgress,
       runTrial: (config, numSpins, betPerLine, linesCount, rngSeed) => {
         const { mechanic, winEvaluator, freeSpinsMode, ...restConfig } = config;
@@ -664,9 +744,20 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         </div>
       </details>
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+        <!-- Deliberately FIRST, and deliberately not a tune. What it produces - broken config,
+             what an even distribution pays, which knob actually moves RTP - is the sort of thing
+             that should change the settings above before a search is started, which is the wrong
+             order if it only ever appears as the opening act of a search already committed to.
+             Costs ~30 cheap measurements against a 150-iteration tune. -->
+        <button id="tune-diagnose-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.9em; background: rgba(127,191,255,0.18); border-color: #7fbfff;" title="Runs the diagnosis only - config validation, structural headroom, and a sweep of every structural knob to see which one actually moves RTP. No search is started and nothing is changed. Takes seconds rather than the minutes a full tune does, and what it tells you will usually change what you type into the settings above.">CHECK MY CONFIG</button>
         <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
         <button id="tune-stop-btn" class="btn-icon btn-sim-btn" style="display: none; padding: 6px 14px; font-size: 0.9em; background: rgba(255,90,90,0.2); border-color: #ff8080;">STOP</button>
       </div>
+      <!-- BEFORE YOU TUNE. Config validation, structural headroom, and which knob actually moves
+           RTP. All of it is produced without any search, and all of it is a RESULT rather than a
+           progress event - in the log it would scroll away under a hundred per-iteration lines
+           seconds after appearing, which is exactly where it was first (wrongly) put. -->
+      <div id="tune-diagnosis" style="display: none; margin-top: 12px;"></div>
       <!-- "Where am I, what is running, and why" - answered continuously rather than left to be
            reconstructed from the numbers. The stats cards below say how the search is DOING; this
            says what it is DOING, which is the question that was unanswerable while a two-stage
@@ -707,6 +798,14 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
     tuneContainer.querySelector('#tune-start-btn').addEventListener('click', () => startTuning({
       paytable, reelFrequencyTables, tuneConfig, tuneContainer,
       originalReelFrequencyTables: reelFrequencyTables,
+    }));
+    tuneContainer.querySelector('#tune-diagnose-btn').addEventListener('click', () => startTuning({
+      paytable, reelFrequencyTables, tuneConfig, tuneContainer,
+      originalReelFrequencyTables: reelFrequencyTables,
+      // Same entry point, same options, same worker pool - only the engine stops earlier. Running
+      // it through a separate path would let the diagnosis and the tune it precedes drift into
+      // disagreeing about what the config measures.
+      diagnoseOnly: true,
     }));
 
     // Each collapsed section carries a live summary of its own contents in its <summary> line, so
@@ -894,8 +993,9 @@ function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRange
   return html;
 }
 
-async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables, continuedFrom = null }) {
+async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables, continuedFrom = null, diagnoseOnly = false }) {
   const startBtn = tuneContainer.querySelector('#tune-start-btn');
+  const diagnoseBtn = tuneContainer.querySelector('#tune-diagnose-btn');
   // `stopBtn` is a persistent element (created once in the panel's template, not per-run) - using
   // `.onclick` assignment rather than `addEventListener` is what lets each new startTuning() call
   // simply replace the previous run's handler (and its now-stale AbortController closure) instead
@@ -951,6 +1051,17 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const liveStatsBestEl = tuneContainer.querySelector('#tune-live-stats-best');
   const liveStatsBestImprovedEl = tuneContainer.querySelector('#tune-live-stats-best-improved');
   const liveStatsViolationsEl = tuneContainer.querySelector('#tune-live-stats-violations');
+  // Everything Phase 0 produces, accumulated and re-rendered as one panel rather than appended to
+  // the log line by line. Held as data (not markup) so a later phase's findings can join an
+  // earlier phase's without either having to know how the other is drawn.
+  const diagnosisEl = tuneContainer.querySelector('#tune-diagnosis');
+  const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null };
+  function renderDiagnosis() {
+    if (!diagnosisEl) return;
+    const html = renderDiagnosisHtml(diagnosis);
+    diagnosisEl.innerHTML = html;
+    diagnosisEl.style.display = html ? 'block' : 'none';
+  }
   const phaseBannerEl = tuneContainer.querySelector('#tune-phase-banner');
   const phaseNameEl = tuneContainer.querySelector('#tune-phase-name');
   const phaseProgressEl = tuneContainer.querySelector('#tune-phase-progress');
@@ -982,6 +1093,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const testedRangeByReel = reelFrequencyTables.map(() => ({}));
 
   const options = {
+    // Stops the engine after Phases 0a/0b/0c - see diagnoseConfig's own doc for why diagnosis is
+    // its own action rather than always the prelude to a search.
+    diagnoseOnly,
     signal: abortController.signal,
     reelsCount: tuneConfig.reelsCount,
     rowsCount: tuneConfig.rowsCount,
@@ -1054,21 +1168,27 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   biasSelects.forEach(el => { el.disabled = true; });
   biasStrengthInputs.forEach(el => { el.disabled = true; });
   startBtn.disabled = true;
-  startBtn.textContent = 'TUNING...';
+  if (diagnoseBtn) diagnoseBtn.disabled = true;
+  startBtn.textContent = diagnoseOnly ? 'CHECKING...' : 'TUNING...';
+  if (diagnoseOnly && diagnoseBtn) diagnoseBtn.textContent = 'CHECKING...';
   stopBtn.style.display = 'inline-block';
   stopBtn.disabled = false;
   stopBtn.textContent = 'STOP';
   resultsEl.innerHTML = '';
   logEl.style.display = 'block';
   logEl.innerHTML = '';
-  liveStatsEl.style.display = 'grid';
+  // A diagnosis measures no candidates, so the per-candidate stats cards have nothing to show and
+  // would sit at "—" for the whole run, reading as a search that never got going.
+  liveStatsEl.style.display = diagnoseOnly ? 'none' : 'grid';
   liveStatsCurrentEl.textContent = '—';
   liveStatsCurrentStepEl.textContent = '';
   liveStatsCurrentProgressBarEl.style.width = '0%';
   liveStatsBestEl.textContent = '—';
   liveStatsBestImprovedEl.innerHTML = '';
   liveStatsViolationsEl.textContent = '—';
-  liveTableEl.style.display = 'block';
+  // Hidden for a diagnosis: it renders the per-reel frequencies with "current"/"best" gauges, and
+  // a diagnosis produces neither. Left visible it says a tune happened when none did.
+  liveTableEl.style.display = diagnoseOnly ? 'none' : 'block';
   liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, null, paytable);
 
   // `style` is applied to the row element rather than accepting markup in `line`: log text is
@@ -1239,6 +1359,8 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // baseline all through Phase 1's scatter rounds, making the strategy look like it
         // hadn't taken effect until well after the fact.
         if (phase === 'initial') {
+          // The starting point only means something if a search is about to use it.
+          if (diagnoseOnly) return;
           appendLog(`Starting point selected (${initialWeightStrategyLabels[options.initialWeightStrategy] || options.initialWeightStrategy})`);
           setPhaseBanner({
             name: 'Phase 0 · Checking the ground',
@@ -1252,18 +1374,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // loudest because an 'error' finding describes a config no amount of tuning can
         // compensate for - the run is about to be refused, and the suggestion is the whole point.
         if (phase === 'validation') {
+          diagnosis.validation = r.findings;
+          renderDiagnosis();
           const bySeverity = { error: [], warning: [], note: [] };
           r.findings.forEach(f => (bySeverity[f.severity] ?? bySeverity.note).push(f));
-          const icon = { error: '✖', warning: '⚠', note: 'ℹ' };
-          const colour = { error: '#ff8080', warning: '#ffcc66', note: '#9ab' };
-          ['error', 'warning', 'note'].forEach(sev => {
-            bySeverity[sev].forEach(f => {
-              appendLog(`${icon[sev]} ${f.message}`, { color: colour[sev], fontWeight: sev === 'error' ? 'bold' : 'normal' });
-              // The suggestion on its own line and dimmer: the finding says what is wrong, this
-              // says what to change, and the second is the part a developer actually acts on.
-              appendLog(`→ ${f.suggestion}`, { color: '#888', paddingLeft: '1.4em' });
-            });
-          });
           if (bySeverity.error.length > 0) {
             setPhaseBanner({
               name: `Config has ${bySeverity.error.length} error${bySeverity.error.length === 1 ? '' : 's'}`,
@@ -1288,16 +1402,14 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
               progress: `${r.knob} ${r.value}`,
             });
           } else if (r.event === 'complete') {
-            formatSensitivityReport(r).split('\n').forEach(line => {
-              const emphasise = /^(WHICH KNOB MATTERS|TO REACH)/.test(line);
-              // pre-wrap, not the default: the report aligns its columns with padded spaces, and
-              // HTML collapses runs of spaces, which turns a table into a ragged list. `pre-wrap`
-              // rather than `pre` so a long ladder still wraps instead of forcing a scrollbar.
-              appendLog(line, {
-                whiteSpace: 'pre-wrap',
-                ...(emphasise ? { color: '#cfe6ff', fontWeight: 'bold', marginTop: '6px' } : null),
-              });
-            });
+            diagnosis.sensitivity = r;
+            renderDiagnosis();
+            // One line in the log, pointing at the panel - so someone reading the log knows the
+            // report exists and where it went, without the report itself scrolling away.
+            const top = r.knobs?.find(k => !k.flat && !k.measurementUnreliable);
+            appendLog(top
+              ? `✓ Sensitivity swept - highest leverage: ${top.knob} (${top.elasticityRtpPerUnit.toFixed(1)}pp per unit). Full report above.`
+              : '✓ Sensitivity swept - see the report above.');
           }
           return;
         }
@@ -1350,6 +1462,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // job rather than misbehaving. The fix in that case is a structural one (on a cluster
         // game, usually how readily symbols stack), not a tuning weight.
         if (phase === 'headroom') {
+          // Also lands in the diagnosis panel, where it sits beside the sensitivity sweep that
+          // answers the question it raises ("what do I change instead of frequencies?").
+          diagnosis.structuralHeadroom = r;
+          renderDiagnosis();
           const noisy = options.trialSpins < 50000 || options.trialsPerPoint < 2;
           const caveat = noisy
             ? ` (single measurement at ${options.trialSpins.toLocaleString()} spins × ${options.trialsPerPoint} trial${options.trialsPerPoint === 1 ? '' : 's'} - treat as a rough read; raise Trial Spins for a number worth acting on)`
@@ -1696,6 +1812,20 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // is 1 - no repeat measurement was ever taken, so there's genuinely no variance to report,
     // said explicitly rather than omitted (omitting it would read as "no problem", not
     // "unknown").
+    // A diagnosis produced no candidate, so there is no RTP, no convergence and no reel tables to
+    // render or copy. It stops here, with the diagnosis panel above already populated - which is
+    // the entire output of this action.
+    if (diagnoseOnly) {
+      appendLog('✓ Config checked. Nothing was tuned and nothing changed - see the report above, then adjust the settings and START TUNING.');
+      setPhaseBanner({
+        name: 'Config checked',
+        strategy: 'no search was run and no frequencies were changed',
+        why: 'use the report above to decide what to change before spending a tune on it',
+      });
+      console.log('Frequency tuner diagnosis:', diagnostics);
+      return;
+    }
+
     const finalTrialMin = diagnostics.rtpPhase?.trialRtpMin;
     const finalTrialMax = diagnostics.rtpPhase?.trialRtpMax;
     const finalStdDev = diagnostics.rtpPhase?.trialRtpStdDev;
@@ -1990,6 +2120,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     biasStrengthInputs.forEach(el => { el.disabled = false; });
     startBtn.disabled = false;
     startBtn.textContent = 'START TUNING';
+    if (diagnoseBtn) { diagnoseBtn.disabled = false; diagnoseBtn.textContent = 'CHECK MY CONFIG'; }
     stopBtn.style.display = 'none';
   }
 }

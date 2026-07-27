@@ -1108,6 +1108,33 @@ export function beatsIncumbent(candidate, incumbent, z) {
  *   knob used to produce this specific result - see its own comment above the `return` statement
  *   for exactly what's included/excluded.
  */
+/**
+ * Diagnosis without a search: what is wrong with this config, what an even symbol distribution
+ * pays, and which structural knob actually moves RTP - Phases 0a, 0b and 0c only.
+ *
+ * This exists as its own entry point because those answers should shape the inputs a developer
+ * hands the tuner, and that is the wrong way round if they only ever arrive as the opening act of
+ * a search already underway. Sensitivity in particular needs no search at all: it is ~30 cheap
+ * measurements, it is the single most useful thing this module produces, and waiting out a
+ * 150-iteration tune to see it is backwards.
+ *
+ * Runs `tuneFrequencies` with `diagnoseOnly`, so the two share every code path by construction and
+ * cannot drift into disagreeing about what a config measures. `measureSensitivity` defaults to ON
+ * here (unlike in `tuneFrequencies`, where it is off so no existing caller pays for it) - a
+ * diagnosis without the sensitivity sweep would be missing its main course.
+ *
+ * @returns {Promise<Object>} the `diagnostics` object: `{ validation, structuralHeadroom,
+ *   sensitivity, reelFeasibility }`. Throws on a blocking validation error, same as a real tune.
+ */
+export async function diagnoseConfig(paytable, reelFrequencyTables, options = {}) {
+  const result = await tuneFrequencies(paytable, reelFrequencyTables, {
+    ...options,
+    measureSensitivity: options.measureSensitivity ?? true,
+    diagnoseOnly: true,
+  });
+  return result.diagnostics;
+}
+
 export async function tuneFrequencies(paytable, reelFrequencyTables, options = {}) {
   if (!paytable || typeof paytable !== 'object') {
     throw new Error('tuneFrequencies requires a paytable');
@@ -1161,6 +1188,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     sensitivitySpins = null,
     sensitivityAt = 'uniform',
     skipValidation = false,
+    diagnoseOnly = false,
     minClusterSize,
     scatterTriggerCount,
     solvePayoutScale = false,
@@ -1608,6 +1636,24 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       ...summarize(baselinePoint, ladderResults, { targetRtp, noiseFloorPct }),
     };
     if (onProgress) await onProgress('sensitivity', 0, null, { event: 'complete', ...sensitivity }, null);
+  }
+
+  // ---- Diagnosis-only exit ----
+  // Everything above this line is DIAGNOSIS: what is wrong with the config, what an even
+  // distribution pays, and which structural knob actually moves RTP. None of it searches anything,
+  // and all of it is the sort of thing that should change the inputs you hand the search - which
+  // is the wrong order if it only ever runs as the opening act of a search you have already
+  // committed to. `diagnoseConfig` (below) stops here.
+  //
+  // Implemented as an early return from this same function rather than as a separate routine, on
+  // purpose: a second implementation would drift, and a diagnosis that disagreed with the tune it
+  // precedes would be worse than no diagnosis at all.
+  if (diagnoseOnly) {
+    return {
+      reelFrequencyTables: baseReelTables,
+      rtp: null, triggerRatePct: null, scaledPaytable: null,
+      diagnostics: { validation, structuralHeadroom, sensitivity, reelFeasibility, diagnoseOnly: true },
+    };
   }
 
   let currentReelTables = baseReelTables;

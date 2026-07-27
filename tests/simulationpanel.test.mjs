@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatReelFrequencyTablesForCopy, formatSensitivityReport } from '../core/SimulationPanel.js';
+import { formatReelFrequencyTablesForCopy, renderDiagnosisHtml } from '../core/SimulationPanel.js';
 
 test('formatReelFrequencyTablesForCopy preserves distinct small frequencies instead of collapsing them', () => {
   // Reproduces the bookbookbook bug: several genuinely distinct tuned frequencies under 1
@@ -185,28 +185,60 @@ const sensitivityFixture = () => ({
   ],
 });
 
-test('formatSensitivityReport leads with the highest-leverage knob and marks the current value', () => {
-  const out = formatSensitivityReport(sensitivityFixture());
-  const lines = out.split('\n');
-  const stackIdx = lines.findIndex(l => l.includes('stackChance'));
-  const maxStackIdx = lines.findIndex(l => l.includes('maxStack'));
-  assert.ok(stackIdx > 0 && stackIdx < maxStackIdx, 'knobs must appear in leverage order, highest first');
-  assert.match(out, /\[0\.3:105%\]/, "the current value must be bracketed so 'where am I' needs no arithmetic");
-  assert.match(out, /236\.5|237/, 'the elasticity is the number that ranks the knob - it has to be visible');
+// The knob table renders one <tr> per knob, so a row is the unit to assert against - matching on
+// whole-output regexes would happily pass while the wrong knob carried the wrong number.
+const knobRows = (html) => html.split('<tr>').slice(1);
+const rowFor = (html, knob) => knobRows(html).find(r => r.includes(`>${knob}</td>`));
+
+test('renderDiagnosisHtml leads with the highest-leverage knob and marks the current value', () => {
+  const out = renderDiagnosisHtml({ sensitivity: sensitivityFixture() });
+  const order = knobRows(out).map(r => (r.match(/>(\w+)<\/td>/) || [])[1]);
+  assert.deepEqual(order, ['stackChance', 'maxStack', 'minGap'],
+    'knobs must render in leverage order, highest first');
+  assert.match(rowFor(out, 'stackChance'), /236\.5/,
+    'the elasticity is what ranks the knob - it has to be on the row');
+  // The current value is the anchor for reading every other point on the ladder, so it must be
+  // visually distinct rather than merely present. Matched as whole <span> elements: slicing the
+  // row on '</span>' also picks up the elasticity bar's own markup, which carries a background of
+  // its own and made this assertion pass for the wrong reason.
+  const ladderSpans = [...rowFor(out, 'stackChance').matchAll(/<span style="([^"]*)"[^>]*>([^<]*)<\/span>/g)]
+    .map(m => ({ style: m[1], text: m[2].trim() }));
+  const current = ladderSpans.find(s => s.text === '0.3: 105%');
+  const other = ladderSpans.find(s => s.text === '0.1: 36%');
+  assert.ok(current && other, `expected both ladder points as spans, got ${ladderSpans.map(s => s.text).join(' | ')}`);
+  assert.ok(/background:/.test(current.style), 'the current ladder point must be highlighted');
+  assert.ok(!/background:/.test(other.style), 'non-current ladder points must not be highlighted');
 });
 
-test('formatSensitivityReport says "no measurable effect" instead of printing a tiny number', () => {
-  // A knob inside the noise floor has not demonstrated anything. Printing "0.4pp per unit" next to
+test('renderDiagnosisHtml says "no measurable effect" instead of printing a tiny number', () => {
+  // A knob inside the noise floor has not demonstrated anything. Printing "0.4pp per unit" beside
   // maxStack's 73.3 invites a developer to treat it as a weak-but-real lever, which is the exact
   // mistake this report exists to prevent.
-  const out = formatSensitivityReport(sensitivityFixture());
-  const minGapLine = out.split('\n').find(l => l.includes('minGap'));
-  assert.match(minGapLine, /no measurable effect/i);
-  assert.ok(!/0\.0pp per unit/.test(minGapLine));
+  const out = renderDiagnosisHtml({ sensitivity: sensitivityFixture() });
+  const row = rowFor(out, 'minGap');
+  assert.match(row, /no measurable effect/i);
+  assert.ok(!/pp per unit/.test(row), 'a flat knob must not also show an elasticity');
 });
 
-test('formatSensitivityReport states the routes to target, marking which one is exact', () => {
-  const out = formatSensitivityReport(sensitivityFixture());
+test('renderDiagnosisHtml escapes text that came from a game config', () => {
+  // Validation messages carry symbol names straight out of a developer's own paytable. They have
+  // no business being parsed as markup on the way to the panel.
+  const out = renderDiagnosisHtml({
+    validation: [{ severity: 'error', code: 'x', message: '<img src=x onerror=alert(1)>', suggestion: 'fix "it" & move on', subject: {} }],
+  });
+  assert.ok(!out.includes('<img'), 'markup in a finding must not survive into the panel');
+  assert.match(out, /&lt;img/);
+  assert.match(out, /&amp;/);
+});
+
+test('renderDiagnosisHtml returns nothing when there is nothing to report', () => {
+  // The panel section stays hidden rather than rendering an empty card.
+  assert.equal(renderDiagnosisHtml({}), '');
+  assert.equal(renderDiagnosisHtml(), '');
+});
+
+test('renderDiagnosisHtml states the routes to target, marking which one is exact', () => {
+  const out = renderDiagnosisHtml({ sensitivity: sensitivityFixture() });
   assert.match(out, /TO REACH 96%/i);
   assert.match(out, /0\.953/);
   assert.match(out, /exact/i);
@@ -214,12 +246,12 @@ test('formatSensitivityReport states the routes to target, marking which one is 
   assert.match(out, /0\.2.*0\.3|interpolat/i, 'an interpolated route must show what it was interpolated between');
 });
 
-test('formatSensitivityReport reports the noise floor, the sample size, and which frequencies it used', () => {
+test('renderDiagnosisHtml reports the noise floor, the sample size, and which frequencies it used', () => {
   // Without the noise floor, a 3pp gap between two ladder points is indistinguishable from a 300pp
   // one except by size. Without the measurement basis, the numbers are not comparable across knobs
   // at all - sweeping at the CURRENT frequencies measures the knob and the existing skew together
   // and attributes the sum to the knob.
-  const out = formatSensitivityReport(sensitivityFixture());
+  const out = renderDiagnosisHtml({ sensitivity: sensitivityFixture() });
   assert.match(out, /5\.2/, 'noise floor');
   // Digits only, separators stripped: the panel formats numbers with toLocaleString, so the
   // thousands separator is whatever the developer's machine uses - a comma here, a non-breaking
@@ -229,14 +261,14 @@ test('formatSensitivityReport reports the noise floor, the sample size, and whic
   // Asserted as "the two bases read differently" rather than by matching one wording, so the
   // report stays free to phrase it for a human ("EVEN symbol frequencies") instead of echoing the
   // internal mode name.
-  const atCurrent = formatSensitivityReport({ ...sensitivityFixture(), measuredAt: 'current' });
+  const atCurrent = renderDiagnosisHtml({ sensitivity: { ...sensitivityFixture(), measuredAt: 'current' } });
   const basisLine = (text) => text.split('\n').find(l => /frequencies/i.test(l));
   assert.ok(basisLine(out), 'the report must state which frequencies it measured at');
   assert.notEqual(basisLine(out), basisLine(atCurrent),
     'uniform and current must not render identically - which one was used changes what the numbers mean');
 });
 
-test('formatSensitivityReport surfaces a broken payoutScale measurement instead of hiding it', () => {
+test('renderDiagnosisHtml surfaces a broken payoutScale measurement instead of hiding it', () => {
   const s = sensitivityFixture();
   s.knobs.push({
     knob: 'payoutScale', current: 1, flat: true, elasticityRtpPerUnit: 0, span: 0,
@@ -244,7 +276,7 @@ test('formatSensitivityReport surfaces a broken payoutScale measurement instead 
     measurementUnreliable: true,
     measurementNote: 'This ladder measured the ORIGINAL payouts at every point. Pass winEvaluatorFactory to fix it.',
   });
-  const out = formatSensitivityReport(s);
+  const out = renderDiagnosisHtml({ sensitivity: s });
   assert.match(out, /winEvaluatorFactory/);
   const payoutLine = out.split('\n').find(l => l.includes('payoutScale') && !l.includes('scale every payout'));
   assert.ok(!/no measurable effect/i.test(payoutLine),
