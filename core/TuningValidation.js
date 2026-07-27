@@ -40,8 +40,126 @@ export function validateTuningConfig({
     findings.push({ severity, code, message, suggestion, subject });
 
   checkPayoutLadders({ paytable, minClusterSize }, add);
+  checkGridGeometry({ reelsCount, rowsCount, minClusterSize, scatterTriggerCount }, add);
+  (reelFrequencyTables ?? []).forEach((reelTable, reel) => {
+    checkReelStructure({ reelTable, reel, reelLength, paytable, multiReel: reelFrequencyTables.length > 1 }, add);
+  });
 
   return findings;
+}
+
+// Reels are 0-indexed everywhere in code but exported as FREQUENCY_REEL1..n, so a message naming
+// "reel 0" sends a developer looking for something that does not exist in game.js. Messages use
+// the 1-based name; `subject.reel` stays 0-based for anything consuming these programmatically.
+const reelName = (reel) => `reel ${reel + 1}`;
+
+// ---- Grid geometry ----
+// Cheap "can this even happen?" arithmetic. Both of these describe a target that no configuration
+// of frequencies can ever produce, which makes them errors rather than warnings.
+function checkGridGeometry({ reelsCount, rowsCount, minClusterSize, scatterTriggerCount }, add) {
+  const cells = reelsCount * rowsCount;
+  if (minClusterSize != null && minClusterSize > cells) {
+    add('error', 'cluster-size-reachable',
+      `The minimum cluster size (${minClusterSize}) is larger than the whole grid (${reelsCount}x${rowsCount} = ${cells} cells) - no cluster can ever pay.`,
+      `Lower minClusterSize to at most ${cells}, or enlarge the grid.`,
+      { minClusterSize, cells });
+  }
+  if (scatterTriggerCount != null && scatterTriggerCount > cells) {
+    add('error', 'scatter-trigger-reachable',
+      `Free spins need ${scatterTriggerCount} scatters but the grid only has ${cells} cells - the bonus can never trigger.`,
+      `Lower the scatter trigger count to at most ${cells}, or enlarge the grid.`,
+      { scatterTriggerCount, cells });
+  }
+}
+
+// ---- Per-reel structure ----
+// Resolution order mirrors generateReel's own (symbol override -> reel defaults -> built-in
+// fallback, see core/SlotMath.js), so a constraint is read here exactly as the strip builder reads
+// it. Reading it any other way would produce findings about a config that is not the one running.
+function checkReelStructure({ reelTable, reel, reelLength, paytable, multiReel }, add) {
+  const defaults = reelTable.defaults ?? {};
+  const symbols = reelTable.symbols ?? {};
+  const where = multiReel ? ` on ${reelName(reel)}` : '';
+  const resolve = (symbol, key, fallback) => symbols[symbol]?.[key] ?? defaults[key] ?? fallback;
+
+  // stackChance is the single highest-leverage structural knob on a cluster game AND the one with
+  // a discontinuity in it - see the warning text. Checked at reel level and per symbol.
+  const stackChanceSites = [
+    { value: defaults.stackChance, symbol: null },
+    ...Object.keys(symbols).map(s => ({ value: symbols[s].stackChance, symbol: s })),
+  ].filter(site => site.value != null && site.value >= 1);
+  stackChanceSites.forEach(({ value, symbol }) => {
+    add('warning', 'stack-chance-mode-switch',
+      `stackChance is ${value}${symbol ? ` for ${symbol}` : ''}${where} - at 1 or above generateReel takes a different code path entirely (an even split across clusters), not "always stack".`,
+      'Measured on Candy Frenzy at uniform frequencies, stackChance 0.7 pays 181% RTP and 1.0 pays 40%. It is not a continuum: 1 or above switches from _computeStackedPlacements to _computeClusterSizes. Use 0.9 if you want "nearly always stacked"; use 1 only if you specifically want the even-split behavior.',
+      { reel, symbol, stackChance: value });
+  });
+
+  // Contradictions are reported once at the level where they were CONFIGURED, not once per symbol
+  // that inherits them. A reel-level `minStack: 5, maxStack: 3` is one mistake in one line of
+  // game.js; reporting it once per symbol would bury it twelve-deep on a real reel and imply
+  // twelve separate things to fix. Symbols are only reported when their own override is what
+  // creates the contradiction.
+  const checkStackPair = (minStack, maxStack, symbol) => {
+    const subject = symbol ? `${symbol}${where}` : `${where.trim() || 'this reel'}'s defaults`;
+    if (minStack > maxStack) {
+      add('error', 'stack-bounds',
+        `${subject} has minStack ${minStack} above maxStack ${maxStack} - no run length satisfies both.`,
+        `Set minStack to at most ${maxStack}, or raise maxStack to at least ${minStack}.`,
+        { reel, symbol: symbol ?? null, minStack, maxStack });
+    } else if (minStack < 1 || maxStack < 1) {
+      add('error', 'stack-bounds',
+        `${subject} has a stack bound below 1 (minStack ${minStack}, maxStack ${maxStack}) - a run cannot be shorter than one position.`,
+        'Set both to 1 or higher.',
+        { reel, symbol: symbol ?? null, minStack, maxStack });
+    }
+  };
+  const defaultMinStack = defaults.minStack ?? 1;
+  const defaultMaxStack = defaults.maxStack ?? Infinity;
+  checkStackPair(defaultMinStack, defaultMaxStack, null);
+  Object.keys(symbols).forEach(symbol => {
+    if (symbols[symbol].minStack == null && symbols[symbol].maxStack == null) return;
+    const minStack = resolve(symbol, 'minStack', 1);
+    const maxStack = resolve(symbol, 'maxStack', Infinity);
+    // Already reported at reel level if the symbol changed neither side of the comparison.
+    if (minStack === defaultMinStack && maxStack === defaultMaxStack) return;
+    checkStackPair(minStack, maxStack, symbol);
+  });
+
+  const checkFrequencyPair = (min, max, symbol) => {
+    if (min == null || max == null || min <= max) return;
+    const subject = symbol ? `${symbol}${where}` : `${where.trim() || 'this reel'}'s defaults`;
+    add('error', 'frequency-bounds-contradiction',
+      `${subject} has minFrequency ${min} above maxFrequency ${max} - the limit penalty can never reach zero.`,
+      `Swap them, or widen one. As it stands every candidate violates one bound or the other, so the search carries a floor of unavoidable penalty and can never report a clean 'converged'.`,
+      { reel, symbol: symbol ?? null, minFrequency: min, maxFrequency: max });
+  };
+  checkFrequencyPair(defaults.minFrequency, defaults.maxFrequency, null);
+  Object.keys(symbols).forEach(symbol => {
+    if (symbols[symbol].minFrequency == null && symbols[symbol].maxFrequency == null) return;
+    const min = symbols[symbol].minFrequency ?? defaults.minFrequency;
+    const max = symbols[symbol].maxFrequency ?? defaults.maxFrequency;
+    if (min === defaults.minFrequency && max === defaults.maxFrequency) return;
+    checkFrequencyPair(min, max, symbol);
+  });
+
+  // The hard floor: a symbol whose runs must sit `minGap` apart can have at most
+  // floor(reelLength / minGap) of them, and every symbol on the reel needs at least one run. Below
+  // this length no arrangement satisfies the constraint - and generateReel does not fail, it hits
+  // its `candidates.length === 0` bailout and silently returns a strip that clumps far more than
+  // the config asked for.
+  const present = Object.keys(symbols).filter(s => symbols[s].frequency > 0);
+  const worstGap = present.reduce((worst, s) => {
+    const gap = resolve(s, 'minGap', paytable?.[s]?.triggerFreeSpins === true ? 3 : 1);
+    return Math.max(worst, gap);
+  }, 1);
+  const needed = present.length * worstGap;
+  if (worstGap > 1 && needed > reelLength) {
+    add('error', 'reel-length-floor',
+      `${present.length} symbols${where} each needing minGap ${worstGap} require at least ${needed} strip positions, but the reel length is ${reelLength}.`,
+      `Raise reel length to at least ${needed}, lower minGap to ${Math.floor(reelLength / present.length)} or below, or carry fewer symbols on this reel. generateReel will not report this: it enforces spacing best-effort and silently gives up on a strip too dense, so the shipped reels clump far more than the config asks.`,
+      { reel, symbolCount: present.length, minGap: worstGap, needed, reelLength });
+  }
 }
 
 // ---- Payout ladders ----
