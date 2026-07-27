@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
-  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml,
+  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow,
 } from '../core/SimulationPanel.js';
 import { scalePaytable } from '../core/SpinSimulator.js';
 
@@ -515,4 +515,46 @@ test('renderLossBudgetHtml renders nothing when no preview was produced', () => 
 test('renderDiagnosisHtml flags a loss the search will not spend on RTP, in the heading', () => {
   const out = renderDiagnosisHtml({ lossPreview: lossPreviewFixture({ dominant: 'spacing', rtpIsDominant: false }) });
   assert.match(out, /not RTP/);
+});
+
+// ---- Package 2.2: intent-named controls ----------------------------------------------------
+
+test('describePenaltyStateNow reports the measured quantity AND what it costs', () => {
+  // "Insist" is a choice about a real, currently-measured quantity. Without this column it is an
+  // incantation, which is the complaint that started this package: "5 penalty weight on
+  // uniformity - what?"
+  const now = describePenaltyStateNow({
+    total: 100, terms: [
+      { key: 'spacing', value: 301, contribution: 75, contributionPct: 75 },
+      { key: 'ordering', value: 0, contribution: 0, contributionPct: 0 },
+    ],
+  });
+  assert.match(now.spacing, /301\.00/, 'the measured quantity');
+  assert.match(now.spacing, /75\.00/, 'what it costs the search');
+  assert.match(now.spacing, /75%/, 'and its share of the loss');
+});
+
+test('describePenaltyStateNow says "satisfied" rather than 0, which reads as switched off', () => {
+  const now = describePenaltyStateNow({ total: 10, terms: [{ key: 'ordering', value: 0, contribution: 0, contributionPct: 0 }] });
+  assert.equal(now.ordering, 'satisfied');
+});
+
+test('describePenaltyStateNow shows em dashes before anything has been measured', () => {
+  // A zero here would claim a measurement that never happened.
+  const now = describePenaltyStateNow(null);
+  assert.equal(now.ordering, '—');
+  assert.equal(now.spacing, '—');
+  assert.ok(Object.keys(now).length >= 5, 'every row must be represented, measured or not');
+});
+
+test('the reproducibility header records which denomination the weights were in', () => {
+  // The same numbers mean entirely different things in the two denominations - measured on Candy
+  // Frenzy, a raw spacing weight of 0.25 is worth 43.75 of the loss against an RTP error of 1.76.
+  // A weight list without its denomination does not describe a run.
+  const table = { defaults: {}, symbols: { bar: { frequency: 2 } } };
+  const out = formatReelFrequencyTablesForCopy([table], {
+    rtp: 96, triggerRatePct: 0.6,
+    inputParameters: { reelLength: 500, reelSeeds: [1], orderingPenaltyWeight: 1, penaltyNormalization: 'normalized' },
+  });
+  assert.match(out, /loss weights \(normalized\)/);
 });

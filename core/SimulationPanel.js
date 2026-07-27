@@ -5,7 +5,7 @@ import { resolveFrequencyBounds } from './SlotMath.js';
 import { exportSpinLogCsv } from './SpinLog.js';
 import { tuneFrequencies } from './SpinSimulator.js';
 import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
-import { spinsPerTriggerToPct, pctToSpinsPerTrigger } from './TuningUnits.js';
+import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent } from './TuningUnits.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -33,6 +33,60 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
  * number beside a large one reads as a weak-but-real lever, and that is the exact mistake this
  * report exists to prevent.
  */
+/**
+ * The five soft constraints, each phrased as what it WANTS rather than what it penalizes, and
+ * paired with the raw weight input that remains authoritative.
+ *
+ * `lossKey` ties each row to its term in the loss preview, which is what fills the "now:" column.
+ * That column is the point of the exercise: "Insist" is a choice about a real, currently-measured
+ * quantity, where "uniformityPenaltyWeight: 5" is an incantation.
+ */
+const PENALTY_INTENTS = [
+  {
+    key: 'ordering', lossKey: 'ordering', weightId: 'tune-ordering-weight', label: 'Respect payout ordering',
+    title: "How hard the search works to keep each reel's payout-ordering preference (set per reel below) satisfied. A higher-paying symbol should not be more frequent than a lower-paying one - or the reverse, if that reel's preference is 'more frequent'. Always a soft preference: the search will accept a small violation rather than push RTP far off target.",
+  },
+  {
+    key: 'limit', lossKey: 'limits', weightId: 'tune-limit-weight', label: 'Respect per-symbol frequency limits',
+    title: "How hard the search works to keep each symbol inside its own minFrequency/maxFrequency, which are set in that symbol's FREQUENCY_REELn entry in game.js rather than here.",
+  },
+  {
+    key: 'uniformity', lossKey: 'uniformity', weightId: 'tune-uniformity-weight', label: 'Keep symbols evenly spread',
+    title: "How hard the search works to keep every tunable symbol near a straight-line target across that reel's payout tiers. The line is flat when the reel's ordering preference is 'No preference', and tilts to match that preference otherwise - so this never fights ordering with a competing flat target.",
+  },
+  {
+    key: 'spacing', lossKey: 'spacing', weightId: 'tune-spacing-weight', label: 'Honor reel spacing',
+    title: "How hard the search works to keep the GENERATED STRIP honoring each symbol's minGap and maxStack. generateReel enforces both best-effort - on a strip too dense to space a symbol out it silently gives up - so without this the search sees no cost in pushing a frequency past what the strip can represent. On a cluster-pays game that clumping is exactly what inflates cluster wins and RTP. Note this cannot always reach zero: a game already over the ceiling at baseline starts non-zero, and the point is to stop the search making it much worse.",
+  },
+  {
+    key: 'triggerRate', lossKey: 'triggerRate', weightId: 'tune-trigger-rate-weight', label: 'Hold the free-spin trigger rate',
+    title: "How hard the search works to keep the trigger rate inside its target band. Phase 2 never tunes trigger symbols directly, so on a line-pay game this cannot move and can stay Off. On a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies swings the trigger rate from 0.75% to 2.04%.",
+  },
+];
+
+/**
+ * What each soft constraint currently COSTS, for the "now:" column beside its intent dropdown.
+ * Pure; returns a `{ key: text }` map. `null` preview -> em dashes, since nothing has measured
+ * anything yet and a zero would claim otherwise.
+ */
+export function describePenaltyStateNow(lossPreview) {
+  const out = {};
+  PENALTY_INTENTS.forEach(({ key }) => { out[key] = '—'; });
+  if (!lossPreview?.terms?.length) return out;
+  const byKey = new Map(lossPreview.terms.map(t => [t.key, t]));
+  PENALTY_INTENTS.forEach(({ key, lossKey }) => {
+    const term = byKey.get(lossKey);
+    if (!term) return;
+    // The measured quantity first, then what it is costing the search. A satisfied constraint
+    // reads "satisfied" rather than "0.00", because 0 next to a weight looks like the constraint
+    // is switched off when it may be switched on and simply not violated.
+    out[key] = term.value === 0
+      ? 'satisfied'
+      : `${term.value.toFixed(2)} → costs ${term.contribution.toFixed(2)} (${(term.contributionPct ?? 0).toFixed(0)}% of loss)`;
+  });
+  return out;
+}
+
 /**
  * The loss budget as a bar-per-term breakdown. Pure - returns HTML, renders nothing.
  *
@@ -759,7 +813,11 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     // searches with very different degrees of freedom, and only the first guarantees the reels
     // are not lopsided relative to each other.
     p.reelCoupling ? `//   reelCoupling ${p.reelCoupling}   maxReelDeviation ${p.maxReelDeviation}` : null,
-    weights ? `//   loss weights: ${weights}` : null,
+    // WITH the denomination, always. The same weights mean entirely different things in the two:
+    // measured on Candy Frenzy a raw spacing weight of 0.25 is worth 43.75 of the loss against an
+    // RTP error term of 1.76, and normalized it is worth a small fraction of one point. A weight
+    // list without its denomination does not describe a run.
+    weights ? `//   loss weights (${p.penaltyNormalization ?? 'raw'}): ${weights}` : null,
     p.orderingBiasByReel ? `//   ordering bias by reel: [${p.orderingBiasByReel.join(', ')}]` : null,
     `//`,
     `// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned`,
@@ -835,6 +893,19 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       return bucket === 0 ? 1 : bucket === 1 ? -1 : 0;
     }
 
+    // Starting weights, in the NORMALIZED denomination the panel defaults to. Ordering and limits
+    // start at 'Prefer' and everything else at 'Off', which is the same shape the raw defaults
+    // always had (0.5/0.5/0/0/0) - what changes is that the numbers now mean something fixed.
+    // A game that configured its own weight keeps it: it lands on whichever named level matches,
+    // or on 'Custom' if none does, and Custom is what flips the panel to raw so the game gets
+    // exactly what it asked for rather than its number reinterpreted in another denomination.
+    const INTENT_DEFAULTS = {
+      ordering: 1,
+      limit: 1,
+      uniformity: 0,
+      spacing: tuneConfig.spacingPenaltyWeight ?? 0,
+      triggerRate: tuneConfig.triggerRatePenaltyWeight ?? 0,
+    };
     const biasSelectorsHtml = Array.from({ length: tuneConfig.reelsCount }, (_, r) => {
       const def = defaultBiasForReel(r, tuneConfig.reelsCount);
       const opt = (value, label) => `<option value="${value}"${def === value ? ' selected' : ''}>${label}</option>`;
@@ -912,23 +983,33 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
             </select>
           </label>
         </div>
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-top: 10px;">
-          <label title="How strongly each reel's ordering preference (below) is enforced as a soft penalty on the search's loss, relative to hitting Target RTP. Higher makes the search work harder to satisfy every reel's preference even at some cost to RTP accuracy." style="font-size: 0.8em; color: #ccc;">Ordering Penalty Weight<br>
-            <input id="tune-ordering-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-          </label>
-          <label title="How strongly a symbol's own soft minFrequency/maxFrequency bounds (set directly in its FREQUENCY_REELn entry in game.js, not from this panel) are enforced as a penalty on the search's loss. Higher discourages the search from letting a bounded symbol drift outside its configured range." style="font-size: 0.8em; color: #ccc;">Frequency Limit Penalty Weight<br>
-            <input id="tune-limit-weight" type="number" value="0.5" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-          </label>
-          <label title="Discourages any one tunable symbol's frequency on a reel from sitting far from a straight-line target across payout tiers - that line is flat (an equal split) when the reel's ordering preference is 'No preference', and tilts to match that preference's direction/Strength otherwise, so this never fights ordering with a competing flat target. 0 (default) is off; raise it if the search keeps producing one or two outlier symbols relative to that line." style="font-size: 0.8em; color: #ccc;">Uniformity Penalty Weight<br>
-            <input id="tune-uniformity-weight" type="number" value="0" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
-          </label>
-          <label title="Penalizes how far a candidate's trigger rate sits OUTSIDE the target band (zero anywhere inside it), in percentage points - the same scale as RTP error, so a weight of 1 trades 1pp of trigger-rate drift against 1pp of RTP error. Phase 2 never tunes trigger symbols directly, so for a line-pay game the trigger rate cannot move and this can stay 0. For a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies (bonus frequency held identical) swings the trigger rate from 0.75% to 2.04%. With this at 0 the search cannot see that happening, which is how a cascade tune ends up with a good RTP and a trigger rate nowhere near target." style="font-size: 0.8em; color: #ccc;">Trigger Rate Penalty Weight<br>
-            <input id="tune-trigger-rate-weight" type="number" value="${tuneConfig.triggerRatePenaltyWeight ?? 0}" step="0.5" min="0" style="width: 100%; margin-top: 4px;">
-          </label>
-          <label title="Penalizes reel-SPACING constraints the generated strip actually fails to honor: runs of the same symbol closer together than its minGap, and runs longer than its maxStack. generateReel enforces both BEST-EFFORT - on a strip too dense to space a symbol out it silently gives up - so without this the search sees no cost at all in pushing a symbol's frequency past what the strip can represent, while the shipped reels clump far more than the config asks. On a cluster-pays game that clumping is exactly what inflates cluster wins and RTP. Counted as one unit per too-close run pair plus one per position a run exceeds maxStack. Note this cannot always reach zero: a symbol needing minGap G can have at most reelLength/G runs, and a game already over that ceiling at baseline starts non-zero - the point is to stop the search making it much worse." style="font-size: 0.8em; color: #ccc;">Reel Spacing Penalty Weight<br>
-            <input id="tune-spacing-weight" type="number" value="${tuneConfig.spacingPenaltyWeight ?? 0}" step="0.05" min="0" style="width: 100%; margin-top: 4px;">
-          </label>
-        </div>
+        <!-- Named by INTENT rather than by magnitude. "uniformityPenaltyWeight: 5" says nothing
+             about what 5 buys; "Insist" says what you want and the now: column says what it
+             currently costs. The raw weights still exist and stay authoritative - they moved to
+             Advanced, and typing one there sets its dropdown to Custom rather than snapping to a
+             named level, because a dropdown that reports something the search is not doing is
+             exactly the problem these levels exist to fix. -->
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.8em;">
+          <thead><tr style="color: #888; font-size: 0.85em; text-transform: uppercase;">
+            <th style="text-align: left; padding: 3px 8px 3px 0; font-weight: normal;">The search should</th>
+            <th style="text-align: left; padding: 3px 8px 3px 0; font-weight: normal; width: 130px;">How much</th>
+            <th style="text-align: left; padding: 3px 0; font-weight: normal;">now</th>
+          </tr></thead>
+          <tbody>
+${PENALTY_INTENTS.map(p => `
+            <tr title="${p.title}">
+              <td style="padding: 4px 8px 4px 0; color: #ccc;">${p.label}</td>
+              <td style="padding: 4px 8px 4px 0;">
+                <select id="tune-intent-${p.key}" style="width: 100%;">
+                  ${Object.entries(INTENT_LEVELS).map(([name, lvl]) => `<option value="${name}" title="${lvl.hint}">${lvl.label}</option>`).join('')}
+                  <option value="custom">Custom…</option>
+                </select>
+              </td>
+              <td id="tune-now-${p.key}" style="padding: 4px 0; color: #9ab; font-size: 0.95em;">—</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        <div id="tune-denomination-note" style="font-size: 0.72em; color: #888; margin-top: 6px;"></div>
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 10px;">
           ${biasSelectorsHtml}
         </div>
@@ -1012,9 +1093,28 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
           <label title="Base PRNG seed for the whole search. A given seed always explores the same sequence, so a run is reproducible end to end - the copyable output records whichever seed produced it. Change it to explore a different path through the same search space without changing any other setting." style="font-size: 0.8em; color: #ccc;">Search Seed<br>
             <input id="tune-search-seed" type="number" value="12345" step="1" min="0" style="width: 100%; margin-top: 4px;">
           </label>
+          <label title="Which denomination the loss weights are expressed in. NORMALIZED re-denominates every penalty into a scale-free fraction, so a weight of 1 is worth roughly one RTP percentage point on any game and any term - which is what makes the named levels above mean anything. RAW uses the penalties' own units, which are incommensurable: ordering is in frequency units, spacing is a violation COUNT. Measured on Candy Frenzy, a raw spacing weight of 0.25 contributes 43.75 to a loss whose RTP error term is 1.76, so the search spends 96% of its effort on spacing while appearing to tune RTP. Raw is the library default and is kept here for reproducing older runs exactly." style="font-size: 0.8em; color: #ccc;">Penalty Denomination<br>
+            <select id="tune-penalty-normalization" style="width: 100%; margin-top: 4px;">
+              <option value="normalized" selected>Normalized (1 ≈ 1pp of RTP)</option>
+              <option value="raw">Raw penalty units</option>
+            </select>
+          </label>
           <label title="Only used by 'Same mix, then vary slightly'. How far each reel's own weight for a symbol may drift from the shared value the linked stage settled on, as a fraction - 0.25 means +/-25%. It exists to keep the refinement a refinement: without a bound, reopening per-reel weights hands back exactly the freedom the linked stage was there to remove, just from a better starting point. Set it to 0 to pin the refinement to the linked answer entirely." style="font-size: 0.8em; color: #ccc;">Max Reel Deviation<br>
             <input id="tune-max-reel-deviation" type="number" value="${tuneConfig.maxReelDeviation ?? 0.25}" step="0.05" min="0" max="0.95" style="width: 100%; margin-top: 4px;">
           </label>
+        </div>
+        <!-- The raw weights the intent dropdowns above drive. Authoritative: readTuneOptions reads
+             THESE, never the dropdowns, so there is exactly one source of truth for what the
+             search was given, and a hand-typed value is never silently overridden by a named
+             level that does not match it. -->
+        <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.1);">
+          <div style="font-size: 0.72em; color: #888; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px;">Raw penalty weights &mdash; these are what the search actually receives</div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;">
+            ${PENALTY_INTENTS.map(p => `
+            <label title="${p.title}" style="font-size: 0.8em; color: #ccc;">${p.label}<br>
+              <input id="${p.weightId}" type="number" value="${INTENT_DEFAULTS[p.key]}" step="0.1" min="0" style="width: 100%; margin-top: 4px;">
+            </label>`).join('')}
+          </div>
         </div>
       </details>
       <div id="tune-action-row" style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
@@ -1116,11 +1216,13 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
       // Only preferences actually turned ON are worth naming. Listing "ordering 0.5, limits 0.5,
       // uniformity 0, trigger 0, spacing 0" would make the two that matter exactly as hard to pick
       // out as they are in the expanded grid, which is the problem this is here to solve.
-      const active = [
-        ['ordering', '#tune-ordering-weight'], ['limits', '#tune-limit-weight'],
-        ['uniformity', '#tune-uniformity-weight'], ['trigger', '#tune-trigger-rate-weight'],
-        ['spacing', '#tune-spacing-weight'],
-      ].filter(([, id]) => num(id) > 0).map(([label, id]) => `${label} ${num(id)}`);
+      // Named by their level when they have one, since that is what the section now shows.
+      const active = PENALTY_INTENTS
+        .filter(p => num(`#${p.weightId}`) > 0)
+        .map(p => {
+          const level = el(`#tune-intent-${p.key}`)?.value;
+          return `${p.key} ${level && level !== 'custom' ? INTENT_LEVELS[level].label.toLowerCase() : num(`#${p.weightId}`)}`;
+        });
       if (summaryEls.shape) {
         // Coupling leads, because it is the one setting in this section that changes what the
         // search can express at all rather than how strongly it prefers something.
@@ -1136,6 +1238,44 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         summaryEls.advanced.textContent = `— seed ${num('#tune-search-seed')} · max std error ${num('#tune-max-rtp-std-error')}%`;
       }
     }
+    // ---- Intent dropdowns <-> raw weights ----
+    // One direction each, and deliberately asymmetric. Picking a level WRITES the weight, because
+    // the level is a shorthand for it. Typing a weight only sets the dropdown to 'custom' - it
+    // never snaps to the nearest level, because a dropdown reading "Insist" beside a weight of 2.5
+    // would report something the search is not doing, which is the exact failure the named levels
+    // exist to fix.
+    function syncDenominationNote() {
+      const anyCustom = PENALTY_INTENTS.some(p => el(`#tune-intent-${p.key}`)?.value === 'custom');
+      const modeEl = el('#tune-penalty-normalization');
+      // A hand-typed weight forces RAW: the named levels are calibrated against normalized
+      // penalties, so reinterpreting someone's own number in a denomination they did not choose
+      // would silently change what they asked for.
+      if (anyCustom && modeEl && modeEl.value === 'normalized') modeEl.value = 'raw';
+      const noteEl = el('#tune-denomination-note');
+      if (!noteEl) return;
+      noteEl.textContent = modeEl?.value === 'normalized'
+        ? 'Levels are calibrated so one step is worth roughly one RTP percentage point. Raw weights are in Advanced.'
+        : 'RAW penalty units — a weight here is in each penalty\'s own scale, and those are not comparable to each other or to RTP error. Set every row to a named level to switch back.';
+    }
+    PENALTY_INTENTS.forEach(p => {
+      const select = el(`#tune-intent-${p.key}`);
+      const weight = el(`#${p.weightId}`);
+      if (!select || !weight) return;
+      select.value = weightToIntent(parseFloat(weight.value));
+      select.addEventListener('change', () => {
+        if (select.value === 'custom') return; // leave the weight alone - "custom" means "what's typed"
+        weight.value = String(intentToWeight(select.value));
+        syncDenominationNote();
+        refreshSectionSummaries();
+      });
+      weight.addEventListener('input', () => {
+        select.value = weightToIntent(parseFloat(weight.value));
+        syncDenominationNote();
+      });
+    });
+    el('#tune-penalty-normalization')?.addEventListener('change', syncDenominationNote);
+    syncDenominationNote();
+
     tuneContainer.querySelectorAll('input, select').forEach(control => {
       control.addEventListener('input', refreshSectionSummaries);
       control.addEventListener('change', refreshSectionSummaries);
@@ -1306,6 +1446,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
     reelCoupling: tuneContainer.querySelector('#tune-reel-coupling'),
     maxReelDeviation: tuneContainer.querySelector('#tune-max-reel-deviation'),
+    penaltyNormalization: tuneContainer.querySelector('#tune-penalty-normalization'),
     solvePayoutScale: tuneContainer.querySelector('#tune-solve-payout-scale'),
     tuneStructural: tuneContainer.querySelector('#tune-tune-structural'),
   };
@@ -1337,6 +1478,14 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     const html = renderDiagnosisHtml(diagnosis);
     diagnosisEl.innerHTML = html;
     diagnosisEl.style.display = html ? 'block' : 'none';
+    // The "now:" column beside each intent dropdown, filled from whatever the last run measured.
+    // This is what makes a level a choice about a real quantity rather than an incantation, so it
+    // is refreshed with the diagnosis rather than only at the end of a tune.
+    const now = describePenaltyStateNow(diagnosis.lossPreview);
+    Object.entries(now).forEach(([key, text]) => {
+      const cell = tuneContainer.querySelector(`#tune-now-${key}`);
+      if (cell) cell.textContent = text;
+    });
   }
   const phaseBannerEl = tuneContainer.querySelector('#tune-phase-banner');
   const phaseNameEl = tuneContainer.querySelector('#tune-phase-name');
@@ -1421,6 +1570,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
     reelCoupling: inputs.reelCoupling.value,
+    // Which denomination the weights above are in. The panel defaults to normalized (the library
+    // to raw), because the named levels in the shape section are only meaningful against
+    // normalized penalties - see core/SpinSimulator.js's own penaltyNormalization doc.
+    penaltyNormalization: inputs.penaltyNormalization.value,
     // On in the panel, off in the library. ~30 extra measurements is right for a developer who
     // just clicked TUNE and wrong for every programmatic caller that never asked for it.
     measureSensitivity: true,
