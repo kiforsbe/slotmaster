@@ -788,6 +788,15 @@ test('tuneFrequencies reports converged-with-violations when RTP is reachable bu
     // === false' should assert against.
     targetRtp: 96, rtpTolerancePct: 3, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 120,
     limitPenaltyWeight: 20, orderingPenaltyWeight: 0.5, stallWindowIterations: 8, maxStallRestarts: 3,
+    // This fixture is deliberately unsatisfiable, which is the point of the test - but Phase 0a
+    // validation now (correctly) refuses to start on it. `bar`'s forced minFrequency of 56.3 sits
+    // above the maxFrequency of 10 it inherits from FREQUENCY_REEL1's defaults, so the limit
+    // penalty can never reach zero. That is a genuine contradiction the fixture's author did not
+    // intend - they wanted an ORDERING conflict - and it is worth knowing it is also a bounds
+    // conflict, since an unsatisfiable limit penalty is a plausible reason this test has never
+    // reached its expected 'converged-with-violations'. Left as-is rather than repaired here:
+    // this test was already failing before Phase 0a existed and fixing it is its own piece of work.
+    skipValidation: true,
   });
   const rp = result.diagnostics.rtpPhase;
   assert.equal(rp.reason, 'converged-with-violations', `expected 'converged-with-violations', got '${rp.reason}' (error=${rp.error}, orderingPenaltyRemaining=${rp.orderingPenaltyRemaining})`);
@@ -896,6 +905,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // give core/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
     'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
+    'validation',
   ]);
   const offenders = new Set();
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
@@ -1781,4 +1791,43 @@ test('a stage announcement carries the strategy and the reason, not just a name'
   assert.ok(start.strategy && start.strategy.length > 10, 'strategy must be a sentence a panel can show verbatim');
   assert.ok(start.why && start.why.length > 10, 'why must explain the choice, not restate the name');
   assert.equal(start.onlyStage, true, 'a single-stage run must say so, so "Phase 2a" is not implied when there is no 2b');
+});
+
+// ---- Phase 0a: config validation ----
+
+test('tuneFrequencies refuses to run on a config with validation errors', async () => {
+  // Failing fast beats tuning against a broken config for 150 iterations and reporting a
+  // confident number derived from it. The pre-849bc8a Candy Frenzy ladder is the case in point:
+  // the search ran for days against an inverted incentive and nothing said so.
+  const paytable = {
+    prem: { type: 'premium', clusterPayout: [{ min: 5, multiplier: 2 }, { min: 7, multiplier: 0.5 }] },
+    reg:  { type: 'regular', clusterPayout: [{ min: 5, multiplier: 0.5 }] },
+  };
+  await assert.rejects(
+    () => tuneFrequencies(paytable, [{ defaults: {}, symbols: { prem: { frequency: 1 }, reg: { frequency: 1 } } }], {
+      reelsCount: 1, rowsCount: 3, reelLength: 100, minClusterSize: 5, paylines: [[0, 0, 0]], linesCount: 1,
+      trialSpins: 500, trialsPerPoint: 1, maxIterations: 2,
+    }),
+    /pays LESS for a bigger cluster/);
+});
+
+test('skipValidation lets a developer who knows better proceed anyway', async () => {
+  const paytable = {
+    prem: { type: 'premium', clusterPayout: [{ min: 5, multiplier: 2 }, { min: 7, multiplier: 0.5 }] },
+    reg:  { type: 'regular', clusterPayout: [{ min: 5, multiplier: 0.5 }] },
+  };
+  const result = await tuneFrequencies(paytable, [{ defaults: {}, symbols: { prem: { frequency: 1 }, reg: { frequency: 1 } } }], {
+    reelsCount: 1, rowsCount: 3, reelLength: 100, minClusterSize: 5, paylines: [[0, 0, 0]], linesCount: 1,
+    trialSpins: 500, trialsPerPoint: 1, maxIterations: 2, skipValidation: true,
+  });
+  assert.ok(result.diagnostics.validation, 'the findings are still reported even when they no longer block');
+  assert.ok(result.diagnostics.validation.some(f => f.severity === 'error'));
+});
+
+test('warnings are reported without blocking the tune', async () => {
+  // stackChance 1 is very likely a mistake but conceivably deliberate, so it must not stop a run.
+  const result = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, maxIterations: 2,
+  });
+  assert.deepEqual(result.diagnostics.validation.filter(f => f.severity === 'error'), []);
 });

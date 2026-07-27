@@ -1001,9 +1001,13 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   liveTableEl.style.display = 'block';
   liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, null, null, paytable);
 
-  const appendLog = (line) => {
+  // `style` is applied to the row element rather than accepting markup in `line`: log text is
+  // built from config values (symbol names straight out of a game's paytable), and there is no
+  // reason to route developer-authored strings through innerHTML to colour a line.
+  const appendLog = (line, style = null) => {
     const row = document.createElement('div');
     row.textContent = line;
+    if (style) Object.assign(row.style, style);
     logEl.appendChild(row);
     logEl.scrollTop = logEl.scrollHeight;
   };
@@ -1172,6 +1176,31 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             why: 'a target the current structure cannot reach is not a search problem, and it is cheaper to find out now',
           });
           if (r.trial) updateLiveTable(r.trial, null);
+          return;
+        }
+        // Phase 0a: static config checks, before a single spin is simulated. Rendered first and
+        // loudest because an 'error' finding describes a config no amount of tuning can
+        // compensate for - the run is about to be refused, and the suggestion is the whole point.
+        if (phase === 'validation') {
+          const bySeverity = { error: [], warning: [], note: [] };
+          r.findings.forEach(f => (bySeverity[f.severity] ?? bySeverity.note).push(f));
+          const icon = { error: '✖', warning: '⚠', note: 'ℹ' };
+          const colour = { error: '#ff8080', warning: '#ffcc66', note: '#9ab' };
+          ['error', 'warning', 'note'].forEach(sev => {
+            bySeverity[sev].forEach(f => {
+              appendLog(`${icon[sev]} ${f.message}`, { color: colour[sev], fontWeight: sev === 'error' ? 'bold' : 'normal' });
+              // The suggestion on its own line and dimmer: the finding says what is wrong, this
+              // says what to change, and the second is the part a developer actually acts on.
+              appendLog(`→ ${f.suggestion}`, { color: '#888', paddingLeft: '1.4em' });
+            });
+          });
+          if (bySeverity.error.length > 0) {
+            setPhaseBanner({
+              name: `Config has ${bySeverity.error.length} error${bySeverity.error.length === 1 ? '' : 's'}`,
+              strategy: 'the tune will not start - these describe a config no amount of searching can compensate for',
+              why: 'fix them in game.js and run again, or pass skipValidation to tune anyway',
+            });
+          }
           return;
         }
         // Phase 2's strategy handover. The engine announces which search is about to run, what it

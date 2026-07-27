@@ -5,6 +5,7 @@
 import { generateReel, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
 import { LineMechanic } from './LineMechanic.js';
 import { cmaes } from './CMAES.js';
+import { validateTuningConfig } from './TuningValidation.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis. Mechanic-agnostic: how one spin
@@ -1120,6 +1121,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     maxReelDeviation = 0.25,
     rotateSeedPerGeneration = true,
     measureHeadroom = true,
+    skipValidation = false,
+    minClusterSize,
+    scatterTriggerCount,
     solvePayoutScale = false,
     orderingBiasByReel = null,
     initialStepSize = 0.5,
@@ -1154,6 +1158,32 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
   const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
+
+  // ---- Phase 0a: config validation ----
+  // Pure arithmetic on the config, no reels built and no spins run, so it costs nothing and runs
+  // before everything else. Errors stop the tune: they describe a config no amount of searching
+  // can compensate for, and spending 150 iterations to report a confident number derived from a
+  // broken paytable is worse than failing immediately. Candy Frenzy is the case in point - it ran
+  // for days against a premium ladder where a 7-cluster paid less than a 5-cluster, which makes
+  // "raise RTP" and "make big clusters rarer" the same instruction.
+  //
+  // Warnings and notes are reported and the run proceeds. `skipValidation` exists for the
+  // developer who has read the finding and disagrees; the findings are still reported either way.
+  const validation = validateTuningConfig({
+    paytable, reelFrequencyTables: baseReelTables, reelLength, reelsCount, rowsCount,
+    minClusterSize: minClusterSize ?? null, scatterTriggerCount: scatterTriggerCount ?? null,
+  });
+  if (onProgress && validation.length > 0) {
+    await onProgress('validation', 0, null, { findings: validation }, null);
+  }
+  const blocking = validation.filter(f => f.severity === 'error');
+  if (blocking.length > 0 && !skipValidation) {
+    throw new Error(
+      `tuneFrequencies refuses to run: ${blocking.length} configuration error${blocking.length === 1 ? '' : 's'} ` +
+      `no amount of tuning can compensate for.\n` +
+      blocking.map(f => `  - ${f.message}\n    Fix: ${f.suggestion}`).join('\n') +
+      `\nPass skipValidation: true to tune anyway.`);
+  }
 
   // Linking writes ONE weight per symbol to every reel, so the reels have to agree on which
   // symbols exist. A best-effort merge would write a frequency onto a reel that never carried
@@ -2477,7 +2507,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
-    rotateSeedPerGeneration, measureHeadroom,
+    rotateSeedPerGeneration, measureHeadroom, skipValidation,
   };
 
   return {
@@ -2489,6 +2519,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     scaledPaytable: payoutScale?.scaledPaytable ?? null,
     diagnostics: {
       inputParameters,
+      // Static config checks (core/TuningValidation.js), reported whether or not they blocked -
+      // a `skipValidation: true` run still carries its errors here, so a result derived from a
+      // knowingly-broken config says so rather than looking like any other result.
+      validation,
       // What an even, no-over-abundance symbol distribution actually pays. `shortfallFactor` is
       // how many times short of target that is - the amount of skew the frequency search is being
       // asked to invent. Well above 1 means the over-abundance a tune produces is the optimizer
