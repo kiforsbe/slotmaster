@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
-  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow, renderTargetChipsHtml, renderPlayerExperienceHtml,
+  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow, renderTargetChipsHtml, renderPlayerExperienceHtml, renderTuneLogHtml,
 } from '../core/SimulationPanel.js';
 import { scalePaytable } from '../core/SpinSimulator.js';
 
@@ -594,4 +594,61 @@ test('renderPlayerExperienceHtml renders the lines it is given and escapes them'
   assert.ok(!/<script>/.test(out), 'report text must be escaped like any other config-derived string');
   assert.equal(renderPlayerExperienceHtml(null), '');
   assert.equal(renderPlayerExperienceHtml({ lines: [] }), '');
+});
+
+// ---- The accepted-best log in the panel -----------------------------------------------------
+
+const logEntryFixture = (over = {}) => ({
+  index: 3, step: 47, stage: 'linked',
+  achieved: { rtp: 96.2, rtpError: 0.2, targetRtp: 96, withinRtpTolerance: true,
+    triggerRatePct: 0.58, spinsPerTrigger: 172.4, targetTriggerRatePct: 0.6, withinTriggerTolerance: true },
+  measurement: { trialRtpStdError: 0.4, reliable: true },
+  shape: { volatilityIndex: 5.5, volatilityBand: 'medium', hitRate: 0.53, maxWin: 679, top1PctShare: 0.30 },
+  violations: { ordering: 0, limits: 0, spacing: 0 },
+  loss: { total: 1.2345, penaltyNormalization: 'normalized', terms: [] },
+  reelFrequencyTables: [],
+  ...over,
+});
+
+test('renderTuneLogHtml leads each row with a verdict, so "is any of this good" is one column', () => {
+  const out = renderTuneLogHtml([logEntryFixture()]);
+  assert.match(out, /meets every target/);
+  assert.match(out, /96\.20%/);
+  assert.match(out, /1 in 172/);
+  assert.match(out, /5\.5x medium/);
+  assert.match(out, /top1% 30%/);
+});
+
+test('renderTuneLogHtml shows each entry its own error bar next to its RTP', () => {
+  // An exported config is a number without an error bar otherwise - the exact mistake the tuner
+  // itself made before maxRtpStdError existed.
+  const out = renderTuneLogHtml([logEntryFixture()]);
+  assert.match(out, /±0\.40/);
+});
+
+test('renderTuneLogHtml flags an entry that misses, without hiding it', () => {
+  // A rejected-looking entry still belongs in the log: it may be the one that suits a purpose the
+  // loss function cannot see.
+  const out = renderTuneLogHtml([logEntryFixture({
+    achieved: { ...logEntryFixture().achieved, rtp: 101.4, rtpError: 5.4, withinRtpTolerance: false },
+    violations: { ordering: 2, limits: 0, spacing: 0 },
+  })]);
+  assert.match(out, /101\.40%/);
+  assert.match(out, /RTP off by 5\.40pp/);
+  assert.match(out, /2 ordering/);
+});
+
+test('renderTuneLogHtml orders newest first and offers per-entry and whole-log export', () => {
+  const out = renderTuneLogHtml([logEntryFixture({ index: 1 }), logEntryFixture({ index: 2 })]);
+  assert.ok(out.indexOf('#2') < out.indexOf('#1'), 'the most recent accepted candidate leads');
+  assert.match(out, /tune-log-copy" data-index="2"/);
+  assert.match(out, /tune-log-export" data-index="1"/);
+  assert.match(out, /id="tune-log-copy-all"/);
+  assert.match(out, /id="tune-log-export-all"/);
+  assert.match(out, /became the best \(2\)/);
+});
+
+test('renderTuneLogHtml renders nothing before anything has been accepted', () => {
+  assert.equal(renderTuneLogHtml([]), '');
+  assert.equal(renderTuneLogHtml(null), '');
 });

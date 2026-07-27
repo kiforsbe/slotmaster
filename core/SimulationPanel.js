@@ -7,6 +7,7 @@ import { tuneFrequencies } from './SpinSimulator.js';
 import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
 import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent, volatilityBandToSigma } from './TuningUnits.js';
 import { describePlayerExperience } from './PlayerExperience.js';
+import { createTuneLogEntry, describeTuneEntryQuality, tuneLogToJson, exportTuneLogJson } from './TuneLog.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
@@ -64,6 +65,56 @@ const PENALTY_INTENTS = [
     title: "How hard the search works to keep the trigger rate inside its target band. Phase 2 never tunes trigger symbols directly, so on a line-pay game this cannot move and can stay Off. On a CASCADE game it moves a lot: the other symbols' weights control how readily clusters form, which controls cascade depth, and every cascade refills the grid with fresh chances to draw the scatter. Measured on Candy Frenzy, reweighting only the candies swings the trigger rate from 0.75% to 2.04%.",
   },
 ];
+
+/**
+ * The accepted-best history, as a browsable list. Pure - returns HTML.
+ *
+ * Ordered newest first, because the last accepted candidate is the one the run is about to hand
+ * back and therefore the one most likely to be under scrutiny. Each row leads with its verdict, so
+ * "is any of this any good" is answerable by scanning one column rather than reading eight numbers
+ * per entry.
+ */
+export function renderTuneLogHtml(entries) {
+  if (!entries?.length) return '';
+  const rows = [...entries].reverse().map(e => {
+    const q = describeTuneEntryQuality(e);
+    const shape = e.shape
+      ? `${e.shape.volatilityIndex.toFixed(1)}x ${esc(e.shape.volatilityBand)} · hit ${(e.shape.hitRate * 100).toFixed(0)}% · max ${e.shape.maxWin.toFixed(0)}x · top1% ${(e.shape.top1PctShare * 100).toFixed(0)}%`
+      : 'shape not measured';
+    return `<tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+        <td style="padding: 5px 8px 5px 0; white-space: nowrap; color: #888; font-size: 0.9em;">#${e.index}<br><span style="font-size: 0.85em;">step ${e.step}${e.stage ? ` · ${esc(e.stage)}` : ''}</span></td>
+        <td style="padding: 5px 8px 5px 0; white-space: nowrap;">
+          <span style="color: ${e.achieved.withinRtpTolerance ? '#7fd97f' : '#e6b800'}; font-weight: bold;">${e.achieved.rtp != null ? `${e.achieved.rtp.toFixed(2)}%` : '—'}</span>
+          <span style="color: #777; font-size: 0.85em;"> ±${e.measurement.trialRtpStdError.toFixed(2)}</span><br>
+          <span style="color: ${e.achieved.withinTriggerTolerance ? '#9ab' : '#e6b800'}; font-size: 0.85em;">${e.achieved.spinsPerTrigger != null ? `1 in ${Math.round(e.achieved.spinsPerTrigger)}` : 'no bonus'}</span>
+        </td>
+        <td style="padding: 5px 8px 5px 0; color: #9ab; font-size: 0.85em;">${shape}</td>
+        <td style="padding: 5px 8px 5px 0; white-space: nowrap; color: #aaa; font-size: 0.85em;">loss ${e.loss.total != null ? e.loss.total.toFixed(4) : '—'}</td>
+        <td style="padding: 5px 8px 5px 0; font-size: 0.85em; color: ${q.ok ? '#7fd97f' : '#e6b800'};">${q.ok ? '✓' : '⚠'} ${esc(q.verdict)}</td>
+        <td style="padding: 5px 0; white-space: nowrap;">
+          <button class="btn-icon tune-log-copy" data-index="${e.index}" style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">COPY</button>
+          <button class="btn-icon tune-log-export" data-index="${e.index}" style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">JSON</button>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `<div style="background: rgba(255,255,255,0.05); border-left: 3px solid #c58fff; border-radius: 6px; padding: 10px 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px;">
+        <span style="font-size: 0.72em; letter-spacing: 0.08em; text-transform: uppercase; color: #c58fff;">Every config that became the best (${entries.length})</span>
+        <span style="display: flex; gap: 6px;">
+          <button id="tune-log-copy-all" class="btn-icon" style="padding: 4px 10px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.25); color: #ddd;">COPY ALL</button>
+          <button id="tune-log-export-all" class="btn-icon" style="padding: 4px 10px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.25); color: #ddd;">EXPORT ALL JSON</button>
+        </span>
+      </div>
+      <div style="font-size: 0.75em; color: #888; margin-bottom: 8px;">
+        The search keeps whichever candidate has the lowest <em>loss</em> &mdash; a weighted blend. An earlier
+        entry here may suit you better; each carries its own error bar, payout shape and violations so you can tell.
+      </div>
+      <div style="max-height: 260px; overflow-y: auto;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.85em;">${rows}</table>
+      </div>
+    </div>`;
+}
 
 /**
  * "Did I get what I asked for?", answered in one glance before any of the detail.
@@ -1219,12 +1270,18 @@ ${PENALTY_INTENTS.map(p => `
           <span title="Accept/reject is decided on Loss (lower always wins), not RTP alone: Loss = RTP error + (ordering penalty × its weight) + (limit penalty × its weight) + (uniformity penalty × its weight). The bar below shows what's actually contributing to it." style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px; cursor: help; border-bottom: 1px dotted #666;">Best</span>
           <div id="tune-live-stats-best" style="font-size: 1.3em; font-weight: bold; margin-top: 2px;">—</div>
           <div id="tune-live-stats-best-improved" style="font-size: 0.72em; margin-top: 8px; min-height: 1.3em;"></div>
+          <!-- Every config that ever became the best, kept rather than overwritten. The search
+               keeps whichever candidate has the lowest LOSS, which is a weighted blend - the one
+               that best serves what a developer actually cares about is often an earlier one, and
+               until now it was discarded the moment something scored better. -->
+          <button id="tune-best-log-btn" class="btn-icon" style="display: none; margin-top: 8px; padding: 4px 10px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.25); color: #ddd;"></button>
         </div>
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
           <div style="font-size: 0.7em; color: #999; text-transform: uppercase; letter-spacing: 0.5px;">Violations (best)</div>
           <div id="tune-live-stats-violations" style="font-size: 0.85em; font-weight: 600; margin-top: 6px; line-height: 1.6;">—</div>
         </div>
       </div>
+      <div id="tune-best-log" style="display: none; margin-top: 12px;"></div>
       <div id="tune-live-table" style="display: none; margin-top: 12px;"></div>
       <div id="tune-progress-log" style="display: none; margin-top: 12px; max-height: 220px; overflow-y: auto; font-family: monospace; font-size: 1.05em; line-height: 1.5; background: rgba(0,0,0,0.3); padding: 8px; border-radius: 6px;"></div>
       <div id="tune-results"></div>
@@ -1549,6 +1606,50 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   // earlier phase's without either having to know how the other is drawn.
   const diagnosisEl = tuneContainer.querySelector('#tune-diagnosis');
   const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null, structuralRecommendation: null, lossPreview: null };
+  // Every candidate the search accepted as its new best, kept rather than overwritten - see
+  // core/TuneLog.js for why the final answer alone is not enough.
+  const tuneLog = [];
+  const bestLogEl = tuneContainer.querySelector('#tune-best-log');
+  const bestLogBtn = tuneContainer.querySelector('#tune-best-log-btn');
+  let bestLogOpen = false;
+  const tuneLogMeta = () => ({ game: tuneConfig.gameName ?? null, inputParameters: lastDiagnostics?.inputParameters ?? null });
+  const copyToClipboard = async (text, btn) => {
+    try { await navigator.clipboard.writeText(text); } catch (err) { /* clipboard blocked - fall through */ }
+    const original = btn.textContent;
+    btn.textContent = 'COPIED!';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  };
+  function renderTuneLog() {
+    if (!bestLogEl || !bestLogBtn) return;
+    bestLogBtn.style.display = tuneLog.length > 0 ? 'inline-block' : 'none';
+    bestLogBtn.textContent = `${bestLogOpen ? 'HIDE' : 'VIEW'} ${tuneLog.length} ACCEPTED`;
+    bestLogEl.style.display = bestLogOpen && tuneLog.length > 0 ? 'block' : 'none';
+    if (!bestLogOpen || tuneLog.length === 0) return;
+    bestLogEl.innerHTML = renderTuneLogHtml(tuneLog);
+    // Rebuilt markup means fresh elements every time, so handlers are attached here rather than
+    // once - and `.onclick` rather than addEventListener so a re-render cannot stack them up.
+    bestLogEl.querySelectorAll('.tune-log-copy').forEach(b => {
+      b.onclick = () => {
+        const e = tuneLog.find(x => x.index === Number(b.dataset.index));
+        if (e) copyToClipboard(tuneLogToJson([e], tuneLogMeta()), b);
+      };
+    });
+    bestLogEl.querySelectorAll('.tune-log-export').forEach(b => {
+      b.onclick = () => {
+        const e = tuneLog.find(x => x.index === Number(b.dataset.index));
+        if (e) exportTuneLogJson([e], tuneLogMeta());
+      };
+    });
+    const copyAll = bestLogEl.querySelector('#tune-log-copy-all');
+    if (copyAll) copyAll.onclick = () => copyToClipboard(tuneLogToJson(tuneLog, tuneLogMeta()), copyAll);
+    const exportAll = bestLogEl.querySelector('#tune-log-export-all');
+    if (exportAll) exportAll.onclick = () => exportTuneLogJson(tuneLog, tuneLogMeta());
+  }
+  if (bestLogBtn) bestLogBtn.onclick = () => { bestLogOpen = !bestLogOpen; renderTuneLog(); };
+  // Set once the run finishes; the log's export header wants the resolved parameters, and they do
+  // not exist until then. An export taken mid-run simply carries a null run header rather than a
+  // wrong one.
+  let lastDiagnostics = null;
   function renderDiagnosis() {
     if (!diagnosisEl) return;
     const html = renderDiagnosisHtml(diagnosis);
@@ -1721,6 +1822,9 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   liveStatsCurrentProgressBarEl.style.width = '0%';
   liveStatsBestEl.textContent = '—';
   liveStatsBestImprovedEl.innerHTML = '';
+  tuneLog.length = 0;
+  bestLogOpen = false;
+  renderTuneLog();
   liveStatsViolationsEl.textContent = '—';
   // Hidden for a diagnosis: it renders the per-reel frequencies with "current"/"best" gauges, and
   // a diagnosis produces neither. Left visible it says a tune happened when none did.
@@ -2306,6 +2410,20 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           lastBestChangeSummary = changes;
           previousBestSnapshot = bestSnapshot;
           previousBestCandidateRef = bestCandidate;
+          // Recorded HERE rather than in the engine: this is already the one place that knows a
+          // new candidate was genuinely accepted (rather than merely evaluated), and the engine
+          // has no business keeping a UI history.
+          if (bestCandidate.trial) {
+            tuneLog.push(createTuneLogEntry({
+              index: tuneLog.length + 1,
+              step: i + 1,
+              stage: currentStage,
+              candidate: bestCandidate,
+              options,
+              reelFrequencyTables: bestCandidate.trial,
+            }));
+            renderTuneLog();
+          }
         }
         const changeListHtml = lastBestChangeSummary.map(c =>
           `<span style="color: ${c.improved ? '#7fd97f' : '#ff8080'};">${c.improved ? '▲' : '▼'} ${c.label} ${c.improved ? 'improved' : 'worsened'} by ${Math.abs(c.delta).toFixed(4)}</span>`
@@ -2415,6 +2533,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // banner further down - the point is that the variance figure travels WITH the RTP number
     // everywhere it's shown, not just in one dedicated spot a reader might skip past.
     const varianceColor = options.trialsPerPoint <= 1 ? '#888' : (isUnreliable ? '#ff8080' : '#7fd97f');
+    // Now that the run has resolved, exports can carry the parameters that produced it.
+    lastDiagnostics = diagnostics;
+    renderTuneLog();
+
     // "Did I get what I asked for?" first, then "what does that actually feel like?", then the
     // numbers. The diagnostics, the per-iteration table and the log are all still below - their
     // job is reassurance during the wait, not the answer afterwards.
