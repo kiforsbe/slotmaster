@@ -17,9 +17,81 @@ export const MIN_CLUSTER_SIZE = 5;
 export const SCATTER_TRIGGER_COUNT = 3;
 export const FREE_SPINS_AWARD = 10;
 
-// 5 breakpoints since a cluster can run all the way up to 49 cells on this 7x7 grid - not a
-// small fixed count like a payline game's payout[i] array.
-const REGULAR_PAYOUT = [
+// 11 breakpoints since a cluster can run all the way up to 49 cells on this 7x7 grid - not a
+// small fixed count like a payline game's payout[i] array. The top tier is "15+": every cluster
+// from 15 cells to the full 49 pays the same, so the ladder does not need a tier per size.
+//
+// Every symbol carries its OWN ladder rather than sharing one of two group ladders. That makes
+// the seven symbols strictly ranked by payout (cottoncandy 300x down to chocolate 40x) where
+// they used to be two tied groups of three and four, and symbol ranking is exactly what the
+// tuner's ordering preference reads - see checkPayoutLadders in core/TuningValidation.js, which
+// ranks on the LAST tier only.
+const COTTONCANDY_PAYOUT = [
+  { min:  5, multiplier:   2.00 },
+  { min:  6, multiplier:   3.00 },
+  { min:  7, multiplier:   3.00 },
+  { min:  8, multiplier:   3.50 },
+  { min:  9, multiplier:   4.00 },
+  { min: 10, multiplier:  10.00 },
+  { min: 11, multiplier:  15.00 },
+  { min: 12, multiplier:  30.00 },
+  { min: 13, multiplier:  70.00 },
+  { min: 14, multiplier: 140.00 },
+  { min: 15, multiplier: 300.00 },
+];
+const GUM_PAYOUT = [
+  { min:  5, multiplier:   1.50 },
+  { min:  6, multiplier:   2.00 },
+  { min:  7, multiplier:   2.00 },
+  { min:  8, multiplier:   2.50 },
+  { min:  9, multiplier:   4.00 },
+  { min: 10, multiplier:   8.00 },
+  { min: 11, multiplier:  12.00 },
+  { min: 12, multiplier:  25.00 },
+  { min: 13, multiplier:  60.00 },
+  { min: 14, multiplier: 120.00 },
+  { min: 15, multiplier: 200.00 },
+];
+const CAKE_PAYOUT = [
+  { min:  5, multiplier:   1.00 },
+  { min:  6, multiplier:   1.50 },
+  { min:  7, multiplier:   1.50 },
+  { min:  8, multiplier:   2.00 },
+  { min:  9, multiplier:   2.50 },
+  { min: 10, multiplier:   6.00 },
+  { min: 11, multiplier:   9.00 },
+  { min: 12, multiplier:  20.00 },
+  { min: 13, multiplier:  40.00 },
+  { min: 14, multiplier:  80.00 },
+  { min: 15, multiplier: 120.00 },
+];
+const MINT_PAYOUT = [
+  { min:  5, multiplier:   0.80 },
+  { min:  6, multiplier:   1.00 },
+  { min:  7, multiplier:   1.50 },
+  { min:  8, multiplier:   2.00 },
+  { min:  9, multiplier:   2.50 },
+  { min: 10, multiplier:   4.00 },
+  { min: 11, multiplier:   6.00 },
+  { min: 12, multiplier:  10.00 },
+  { min: 13, multiplier:  20.00 },
+  { min: 14, multiplier:  40.00 },
+  { min: 15, multiplier:  80.00 },
+];
+const GUMMY_PAYOUT = [
+  { min:  5, multiplier:   0.60 },
+  { min:  6, multiplier:   0.60 },
+  { min:  7, multiplier:   0.80 },
+  { min:  8, multiplier:   1.50 },
+  { min:  9, multiplier:   2.00 },
+  { min: 10, multiplier:   3.00 },
+  { min: 11, multiplier:   5.00 },
+  { min: 12, multiplier:   8.00 },
+  { min: 13, multiplier:  16.00 },
+  { min: 14, multiplier:  30.00 },
+  { min: 15, multiplier:  60.00 },
+];
+const BEAN_PAYOUT = [
   { min:  5, multiplier:   0.50 },
   { min:  6, multiplier:   0.60 },
   { min:  7, multiplier:   0.80 },
@@ -32,50 +104,45 @@ const REGULAR_PAYOUT = [
   { min: 14, multiplier:  24.00 },
   { min: 15, multiplier:  50.00 },
 ];
-const PREMIUM_PAYOUT = [
-  { min:  5, multiplier:   1.50 },
-  { min:  6, multiplier:   2.00 },
-  { min:  7, multiplier:   2.50 },
-  { min:  8, multiplier:   3.00 },
-  { min:  9, multiplier:   4.00 },
-  { min: 10, multiplier:   8.00 },
-  { min: 11, multiplier:  12.00 },
-  { min: 12, multiplier:  25.00 },
-  { min: 13, multiplier:  60.00 },
-  { min: 14, multiplier: 120.00 },
-  { min: 15, multiplier: 200.00 },
+const CHOCOLATE_PAYOUT = [
+  { min:  5, multiplier:   0.40 },
+  { min:  6, multiplier:   0.50 },
+  { min:  7, multiplier:   0.60 },
+  { min:  8, multiplier:   0.80 },
+  { min:  9, multiplier:   1.00 },
+  { min: 10, multiplier:   2.00 },
+  { min: 11, multiplier:   3.00 },
+  { min: 12, multiplier:   5.00 },
+  { min: 13, multiplier:  10.00 },
+  { min: 14, multiplier:  20.00 },
+  { min: 15, multiplier:  40.00 },
 ];
 
 // chest, clover, and wild exist in the art but are unused in v1 - excluded here entirely,
 // so they never appear on a reel or in the paytable.
 export const PAYTABLE = {
-  cottoncandy: { type: 'premium', clusterPayout: PREMIUM_PAYOUT, friendlyName: 'Cotton Candy' },
-  gum:         { type: 'premium', clusterPayout: PREMIUM_PAYOUT, friendlyName: 'Bubble Gum' },
-  //crystal:     { type: 'premium', clusterPayout: PREMIUM_PAYOUT, friendlyName: 'Sugar Crystal' },
-  //rocket:      { type: 'premium', clusterPayout: PREMIUM_PAYOUT, friendlyName: 'Candy Rocket' },
-  //crown:       { type: 'premium', clusterPayout: PREMIUM_PAYOUT, friendlyName: 'Candy Crown' },
-  cake:        { type: 'premium', clusterPayout: PREMIUM_PAYOUT, friendlyName: 'Cake Slice' },
-  mint:        { type: 'regular', clusterPayout: REGULAR_PAYOUT, friendlyName: 'Mint' },
-  gummy:       { type: 'regular', clusterPayout: REGULAR_PAYOUT, friendlyName: 'Gummy Bear' },
-  bean:        { type: 'regular', clusterPayout: REGULAR_PAYOUT, friendlyName: 'Jelly Bean' },
-  chocolate:   { type: 'regular', clusterPayout: REGULAR_PAYOUT, friendlyName: 'Chocolate' },
-  //chewy:       { type: 'regular', clusterPayout: REGULAR_PAYOUT, friendlyName: 'Chewy Candy' },
-  //cherry:      { type: 'regular', clusterPayout: REGULAR_PAYOUT, friendlyName: 'Cherry Candy' },
+  cottoncandy: { type: 'premium', clusterPayout: COTTONCANDY_PAYOUT, friendlyName: 'Cotton Candy' },
+  gum:         { type: 'premium', clusterPayout: GUM_PAYOUT,         friendlyName: 'Bubble Gum' },
+  cake:        { type: 'premium', clusterPayout: CAKE_PAYOUT,        friendlyName: 'Cake Slice' },
+  mint:        { type: 'regular', clusterPayout: MINT_PAYOUT,        friendlyName: 'Mint' },
+  gummy:       { type: 'regular', clusterPayout: GUMMY_PAYOUT,       friendlyName: 'Gummy Bear' },
+  bean:        { type: 'regular', clusterPayout: BEAN_PAYOUT,        friendlyName: 'Jelly Bean' },
+  chocolate:   { type: 'regular', clusterPayout: CHOCOLATE_PAYOUT,   friendlyName: 'Chocolate' },
   bonus:       { type: 'scatter', paymode: 'any', triggerFreeSpins: true, friendlyName: 'Bonus' },
 };
 
 // ---- Tuned 2026-07-27 ----
-// Achieved: RTP 95.94%  |  free-spin trigger 0.464%
+// Achieved: RTP 96.17%  |  free-spin trigger 0.439%
 //
 // To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
 // same reel geometry, since strips are generated from them:
 //   searchSeed 12345   reelSeeds [101, 202, 303, 404, 505, 606, 707]
 //   reelLength 500   reels 7 x 7 rows
-//   target RTP 96% +/-1.5   target trigger 0.4% +/-0.15
+//   target RTP 96% +/-1.5   target trigger 0.5% +/-0.15
 //   250,000 spins x 2 trials   cmaes, max 50 iterations
-//   initial weights: provided   max RTP std error 1
+//   initial weights: uniform   max RTP std error 1
 //   reelCoupling linked   maxReelDeviation 0.25
-//   loss weights (normalized): ordering 1, limit 1, uniformity 0, stdError 0, triggerRate 1, spacing 1
+//   loss weights (normalized): ordering 1, limit 1, uniformity 1, stdError 0, triggerRate 1, spacing 1
 //   ordering bias by reel: [0, 0, 0, 0, 0, 0, 0]
 //
 // REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
@@ -85,13 +152,13 @@ export const REEL_LENGTH = 500;
 export const FREQUENCY_REEL1 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.06673 },
-    gum:         { frequency: 0.0803 },
-    cake:        { frequency: 0.04489 },
-    mint:        { frequency: 0.08262 },
-    gummy:       { frequency: 0.09866 },
-    bean:        { frequency: 0.0411 },
-    chocolate:   { frequency: 0.1032 },
+    cottoncandy: { frequency: 0.0573 },
+    gum:         { frequency: 0.0542 },
+    cake:        { frequency: 0.1067 },
+    mint:        { frequency: 0.0684 },
+    gummy:       { frequency: 0.08297 },
+    bean:        { frequency: 0.08209 },
+    chocolate:   { frequency: 0.06583 },
     bonus:       { frequency: 0.003908, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -99,13 +166,13 @@ export const FREQUENCY_REEL1 = {
 export const FREQUENCY_REEL2 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.06674 },
-    gum:         { frequency: 0.08031 },
-    cake:        { frequency: 0.0449 },
-    mint:        { frequency: 0.08263 },
-    gummy:       { frequency: 0.09868 },
-    bean:        { frequency: 0.0411 },
-    chocolate:   { frequency: 0.1032 },
+    cottoncandy: { frequency: 0.05731 },
+    gum:         { frequency: 0.0542 },
+    cake:        { frequency: 0.1067 },
+    mint:        { frequency: 0.06841 },
+    gummy:       { frequency: 0.08298 },
+    bean:        { frequency: 0.0821 },
+    chocolate:   { frequency: 0.06583 },
     bonus:       { frequency: 0.002926, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -113,13 +180,13 @@ export const FREQUENCY_REEL2 = {
 export const FREQUENCY_REEL3 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.03708 },
-    gum:         { frequency: 0.04461 },
-    cake:        { frequency: 0.02494 },
-    mint:        { frequency: 0.0459 },
-    gummy:       { frequency: 0.05482 },
-    bean:        { frequency: 0.02283 },
-    chocolate:   { frequency: 0.05736 },
+    cottoncandy: { frequency: 0.03184 },
+    gum:         { frequency: 0.03011 },
+    cake:        { frequency: 0.05929 },
+    mint:        { frequency: 0.03801 },
+    gummy:       { frequency: 0.0461 },
+    bean:        { frequency: 0.04561 },
+    chocolate:   { frequency: 0.03658 },
     bonus:       { frequency: 0.003271, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -127,13 +194,13 @@ export const FREQUENCY_REEL3 = {
 export const FREQUENCY_REEL4 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.06671 },
-    gum:         { frequency: 0.08028 },
-    cake:        { frequency: 0.04488 },
-    mint:        { frequency: 0.0826 },
-    gummy:       { frequency: 0.09863 },
-    bean:        { frequency: 0.04108 },
-    chocolate:   { frequency: 0.1032 },
+    cottoncandy: { frequency: 0.05729 },
+    gum:         { frequency: 0.05418 },
+    cake:        { frequency: 0.1067 },
+    mint:        { frequency: 0.06839 },
+    gummy:       { frequency: 0.08295 },
+    bean:        { frequency: 0.08208 },
+    chocolate:   { frequency: 0.06581 },
     bonus:       { frequency: 0.002925, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -141,13 +208,13 @@ export const FREQUENCY_REEL4 = {
 export const FREQUENCY_REEL5 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.06672 },
-    gum:         { frequency: 0.08029 },
-    cake:        { frequency: 0.04489 },
-    mint:        { frequency: 0.08261 },
-    gummy:       { frequency: 0.09865 },
-    bean:        { frequency: 0.04109 },
-    chocolate:   { frequency: 0.1032 },
+    cottoncandy: { frequency: 0.0573 },
+    gum:         { frequency: 0.05419 },
+    cake:        { frequency: 0.1067 },
+    mint:        { frequency: 0.0684 },
+    gummy:       { frequency: 0.08296 },
+    bean:        { frequency: 0.08209 },
+    chocolate:   { frequency: 0.06582 },
     bonus:       { frequency: 0.002925, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -155,13 +222,13 @@ export const FREQUENCY_REEL5 = {
 export const FREQUENCY_REEL6 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.06674 },
-    gum:         { frequency: 0.08031 },
-    cake:        { frequency: 0.04489 },
-    mint:        { frequency: 0.08263 },
-    gummy:       { frequency: 0.09867 },
-    bean:        { frequency: 0.0411 },
-    chocolate:   { frequency: 0.1032 },
+    cottoncandy: { frequency: 0.05731 },
+    gum:         { frequency: 0.0542 },
+    cake:        { frequency: 0.1067 },
+    mint:        { frequency: 0.06841 },
+    gummy:       { frequency: 0.08298 },
+    bean:        { frequency: 0.0821 },
+    chocolate:   { frequency: 0.06583 },
     bonus:       { frequency: 0.002926, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -169,13 +236,13 @@ export const FREQUENCY_REEL6 = {
 export const FREQUENCY_REEL7 = {
   defaults: { minGap: 2, maxStack: 3, minStack: 2, stackChance: 0.15, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
-    cottoncandy: { frequency: 0.06674 },
-    gum:         { frequency: 0.08031 },
-    cake:        { frequency: 0.04489 },
-    mint:        { frequency: 0.08263 },
-    gummy:       { frequency: 0.09867 },
-    bean:        { frequency: 0.0411 },
-    chocolate:   { frequency: 0.1032 },
+    cottoncandy: { frequency: 0.05731 },
+    gum:         { frequency: 0.0542 },
+    cake:        { frequency: 0.1067 },
+    mint:        { frequency: 0.06841 },
+    gummy:       { frequency: 0.08298 },
+    bean:        { frequency: 0.0821 },
+    chocolate:   { frequency: 0.06583 },
     bonus:       { frequency: 0.002926, minGap: 8, maxStack: 1, minStack: 1, maxFrequency: 0.025 },
   },
 };
@@ -384,7 +451,7 @@ async function initGame() {
 
   updateUI();
   setupUIHandlers();
-  buildPaytableContent();
+  buildPaytableContent(themeAssets);
 }
 
 function updateUI() {
@@ -531,40 +598,65 @@ function setupUIHandlers() {
   }
 }
 
-function buildPaytableContent() {
+// One tile out of the spritesheet, positioned by CSS rather than drawn: the paytable opens before
+// the engine has necessarily finished loading its own copy, and a <canvas> here would need that.
+// Returns '' when the theme has no tile for the symbol, so a missing sprite costs a name, not a row.
+function symbolIconHtml(symbol, themeAssets, size = 36) {
+  const tile = themeAssets?.symbolsConfig?.[symbol];
+  if (!tile || !themeAssets.spritesheetUrl) return '';
+  const scale = size / tile.w;
+  return `<span class="paytable-icon" style="width: ${size}px; height: ${Math.round(tile.h * scale)}px;">`
+    + `<img src="${themeAssets.spritesheetUrl}" alt="" style="transform: scale(${scale}) translate(${-tile.x}px, ${-tile.y}px);">`
+    + `</span>`;
+}
+
+function formatMultiplier(multiplier) {
+  return `${Number(multiplier.toFixed(2))}x`;
+}
+
+// A matrix, not a list of cards: cluster size down the side, symbol across the top. Every symbol
+// carries its own ladder, so "what does a cluster of 12 pay?" is a row here where it used to be
+// seven separate lookups. Both axes are derived from PAYTABLE rather than hardcoded - a symbol
+// added or a breakpoint moved changes this table without anyone remembering to edit it.
+function buildPaytableContent(themeAssets) {
   const container = document.getElementById('paytable-grid-content');
-  container.innerHTML = '';
+  const topTierOf = (symbol) => PAYTABLE[symbol].clusterPayout.at(-1).multiplier;
 
-  for (const symbol of Object.keys(PAYTABLE)) {
-    const meta = PAYTABLE[symbol];
-    const item = document.createElement('div');
-    item.className = 'paytable-item';
+  // Columns run premium-to-cheap, ranked on the top tier - the same ranking the tuner's ordering
+  // preference uses (see checkPayoutLadders in core/TuningValidation.js), so the paytable a player
+  // reads and the frequencies the reels were built from are ordered by the same rule.
+  const paying = Object.keys(PAYTABLE)
+    .filter(s => Array.isArray(PAYTABLE[s].clusterPayout) && PAYTABLE[s].clusterPayout.length > 0)
+    .sort((a, b) => topTierOf(b) - topTierOf(a));
 
-    const title = document.createElement('span');
-    title.className = 'paytable-symbol-name';
-    title.textContent = meta.friendlyName || symbol;
-    item.appendChild(title);
+  const sizes = [...new Set(paying.flatMap(s => PAYTABLE[s].clusterPayout.map(t => t.min)))]
+    .sort((a, b) => a - b);
+  const topSize = sizes.at(-1);
 
-    const payLines = document.createElement('div');
-    payLines.className = 'paytable-payouts';
+  const head = `<th class="paytable-size">Cluster</th>` + paying.map(s =>
+    `<th>${symbolIconHtml(s, themeAssets)}<span class="paytable-col-name">${PAYTABLE[s].friendlyName || s}</span></th>`).join('');
 
-    let content = '';
-    if (meta.clusterPayout) {
-      meta.clusterPayout.forEach(tier => {
-        const label = tier.min >= 25 ? `${tier.min}+` : (() => {
-          const next = meta.clusterPayout.find(t => t.min > tier.min);
-          return next ? `${tier.min}-${next.min - 1}` : `${tier.min}+`;
-        })();
-        content += `<strong>${label}:</strong> ${tier.multiplier}x<br>`;
-      });
-    } else {
-      content += `<em style="color:#ff6ec7; font-size:10px;">Pays anywhere. 3+ triggers ${FREE_SPINS_AWARD} Free Spins - winning tiles leave a growing multiplier</em>`;
-    }
+  // Biggest first: the top row is what anyone opens a paytable to find.
+  const rows = [...sizes].reverse().map(size => {
+    // The largest breakpoint has no upper bound - it pays for every cluster from there up to all
+    // 49 cells - so it is the only row that gets a "+".
+    const label = size === topSize ? `${size}+` : String(size);
+    const cells = paying.map(s => {
+      const tier = PAYTABLE[s].clusterPayout.filter(t => t.min <= size).at(-1);
+      return `<td>${tier ? formatMultiplier(tier.multiplier) : '&mdash;'}</td>`;
+    }).join('');
+    return `<tr${size === topSize ? ' class="paytable-top-row"' : ''}><th class="paytable-size">${label}</th>${cells}</tr>`;
+  }).join('');
 
-    payLines.innerHTML = content;
-    item.appendChild(payLines);
-    container.appendChild(item);
-  }
+  // Anything without a ladder pays by its own rule and would be a column of dashes.
+  const notes = Object.keys(PAYTABLE)
+    .filter(s => !Array.isArray(PAYTABLE[s].clusterPayout))
+    .map(s => `<div class="paytable-note">${symbolIconHtml(s, themeAssets, 29)}<span><strong style="color: var(--gold);">`
+      + `${PAYTABLE[s].friendlyName || s}</strong> pays anywhere on the grid. ${SCATTER_TRIGGER_COUNT}+ triggers `
+      + `${FREE_SPINS_AWARD} Free Spins - winning tiles leave a growing multiplier.</span></div>`)
+    .join('');
+
+  container.innerHTML = `<table class="paytable-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>${notes}`;
 }
 
 if (typeof window !== 'undefined') {

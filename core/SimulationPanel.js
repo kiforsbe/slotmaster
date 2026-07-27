@@ -728,13 +728,14 @@ function formatPayoutForCopy(v) {
 /**
  * Renders a `scaledPaytable` (from tuneFrequencies' `solvePayoutScale`) as paste-ready code.
  *
- * Cluster games declare a small number of SHARED ladders - Candy Frenzy has exactly two,
- * `PREMIUM_PAYOUT` and `REGULAR_PAYOUT`, with six symbols pointing at each - so emitting one
- * literal per symbol would be technically correct and practically useless: the developer's source
- * has two constants to paste over, not twelve object literals to reassemble by hand. Ladders are
- * therefore grouped by VALUE (not by reference, which `scalePaytable`'s per-entry copy has already
- * broken), and each group is named after the `type` its members share - which on the real target
- * game reproduces the source's own constant names exactly.
+ * Cluster games declare one constant per DISTINCT ladder, and how many that is varies: a game may
+ * point six symbols at two shared ladders, or give all seven their own. Emitting one literal per
+ * symbol would be technically correct and practically useless in the first case - the developer's
+ * source has two constants to paste over, not twelve object literals to reassemble by hand.
+ * Ladders are therefore grouped by VALUE (not by reference, which `scalePaytable`'s per-entry copy
+ * has already broken), and each group is named after whatever its members have in common: the sole
+ * symbol when a ladder has only one, otherwise the `type` they share. Both spellings reproduce the
+ * source's own constant names on the real target games.
  *
  * Line-pay games instead carry a distinct `payout` array per symbol with no shared structure to
  * preserve, so those are emitted as per-symbol replacement lines. The asymmetry is deliberate: in
@@ -768,16 +769,25 @@ export function formatScaledPaytableForCopy(scaledPaytable, payoutScale = null) 
   const blocks = [];
   const usedNames = new Set();
   groups.forEach(g => {
-    // Unanimous type -> the name the source almost certainly already uses. Mixed or missing
-    // type -> an indexed fallback, since guessing a name wrong is worse than not guessing.
-    let base = g.types.size === 1 ? `${[...g.types][0].toUpperCase()}_PAYOUT` : `CLUSTER_PAYOUT_${blocks.length + 1}`;
+    // One symbol -> name it after that symbol, since a per-symbol ladder is what the source
+    // declares. Several symbols with a unanimous type -> the name a shared ladder almost certainly
+    // already uses. Anything else -> an indexed fallback, since guessing a name wrong is worse
+    // than not guessing. Naming every group by type would emit PREMIUM_PAYOUT_2/_3 for a game with
+    // a ladder per symbol - names matching nothing in the file they are meant to be pasted into.
+    const solo = g.symbols.length === 1;
+    const base = solo ? `${g.symbols[0].toUpperCase()}_PAYOUT`
+      : g.types.size === 1 ? `${[...g.types][0].toUpperCase()}_PAYOUT`
+      : `CLUSTER_PAYOUT_${blocks.length + 1}`;
     let name = base;
     for (let n = 2; usedNames.has(name); n++) name = `${base}_${n}`;
     usedNames.add(name);
 
     const minWidth = Math.max(...g.tiers.map(t => String(t.min).length));
     const lines = g.tiers.map(t => `  { min: ${String(t.min).padStart(minWidth)}, multiplier: ${formatPayoutForCopy(t.multiplier)} },`);
-    blocks.push(`// Used by: ${g.symbols.join(', ')}\nexport const ${name} = [\n${lines.join('\n')}\n];`);
+    // The "used by" line is what tells you where to paste a SHARED ladder. On a solo ladder the
+    // constant's own name already says it, and the comment is noise.
+    const usedBy = solo ? '' : `// Used by: ${g.symbols.join(', ')}\n`;
+    blocks.push(`${usedBy}export const ${name} = [\n${lines.join('\n')}\n];`);
   });
 
   if (lineRows.length > 0) {
@@ -918,7 +928,11 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     `// same reel geometry, since strips are generated from them:`,
     `//   searchSeed ${p.searchSeed}   reelSeeds [${(p.reelSeeds ?? []).join(', ')}]`,
     `//   reelLength ${p.reelLength}   reels ${p.reelsCount} x ${p.rowsCount} rows`,
-    `//   target RTP ${p.targetRtp}% +/-${p.rtpTolerancePct}   target trigger ${p.targetTriggerRatePct}% +/-${p.triggerRateTolerancePct}`,
+    // The trigger target is derived from the "1 in N spins" the panel actually asks for, so as a
+    // percentage it is a repeating fraction - printed raw it lands in the header as
+    // "0.5988023952095808%". Rounded, plus the spins form, which is the number to type back in.
+    `//   target RTP ${p.targetRtp}% +/-${p.rtpTolerancePct}   target trigger ${num(p.targetTriggerRatePct)}%`
+      + ` (1 in ${Math.round(pctToSpinsPerTrigger(p.targetTriggerRatePct) ?? 0)}) +/-${p.triggerRateTolerancePct}`,
     `//   ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`,
     `//   initial weights: ${p.initialWeightStrategy}   max RTP std error ${p.maxRtpStdError}`,
     // Coupling changes what the result MEANS, not just how it was found: the same frequencies
@@ -1628,7 +1642,12 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const bestLogEl = tuneContainer.querySelector('#tune-best-log');
   const bestLogBtn = tuneContainer.querySelector('#tune-best-log-btn');
   let bestLogOpen = false;
-  const tuneLogMeta = () => ({ game: tuneConfig.gameName ?? null, inputParameters: lastDiagnostics?.inputParameters ?? null });
+  // Set from the 'input-parameters' progress event at the very start of a run, so the log's
+  // exports carry the run's knobs from the first accepted candidate rather than only after the
+  // run resolves. `lastDiagnostics` is the fallback for a finished run.
+  let liveInputParameters = null;
+  const runInputParameters = () => liveInputParameters ?? lastDiagnostics?.inputParameters ?? null;
+  const tuneLogMeta = () => ({ game: tuneConfig.gameName ?? null, inputParameters: runInputParameters() });
   const copyToClipboard = async (text, btn) => {
     try { await navigator.clipboard.writeText(text); } catch (err) { /* clipboard blocked - fall through */ }
     const original = btn.textContent;
@@ -1652,7 +1671,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         const e = tuneLog.find(x => x.index === Number(b.dataset.index));
         if (!e) return;
         copyToClipboard(formatReelFrequencyTablesForCopy(e.reelFrequencyTables, {
-          inputParameters: lastDiagnostics?.inputParameters ?? {},
+          inputParameters: runInputParameters() ?? {},
           rtp: e.achieved.rtp,
           triggerRatePct: e.achieved.triggerRatePct,
           tuneLogEntry: e,
@@ -2039,6 +2058,14 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
             why: 'a target the current structure cannot reach is not a search problem, and it is cheaper to find out now',
           });
           if (r.trial) updateLiveTable(r.trial, null);
+          return;
+        }
+        // The resolved knobs, arriving before any work starts. Nothing is drawn from them - they
+        // exist so that anything exported WHILE the run is still going (the tune log's COPY JS and
+        // JSON buttons, which are live) carries the parameters that produced it. Waiting for the
+        // run to resolve meant a mid-run copy emitted a header of `undefined`s.
+        if (phase === 'input-parameters') {
+          liveInputParameters = r;
           return;
         }
         // Phase 0a: static config checks, before a single spin is simulated. Rendered first and

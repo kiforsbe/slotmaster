@@ -1513,6 +1513,31 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     signal = null,
   } = options;
 
+  // A snapshot of every resolved (defaults-applied) knob this run is using. Built HERE rather than
+  // beside the `return` it also travels in, and emitted before any work starts, because the things
+  // that consume it are live: the tune log lets a developer copy a candidate's frequencies out
+  // mid-run, and frequencies alone are not a reproducible artifact. Deferring this to the end meant
+  // anything exported before the run resolved carried a header of `undefined`s.
+  //
+  // Deliberately limited to the JSON-safe tuning knobs a user actually configures - not
+  // `winEvaluator`/`mechanic`/`payoutOf`/`onProgress`/`runTrial` (functions, not serializable) or
+  // `paylines` (game layout, not a tuning parameter).
+  const inputParameters = {
+    reelsCount, rowsCount, reelLength, reelSeeds, betPerLine, linesCount,
+    targetRtp, rtpTolerancePct, maxRtpStdError,
+    targetTriggerRatePct, triggerRateTolerancePct,
+    trialSpins, trialsPerPoint, maxIterations,
+    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
+    triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
+    penaltyNormalization, targetVolatility, volatilityTolerance, volatilityPenaltyWeight,
+    reelCoupling, maxReelDeviation,
+    initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
+    stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
+    initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
+    rotateSeedPerGeneration, measureHeadroom, skipValidation,
+    measureSensitivity, sensitivitySpins, sensitivityAt, tuneStructural,
+  };
+
   const orderingBiasFor = (r) => (orderingBiasByReel && orderingBiasByReel[r] != null) ? orderingBiasByReel[r] : -1;
 
   const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -1523,6 +1548,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
   const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
+
+  // First thing out, before validation and before a single spin - a caller that exports anything
+  // mid-run needs these from the start, not once the run resolves.
+  if (onProgress) await onProgress('input-parameters', 0, null, inputParameters, null);
 
   // ---- Phase 0a: config validation ----
   // Pure arithmetic on the config, no reels built and no spins run, so it costs nothing and runs
@@ -3183,25 +3212,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // caller happened to pass explicitly) - lets anything serializing `diagnostics` as JSON (the
   // TUNE FREQUENCIES panel's own `console.log('Frequency tuner diagnostics:', ...)`, a test, a
   // future export feature) show exactly what parameters produced this specific result, without
-  // the reader having to separately track what was typed into the panel at the time. Deliberately
-  // limited to the JSON-safe tuning knobs a user actually configures - not `winEvaluator`/
-  // `mechanic`/`payoutOf`/`onProgress`/`runTrial` (functions, not serializable) or `paylines`
-  // (game layout, not a tuning parameter).
-  const inputParameters = {
-    reelsCount, rowsCount, reelLength, reelSeeds, betPerLine, linesCount,
-    targetRtp, rtpTolerancePct, maxRtpStdError,
-    targetTriggerRatePct, triggerRateTolerancePct,
-    trialSpins, trialsPerPoint, maxIterations,
-    orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
-    triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
-    penaltyNormalization, targetVolatility, volatilityTolerance, volatilityPenaltyWeight,
-    reelCoupling, maxReelDeviation,
-    initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
-    stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
-    initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
-    rotateSeedPerGeneration, measureHeadroom, skipValidation,
-    measureSensitivity, sensitivitySpins, sensitivityAt, tuneStructural,
-  };
+  // the reader having to separately track what was typed into the panel at the time. Built and
+  // emitted at the top of the run (see its declaration) so a mid-run export carries it too.
 
   return {
     reelFrequencyTables: finalReelTables,

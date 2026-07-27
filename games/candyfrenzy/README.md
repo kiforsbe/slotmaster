@@ -37,9 +37,17 @@ this game's own cluster win evaluator (`core/ClusterMath.js`) and free-spins pay
   `renderOrder: 'behind'`, so a tile's badge is only visible while that cell hasn't yet had a
   new symbol land on it (candy sprite art is opaque, so a landed tile hides a `'behind'`
   badge underneath it).
-- **Symbols** — Premium: Cotton Candy, Bubble Gum, Sugar Crystal, Candy Rocket, Candy Crown,
-  Cake Slice. Regular: Mint, Gummy Bear, Jelly Bean, Chocolate, Chewy Candy, Cherry Candy.
-  No wild in this version.
+- **Symbols** — Premium: Cotton Candy, Bubble Gum, Cake Slice. Regular: Mint, Gummy Bear,
+  Jelly Bean, Chocolate. Plus the `bonus` scatter. No wild in this version — the spritesheet
+  carries more art than that (chest, clover, wild), and `game.js` excludes it explicitly so it
+  never reaches a reel.
+- **Payouts.** Every symbol has its own `clusterPayout` ladder, 11 breakpoints from a cluster of
+  5 up to `15+` — which covers everything from 15 cells to all 49, so the ladder needs no tier
+  per size. That makes the seven strictly ranked, Cotton Candy at 300x down to Chocolate at 40x,
+  and symbol ranking is what the tuner's ordering preference reads (`checkPayoutLadders` in
+  `core/TuningValidation.js`, which ranks on the last tier only). The in-game paytable renders
+  them as one matrix — cluster size down the side, symbol across the top — built from `PAYTABLE`
+  rather than hand-written, so a moved breakpoint changes the table without anyone editing it.
 
 ## Dev tooling
 
@@ -49,10 +57,10 @@ built on `core/CascadeSpinMechanic.js`, the cascade sibling of the line-pay game
 RUN SIMULATION reuses the live engine's own `createMultiplierTilesMode()` instance, so a
 simulated free-spins round measures the real persistent-multiplier-tile economics, not a flat
 approximation. TUNE FREQUENCIES runs the same two-phase search (scatter-rate scaling, then a
-joint Nelder-Mead frequency search) every other game's tuner does, ranking symbols by their
-highest `clusterPayout` tier instead of a line-pay N-of-a-kind array. The paytable multipliers
-here are a starting point, not a tuned RTP yet — run TUNE FREQUENCIES in-browser before
-treating them as final.
+joint frequency search) every other game's tuner does, ranking symbols by their highest
+`clusterPayout` tier instead of a line-pay N-of-a-kind array. The frequencies in `game.js` were
+tuned against the ladders above and against `REEL_LENGTH` — change either and they no longer
+mean what their header says they achieved.
 
 ## Debug cheat
 
@@ -61,4 +69,4 @@ next spin's final grid to contain 3 `bonus` symbols, for testing the free-spins 
 retrigger without waiting for a natural hit.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `97dc0d6`._
+_Docs last synced with the codebase: 2026-07-27, commit `281f9ea`._

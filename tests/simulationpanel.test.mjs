@@ -295,29 +295,63 @@ test('renderDiagnosisHtml surfaces a broken payoutScale measurement instead of h
 // rendered result.
 
 test('formatScaledPaytableForCopy groups symbols sharing a payout ladder into one named constant', () => {
-  // Candy Frenzy declares TWO ladders (PREMIUM_PAYOUT, REGULAR_PAYOUT) and points six symbols at
-  // each. Emitting twelve inline copies would be technically correct and practically useless -
-  // the developer's source has two constants to paste over, not twelve object literals to
-  // reassemble. Grouping is by ladder VALUE, so the shared-reference structure survives.
+  // A game that points several symbols at ONE ladder has one constant to paste over, not one
+  // object literal per symbol to reassemble by hand. Grouping is by ladder VALUE, so the
+  // shared-reference structure survives `scalePaytable`'s per-entry copy. Every group here has at
+  // least two members deliberately - a solo ladder is named after its symbol instead, which is a
+  // different rule covered by its own test.
   const PREMIUM = [{ min: 5, multiplier: 0.75 }, { min: 7, multiplier: 1.75 }];
   const REGULAR = [{ min: 5, multiplier: 0.2 }];
   const original = {
     gum:   { type: 'premium', clusterPayout: PREMIUM, friendlyName: 'Bubble Gum' },
     cake:  { type: 'premium', clusterPayout: PREMIUM, friendlyName: 'Cake Slice' },
     mint:  { type: 'regular', clusterPayout: REGULAR, friendlyName: 'Mint' },
+    bean:  { type: 'regular', clusterPayout: REGULAR, friendlyName: 'Jelly Bean' },
     bonus: { type: 'scatter', triggerFreeSpins: true, friendlyName: 'Bonus' },
   };
   const out = formatScaledPaytableForCopy(scalePaytable(original, 0.5), { scale: 0.5 });
 
   assert.equal((out.match(/export const PREMIUM_PAYOUT/g) || []).length, 1,
-    'the six-symbol premium ladder must be emitted once, not once per symbol');
-  assert.match(out, /export const REGULAR_PAYOUT/);
+    'the shared premium ladder must be emitted once, not once per symbol');
+  assert.equal((out.match(/export const REGULAR_PAYOUT/g) || []).length, 1);
   assert.match(out, /multiplier: 0\.375/, 'premium 0.75 x 0.5');
   assert.match(out, /multiplier: 0\.1\b/, 'regular 0.2 x 0.5');
   // Which symbols a ladder belongs to is the only way to know where to paste it.
   assert.match(out, /gum, cake/);
+  assert.match(out, /mint, bean/);
   // A scatter has no payout ladder at all and must not invent one.
   assert.ok(!/bonus/.test(out), 'a symbol with no payout ladder must not appear');
+});
+
+test('the reproducibility header rounds the trigger target and gives it in the unit the panel asks for', () => {
+  // The panel asks for "1 in N spins" and converts, so the percentage is a repeating fraction:
+  // 1 in 167 is 0.5988023952095808%, which is what the header printed verbatim. Nobody types that
+  // back in, and the number they would type - the spins - was missing entirely.
+  const out = formatReelFrequencyTablesForCopy([{ defaults: {}, symbols: { bar: { frequency: 2 } } }], {
+    rtp: 96, triggerRatePct: 0.6,
+    inputParameters: { targetTriggerRatePct: 100 / 167, triggerRateTolerancePct: 0.15, targetRtp: 96, rtpTolerancePct: 1.5 },
+  });
+  assert.ok(!/0\.5988023952095808/.test(out), 'a 16-digit float has no place in pasted source');
+  assert.match(out, /target trigger 0\.5988% \(1 in 167\) \+\/-0\.15/);
+});
+
+test('formatScaledPaytableForCopy names a ladder after its symbol when only one symbol uses it', () => {
+  // Candy Frenzy gives every symbol its OWN ladder, so grouping by type would emit
+  // PREMIUM_PAYOUT, PREMIUM_PAYOUT_2, PREMIUM_PAYOUT_3 - three names matching nothing in the file
+  // they are meant to be pasted into, and two of them silently wrong about which symbol they pay.
+  const original = {
+    cottoncandy: { type: 'premium', clusterPayout: [{ min: 5, multiplier: 2 }, { min: 15, multiplier: 300 }] },
+    gum:         { type: 'premium', clusterPayout: [{ min: 5, multiplier: 1.5 }, { min: 15, multiplier: 200 }] },
+    cake:        { type: 'premium', clusterPayout: [{ min: 5, multiplier: 1 }, { min: 15, multiplier: 120 }] },
+  };
+  const out = formatScaledPaytableForCopy(scalePaytable(original, 0.5), { scale: 0.5 });
+
+  assert.match(out, /export const COTTONCANDY_PAYOUT/);
+  assert.match(out, /export const GUM_PAYOUT/);
+  assert.match(out, /export const CAKE_PAYOUT/);
+  assert.ok(!/PREMIUM_PAYOUT/.test(out), 'a per-symbol ladder must not be named after its type group');
+  assert.ok(!/Used by:/.test(out), "a solo ladder's own name already says which symbol uses it");
+  assert.match(out, /multiplier: 150\b/, 'cottoncandy 300 x 0.5');
 });
 
 test('formatScaledPaytableForCopy emits per-symbol payout arrays for a line-pay paytable', () => {

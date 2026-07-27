@@ -448,6 +448,30 @@ test('tuneFrequencies converges RTP close to target even when baseline data has 
   assert.ok(typeof diagnostics.rtpPhase.orderingViolations === 'object', 'orderingViolations must be reported (possibly empty), never omitted');
 });
 
+test('tuneFrequencies emits its resolved input parameters before any work, not only at the end', async () => {
+  // The tune log lets a developer copy a candidate's frequencies out WHILE the search is still
+  // running, and frequencies alone are not a reproducible artifact - they mean nothing without the
+  // seed, reel length and targets that produced them. When inputParameters existed only on the
+  // returned diagnostics, a mid-run copy emitted a header of literal `undefined`s.
+  const events = [];
+  await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 2000, trialsPerPoint: 1, maxIterations: 2,
+    onProgress: (phase, i, param, r) => { events.push({ phase, r }); },
+  });
+
+  assert.equal(events[0].phase, 'input-parameters',
+    `must arrive before every other event, since a copy can happen at any point: got ${events[0].phase}`);
+  const p = events[0].r;
+  assert.equal(p.reelLength, REEL_LENGTH);
+  assert.deepEqual(p.reelSeeds, REEL_SEEDS);
+  assert.equal(p.targetRtp, 96);
+  // Resolved, not merely echoed: nothing above passed searchAlgorithm or maxRtpStdError.
+  assert.ok(p.searchAlgorithm, 'defaults must be applied, or the header records a knob nobody set');
+  assert.ok(p.maxRtpStdError != null);
+});
+
 test('tuneFrequencies honors a per-reel reversed ordering preference (orderingBiasByReel)', async () => {
   // bias +1 on reel index 1 reverses that reel's preference: a higher-paying symbol should
   // end up no *less* frequent than a lower-paying one there - the opposite of the default -1
@@ -905,7 +929,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // give core/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
     'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
-    'validation', 'sensitivity', 'structural', 'loss-preview',
+    'validation', 'sensitivity', 'structural', 'loss-preview', 'input-parameters',
   ]);
   const offenders = new Set();
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
@@ -1331,7 +1355,10 @@ test('tuneFrequencies fires an "initial" onProgress event before Phase 1, with t
       if (phase === 'initial') initialTrialSymbols = { ...r.trial[0].symbols };
     },
   });
-  assert.equal(phasesSeen[0], 'initial', `expected 'initial' to be the very first onProgress event, got order: ${phasesSeen.slice(0, 3)}`);
+  // 'input-parameters' precedes everything by design - it carries no work, only the knobs the run
+  // resolved - so what this asserts is that 'initial' comes before any phase that does work.
+  const working = phasesSeen.filter(p => p !== 'input-parameters');
+  assert.equal(working[0], 'initial', `expected 'initial' to be the first onProgress event carrying work, got order: ${working.slice(0, 3)}`);
   assert.ok(initialTrialSymbols, "expected the 'initial' event to carry r.trial");
 
   // The preview must match the real search's own starting point exactly - both use the same
