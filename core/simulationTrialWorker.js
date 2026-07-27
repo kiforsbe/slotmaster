@@ -20,7 +20,15 @@ self.onmessage = (event) => {
   const { taskId, config, numSpins, betPerLine, linesCount, rngSeed } = event.data;
   try {
     const { winEvaluatorName, mechanicName, freeSpinsModeName, minClusterSize, scatterTriggerCount, ...simConfig } = config;
-    const winEvaluator = resolveWinEvaluator(winEvaluatorName, simConfig.paytable, simConfig.scatterSymbol, minClusterSize, scatterTriggerCount);
+    const winEvaluator = resolveWinEvaluator(
+      winEvaluatorName,
+      simConfig.paytable,
+      simConfig.scatterSymbol,
+      minClusterSize,
+      scatterTriggerCount,
+      simConfig.paylines,
+      simConfig.wildSymbol
+    );
     const mechanic = resolveMechanic(mechanicName);
     const freeSpinsMode = resolveFreeSpinsMode(freeSpinsModeName);
     const rng = rngSeed != null ? createSeededRng(rngSeed) : Math.random;

@@ -21,6 +21,32 @@ const WIN_EVALUATORS = { checkWins, checkWildLineWins };
 const CLUSTER_WIN_EVALUATOR_BUILDERS = {
   checkClusterWins: (paytable, scatterSymbol, minClusterSize, scatterTriggerCount) =>
     (grid) => checkClusterWins(grid, paytable, minClusterSize, scatterSymbol, scatterTriggerCount),
+  checkLineCascadeWins: (paytable, scatterSymbol, minClusterSize, scatterTriggerCount, paylines, wildSymbol) =>
+    (grid) => {
+      const results = checkWins(grid, paytable, paylines, paylines.length, wildSymbol, scatterSymbol, scatterTriggerCount);
+      const clusterWins = [];
+      results.lineWins.forEach(lw => {
+        clusterWins.push({
+          symbol: lw.symbol,
+          count: lw.count,
+          payout: lw.payout / paylines.length,
+          winningPositions: lw.winningPositions
+        });
+      });
+      if (results.scatterWin) {
+        clusterWins.push({
+          symbol: results.scatterWin.symbol,
+          count: results.scatterWin.count,
+          payout: results.scatterWin.payout,
+          winningPositions: results.scatterWin.winningPositions
+        });
+      }
+      return {
+        clusterWins,
+        totalPayoutMultiplier: (results.totalLinePayoutMultiplier / paylines.length) + (results.scatterWin ? results.scatterWin.payout : 0),
+        scatterWin: results.scatterWin
+      };
+    }
 };
 
 const MECHANICS = { line: LineMechanic, cascade: CascadeSpinMechanic };
@@ -29,10 +55,10 @@ const MECHANICS = { line: LineMechanic, cascade: CascadeSpinMechanic };
 // see FreeSpinsModes.js's own doc - so reconstructing with defaults here is exact, not lossy.
 const FREE_SPINS_MODE_BUILDERS = { flatMultiplier: () => createFlatMultiplierMode(), multiplierTiles: () => createMultiplierTilesMode() };
 
-export function resolveWinEvaluator(winEvaluatorName, paytable, scatterSymbol, minClusterSize, scatterTriggerCount) {
+export function resolveWinEvaluator(winEvaluatorName, paytable, scatterSymbol, minClusterSize, scatterTriggerCount, paylines, wildSymbol) {
   if (!winEvaluatorName) return undefined;
   if (CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName]) {
-    return CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName](paytable, scatterSymbol, minClusterSize, scatterTriggerCount);
+    return CLUSTER_WIN_EVALUATOR_BUILDERS[winEvaluatorName](paytable, scatterSymbol, minClusterSize, scatterTriggerCount, paylines, wildSymbol);
   }
   return WIN_EVALUATORS[winEvaluatorName];
 }
