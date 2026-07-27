@@ -1759,24 +1759,6 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     }
   }
 
-  // ---- Diagnosis-only exit ----
-  // Everything above this line is DIAGNOSIS: what is wrong with the config, what an even
-  // distribution pays, and which structural knob actually moves RTP. None of it searches anything,
-  // and all of it is the sort of thing that should change the inputs you hand the search - which
-  // is the wrong order if it only ever runs as the opening act of a search you have already
-  // committed to. `diagnoseConfig` (below) stops here.
-  //
-  // Implemented as an early return from this same function rather than as a separate routine, on
-  // purpose: a second implementation would drift, and a diagnosis that disagreed with the tune it
-  // precedes would be worse than no diagnosis at all.
-  if (diagnoseOnly) {
-    return {
-      reelFrequencyTables: baseReelTables,
-      rtp: null, triggerRatePct: null, scaledPaytable: null,
-      diagnostics: { validation, structuralHeadroom, sensitivity, structuralRecommendation, reelFeasibility, diagnoseOnly: true },
-    };
-  }
-
   let currentReelTables = baseReelTables;
   let scatterPhase = null;
   // Builds the Phase 1 trial for a given multiplier - shared by the search itself and by the
@@ -1870,7 +1852,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return best ? { ...best, converged: false, reason: 'exhausted' } : null;
   }
 
-  if (triggerSymbols.length > 0) {
+  // `!diagnoseOnly` because Phase 1 is a SEARCH - it moves the trigger symbol's frequency. A
+  // diagnosis reports on the config as it stands and changes nothing, so it skips this and leaves
+  // `currentReelTables` at the baseline, which is also exactly the config the loss preview below
+  // should be describing.
+  if (triggerSymbols.length > 0 && !diagnoseOnly) {
     scatterPhase = await bisect1D({
       initialParam: 1,
       minParam: 0.05,
@@ -2040,6 +2026,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   });
 
   let rtpPhaseResult = null;
+  // What the loss is made of at the starting point - see the "Loss budget preview" block below.
+  // Declared out here so it survives into `diagnostics` alongside the phase results.
+  let lossPreview = null;
 
   if (dims.length > 0) {
     // Dedicated RNG for initialWeightStrategy sampling, seeded off searchSeed like every other
@@ -2417,7 +2406,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     //
     // `iterationOffset` keeps the 'shape' progress events numbered continuously across both
     // stages, so a caller's log reads as one search rather than two restarting from zero.
-    async function runSearchStage({ dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0, stageTag = null }) {
+    async function runSearchStage({ dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0, stageTag = null, precomputedBaseline = null }) {
     stageDims = sDims;
     stageBounds = sBounds;
     let point = startPoint;
@@ -2446,7 +2435,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // "continue tuning from this result" must never do. Measured under `baseNmSeed` - the same
     // seed the first round's own candidates use - so it's directly comparable to them.
     if (searchAlgorithm === 'cmaes') {
-      const baseline = { point: startPoint, ...(await makeEvaluate(baseNmSeed)(startPoint)) };
+      // The loss preview measured exactly this point under exactly this seed a moment ago, so the
+      // first stage is handed that result rather than paying for an identical measurement. Only
+      // the first: a later stage starts from a different point, and reusing it there would anchor
+      // the search to a candidate it never evaluated.
+      const baseline = precomputedBaseline ?? { point: startPoint, ...(await makeEvaluate(baseNmSeed)(startPoint)) };
       best = baseline;
       bestOrderingPenalty = baseline.orderingPenalty;
       bestLimitPenalty = baseline.limitPenalty;
@@ -2589,6 +2582,68 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     let stage = null;
     let coupling = null;
 
+    // ---- Loss budget preview ----
+    // What the search is ACTUALLY optimizing, stated before it spends its budget rather than
+    // reconstructed afterwards. 150 iterations is a long time to discover that the spacing term was
+    // worth 75 and the RTP error 21 - i.e. that "tuning for RTP" was tuning for spacing all along.
+    //
+    // Costs one measurement, and on CMA-ES not even that: it needs a measurement of exactly this
+    // point for its own baseline anchor, so the result is handed straight to the first stage
+    // instead of being paid for twice.
+    const previewBaseline = { point: initialPoint, ...(await makeEvaluate(baseNmSeed)(initialPoint)) };
+    const usingNormalized = penaltyNormalization === 'normalized';
+    const norm = usingNormalized;
+    const lossTerms = [
+      { key: 'rtpError', label: 'RTP error', weight: 1, value: previewBaseline.error, contribution: previewBaseline.error },
+      { key: 'ordering', label: 'Payout ordering', weight: orderingPenaltyWeight,
+        value: norm ? previewBaseline.orderingPenaltyNormalized : previewBaseline.orderingPenalty },
+      { key: 'limits', label: 'Frequency limits', weight: limitPenaltyWeight,
+        value: norm ? previewBaseline.limitPenaltyNormalized : previewBaseline.limitPenalty },
+      { key: 'uniformity', label: 'Even spread', weight: uniformityPenaltyWeight,
+        value: norm ? previewBaseline.uniformityPenaltyNormalized : previewBaseline.uniformityPenalty },
+      { key: 'spacing', label: 'Reel spacing', weight: spacingPenaltyWeight,
+        value: norm ? previewBaseline.spacingPenaltyNormalized : previewBaseline.spacingPenalty },
+      { key: 'triggerRate', label: 'Trigger rate', weight: triggerRatePenaltyWeight, value: previewBaseline.triggerRatePenalty },
+      { key: 'stdError', label: 'Measurement noise', weight: stdErrorPenaltyWeight, value: previewBaseline.trialRtpStdError ?? 0 },
+    ].map(t => ({ ...t, contribution: t.contribution ?? t.weight * t.value }));
+    const lossTotal = lossTerms.reduce((sum, t) => sum + t.contribution, 0);
+    lossTerms.sort((a, b) => b.contribution - a.contribution);
+    lossTerms.forEach(t => { t.contributionPct = lossTotal > 0 ? (t.contribution / lossTotal) * 100 : 0; });
+    const dominant = lossTerms[0];
+    lossPreview = {
+      terms: lossTerms,
+      total: lossTotal,
+      penaltyNormalization,
+      dominant: dominant?.key ?? null,
+      // Flagged only when something OTHER than RTP error is running the search. That is the
+      // finding: a penalty outweighing the objective is a legitimate choice, but it should be one
+      // the developer made on purpose rather than one they discover 150 iterations later.
+      rtpIsDominant: dominant?.key === 'rtpError',
+    };
+    if (onProgress) await onProgress('loss-preview', 0, null, lossPreview, null);
+
+    // ---- Diagnosis-only exit ----
+    // Everything above this line is DIAGNOSIS: what is wrong with the config, what an even
+    // distribution pays, which structural knob actually moves RTP, what to set them to, and what
+    // the loss is made of. None of it searches anything, and all of it is the sort of thing that
+    // should change the inputs you hand the search - which is the wrong order if it only ever runs
+    // as the opening act of a search you have already committed to. `diagnoseConfig` stops here.
+    //
+    // It sits INSIDE the Phase 2 setup rather than before it because the loss preview needs
+    // `makeEvaluate` and `initialPoint`, which are built here. Nothing has been searched at this
+    // point: Phase 1 is skipped for a diagnosis (see its own guard) and no stage has run.
+    //
+    // Implemented as an early return from this same function rather than as a separate routine, on
+    // purpose: a second implementation would drift, and a diagnosis that disagreed with the tune it
+    // precedes would be worse than no diagnosis at all.
+    if (diagnoseOnly) {
+      return {
+        reelFrequencyTables: baseReelTables,
+        rtp: null, triggerRatePct: null, scaledPaytable: null,
+        diagnostics: { validation, structuralHeadroom, sensitivity, structuralRecommendation, lossPreview, reelFeasibility, diagnoseOnly: true },
+      };
+    }
+
     // Announces which search is about to run, what it can move, and why - fired before every
     // stage, single-stage runs included. A search that silently changes strategy partway through
     // is indistinguishable from one that never changed at all: the per-iteration numbers move
@@ -2608,7 +2663,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       });
       const stageA = await runSearchStage({
         dims: activeDims, bounds: dimBounds, startPoint: initialPoint, iterationBudget: linkedBudget,
-        stageTag: 'linked',
+        stageTag: 'linked', precomputedBaseline: previewBaseline,
       });
       await announceStage('linked', { event: 'end', rtp: stageA.best.rtp, error: stageA.best.error, iterationsUsed: stageA.iterationsUsed, reason: stageA.stalledOut ? 'stalled' : stageA.userStopped ? 'stopped' : 'budget spent' });
       // Phase 2b starts from what 2a actually produced, read back off the projected tables rather
@@ -2705,7 +2760,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       });
       stage = await runSearchStage({
         dims: activeDims, bounds: dimBounds, startPoint: initialPoint, iterationBudget: maxIterations,
-        stageTag: linkedCoupling ? 'linked' : 'independent',
+        stageTag: linkedCoupling ? 'linked' : 'independent', precomputedBaseline: previewBaseline,
       });
       await announceStage(linkedCoupling ? 'linked' : 'independent', {
         event: 'end', rtp: stage.best.rtp, error: stage.best.error, iterationsUsed: stage.iterationsUsed,
@@ -2756,6 +2811,17 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       uniformityPenaltyRemaining: bestUniformityPenalty,
       stillImproving,
       fixedSymbols,
+    };
+  }
+
+  // A game with nothing tunable never enters the Phase 2 block above, so the diagnosis exit inside
+  // it is never reached. Without this, such a config would fall through and be measured and
+  // reported as though it had been tuned - a result, from a call that promised not to produce one.
+  if (diagnoseOnly) {
+    return {
+      reelFrequencyTables: baseReelTables,
+      rtp: null, triggerRatePct: null, scaledPaytable: null,
+      diagnostics: { validation, structuralHeadroom, sensitivity, structuralRecommendation, lossPreview, reelFeasibility, diagnoseOnly: true },
     };
   }
 
@@ -2864,6 +2930,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // the returned tables keep the structural defaults they came in with, because which values a
       // game ships is a design decision and not the tuner's to make.
       structuralRecommendation,
+      // What the loss was actually made of at the starting point, sorted by contribution, in
+      // whichever denomination `penaltyNormalization` selected. `rtpIsDominant: false` means some
+      // penalty - not RTP error - is what the search is really optimizing.
+      lossPreview,
       // Closed-form payout-value solve, when requested: the exact multiplier applied to every
       // payout to hit targetRtp, plus a verification measurement under the scaled paytable.
       payoutScale: payoutScale

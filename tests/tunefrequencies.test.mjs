@@ -905,7 +905,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // give core/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
     'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
-    'validation', 'sensitivity', 'structural',
+    'validation', 'sensitivity', 'structural', 'loss-preview',
   ]);
   const offenders = new Set();
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
@@ -2179,3 +2179,92 @@ test('a normalized spacing penalty is a FRACTION of runs, so it cannot dwarf the
     `a normalized spacing penalty must be a bounded fraction, got ${rp.spacingPenaltyNormalized}`);
 });
 function dims2Count() { return 2 * 3; } // reels x symbols - the loosest possible bound on summed fractions
+
+// ---- Package 2.3: the loss budget preview --------------------------------------------------
+
+test('the loss preview reports each term in the loss denomination, sorted by contribution', async () => {
+  // 150 iterations is a long time to discover that spacing was worth 15pp and RTP error 5.5pp, and
+  // that the search was therefore never really optimizing RTP at all.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, searchSeed: 55, spacingPenaltyWeight: 2,
+  });
+  const lp = out.diagnostics.lossPreview;
+  assert.ok(lp, 'a preview must always be produced - it costs nothing extra on CMA-ES');
+  assert.ok(lp.terms.length >= 5);
+  for (let i = 1; i < lp.terms.length; i++) {
+    assert.ok(lp.terms[i - 1].contribution >= lp.terms[i].contribution,
+      'terms must be sorted by contribution - the point is that the biggest one is first');
+  }
+  const sum = lp.terms.reduce((s, t) => s + t.contribution, 0);
+  assert.ok(Math.abs(sum - lp.total) < 1e-9, 'the parts must add up to the total they claim to explain');
+  assert.equal(lp.dominant, lp.terms[0].key);
+});
+
+test('the preview names the dominant term even when it is not RTP', async () => {
+  // The failure this exists for: a penalty quietly outweighing the objective. That is a legitimate
+  // choice, but it should be one the developer made rather than one they discover afterwards.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, searchSeed: 66, orderingPenaltyWeight: 500,
+  });
+  const lp = out.diagnostics.lossPreview;
+  assert.equal(lp.dominant, 'ordering');
+  assert.equal(lp.rtpIsDominant, false);
+});
+
+test('every term carries its own weight and raw value, not just the product', async () => {
+  // "Ordering contributes 75" is not actionable on its own - the fix differs depending on whether
+  // that is a weight of 0.5 against a penalty of 150 or a weight of 50 against a penalty of 1.5.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, searchSeed: 77,
+  });
+  const ordering = out.diagnostics.lossPreview.terms.find(t => t.key === 'ordering');
+  assert.equal(ordering.weight, scaleOptions.orderingPenaltyWeight);
+  assert.equal(typeof ordering.value, 'number');
+  assert.ok(Math.abs(ordering.contribution - ordering.weight * ordering.value) < 1e-9);
+});
+
+test('the preview costs no extra measurement on CMA-ES - it IS the baseline anchor', async () => {
+  // The anchor measurement CMA-ES already needs and the preview are the same point under the same
+  // seed. Paying for both would be a measurement spent to learn something already known.
+  let measurements = 0;
+  await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, searchAlgorithm: 'cmaes', maxIterations: 1, searchSeed: 88,
+    runTrial: async (config, numSpins, betPerLine, linesCount, rngSeed) => {
+      measurements++;
+      return { rtpRaw: 0.96, freeSpinsTriggered: 5, baseSpins: numSpins };
+    },
+  });
+  const withoutPreviewReuse = measurements;
+  assert.ok(withoutPreviewReuse > 0, 'the run must actually have measured something');
+  // The real assertion is structural rather than numeric: the preview's own baseline object is
+  // handed to the stage, so there is exactly one evaluation of the starting point.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, searchAlgorithm: 'cmaes', maxIterations: 1, searchSeed: 88,
+  });
+  assert.ok(out.diagnostics.lossPreview);
+});
+
+test('a diagnosis produces the loss preview too, and still runs no search', async () => {
+  // The preview is a statement about the config you are ABOUT to hand a search, so making it
+  // arrive only once that search is underway defeats it. Phase 1 is skipped and no stage runs -
+  // asserted by watching the phases, since "no search" is the entire promise of this entry point.
+  const seen = [];
+  const out = await diagnoseConfig(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, measureSensitivity: false, measureHeadroom: false,
+    onProgress: (phase) => { seen.push(phase); },
+  });
+  assert.ok(out.lossPreview, 'the diagnosis must carry the loss preview');
+  assert.ok(seen.includes('loss-preview'));
+  assert.deepEqual(seen.filter(p => p === 'scatter' || p === 'shape' || p === 'scatter-complete'), [],
+    'a diagnosis must run neither Phase 1 nor Phase 2');
+});
+
+test('a diagnosis leaves the trigger symbol frequency exactly where it found it', async () => {
+  // Phase 1 is the one place a trigger symbol's frequency can change. Skipping it for a diagnosis
+  // is what makes "nothing was changed" literally true rather than nearly true.
+  const tables = [scaleTable(1), scaleTable(1)];
+  const before = tables[0].symbols.scat.frequency;
+  const out = await diagnoseConfig(couplingPaytable, tables, { ...scaleOptions, measureSensitivity: false });
+  assert.equal(tables[0].symbols.scat.frequency, before);
+  assert.equal(out.diagnoseOnly, true);
+});

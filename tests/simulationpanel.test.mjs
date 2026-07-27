@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
-  formatScaledPaytableForCopy, renderPayoutScaleHtml,
+  formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml,
 } from '../core/SimulationPanel.js';
 import { scalePaytable } from '../core/SpinSimulator.js';
 
@@ -455,4 +455,64 @@ test('renderDiagnosisHtml does not dress an unresolvable recommendation as a con
   assert.match(out, /not resolvable at this sample size/i);
   assert.match(out, /cannot tell the combinations apart/i);
   assert.ok(!out.includes('#7fd97f'), 'an unresolvable result must not be drawn in the confirmed-green accent');
+});
+
+// ---- Package 2.3: the loss budget in the panel ---------------------------------------------
+
+const lossPreviewFixture = (over = {}) => ({
+  penaltyNormalization: 'normalized', total: 100, dominant: 'rtpError', rtpIsDominant: true,
+  terms: [
+    { key: 'rtpError', label: 'RTP error', weight: 1, value: 60, contribution: 60, contributionPct: 60 },
+    { key: 'spacing', label: 'Reel spacing', weight: 2, value: 15, contribution: 30, contributionPct: 30 },
+    { key: 'ordering', label: 'Payout ordering', weight: 0.5, value: 20, contribution: 10, contributionPct: 10 },
+    { key: 'uniformity', label: 'Even spread', weight: 0, value: 3, contribution: 0, contributionPct: 0 },
+  ],
+  ...over,
+});
+
+test('renderLossBudgetHtml shows each term with its own weight, not just the product', () => {
+  // "Ordering contributes 10" is not actionable alone: the fix differs depending on whether that
+  // is weight 0.5 against a penalty of 20 or weight 20 against a penalty of 0.5.
+  const out = renderLossBudgetHtml(lossPreviewFixture());
+  assert.match(out, /×2/, 'the spacing weight must be visible');
+  assert.match(out, /×0\.5/);
+  assert.match(out, /30\.00/);
+});
+
+test('renderLossBudgetHtml calls out a penalty that outweighs RTP error', () => {
+  // The whole reason this exists: 150 iterations is a long time to discover the search was
+  // optimizing spacing rather than RTP.
+  const out = renderLossBudgetHtml(lossPreviewFixture({
+    dominant: 'spacing', rtpIsDominant: false,
+    terms: [
+      { key: 'spacing', label: 'Reel spacing', weight: 0.25, value: 301, contribution: 75, contributionPct: 75 },
+      { key: 'rtpError', label: 'RTP error', weight: 1, value: 21, contribution: 21, contributionPct: 21 },
+    ],
+  }));
+  assert.match(out, /Reel spacing/);
+  assert.match(out, /outweighs RTP error/);
+  assert.match(out, /75\.00.*21\.00|21\.00/s);
+});
+
+test('renderLossBudgetHtml lists a switched-off term instead of hiding it', () => {
+  // "Where did my spacing constraint go" is answered by seeing it listed as off, not by its
+  // absence - an absent row is indistinguishable from a term that does not exist.
+  const out = renderLossBudgetHtml(lossPreviewFixture());
+  assert.match(out, /Even spread/);
+  assert.match(out, />off</);
+});
+
+test('renderLossBudgetHtml warns that raw penalty units are not comparable', () => {
+  const out = renderLossBudgetHtml(lossPreviewFixture({ penaltyNormalization: 'raw' }));
+  assert.match(out, /not comparable/i);
+});
+
+test('renderLossBudgetHtml renders nothing when no preview was produced', () => {
+  assert.equal(renderLossBudgetHtml(null), '');
+  assert.equal(renderLossBudgetHtml({ terms: [] }), '');
+});
+
+test('renderDiagnosisHtml flags a loss the search will not spend on RTP, in the heading', () => {
+  const out = renderDiagnosisHtml({ lossPreview: lossPreviewFixture({ dominant: 'spacing', rtpIsDominant: false }) });
+  assert.match(out, /not RTP/);
 });

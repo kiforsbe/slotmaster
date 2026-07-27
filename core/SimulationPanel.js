@@ -33,7 +33,51 @@ const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt
  * number beside a large one reads as a weak-but-real lever, and that is the exact mistake this
  * report exists to prevent.
  */
-export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null, sensitivity = null, structuralRecommendation = null } = {}) {
+/**
+ * The loss budget as a bar-per-term breakdown. Pure - returns HTML, renders nothing.
+ *
+ * The quantity every one of these numbers is denominated in is "as much as this many percentage
+ * points of RTP error", because that is literally how the loss adds them up. Saying so is the
+ * whole point: `spacingPenaltyWeight: 0.25` conveys nothing, while "reel spacing is worth 75 of
+ * this loss and RTP error 21" conveys that the search is not doing what its operator thinks.
+ */
+export function renderLossBudgetHtml(lossPreview) {
+  if (!lossPreview?.terms?.length) return '';
+  const { terms, total, dominant, rtpIsDominant, penaltyNormalization } = lossPreview;
+  const rows = terms.map(t => {
+    const pct = t.contributionPct ?? 0;
+    const isDominant = t.key === dominant;
+    // A term switched off contributes nothing and has no bar - but it is still listed, because
+    // "this is off" is information a developer looking for a missing constraint needs.
+    const off = t.weight === 0 && t.key !== 'rtpError';
+    return `<tr style="${isDominant ? 'background: rgba(255,255,255,0.05);' : ''}">
+        <td style="padding: 3px 8px 3px 0; white-space: nowrap; color: ${off ? '#777' : '#ddd'};">${isDominant ? '▶ ' : ''}${esc(t.label)}</td>
+        <td style="padding: 3px 8px 3px 0; text-align: right; color: #888; font-size: 0.9em;">${off ? 'off' : `×${t.weight}`}</td>
+        <td style="padding: 3px 8px 3px 0; width: 110px;">
+          <div style="height: 8px; border-radius: 4px; background: rgba(255,255,255,0.1); overflow: hidden;">
+            <div style="height: 100%; width: ${pct.toFixed(0)}%; background: ${t.key === 'rtpError' ? '#7fbfff' : '#c58fff'};"></div>
+          </div>
+        </td>
+        <td style="padding: 3px 8px 3px 0; text-align: right; white-space: nowrap; color: ${off ? '#777' : '#fff'};">${t.contribution.toFixed(2)}</td>
+        <td style="padding: 3px 0; text-align: right; color: #9ab; font-size: 0.9em;">${pct.toFixed(0)}%</td>
+      </tr>`;
+  }).join('');
+
+  const verdict = rtpIsDominant
+    ? `<div style="font-size: 0.82em; color: #9ab; margin-top: 8px;">RTP error is the largest term, so the search is chiefly optimizing RTP — which is usually what you want.</div>`
+    : `<div style="font-size: 0.82em; color: #e6b800; margin-top: 8px;"><strong>${esc(terms[0].label)}</strong> outweighs RTP error in this loss (${terms[0].contribution.toFixed(2)} against ${(terms.find(t => t.key === 'rtpError')?.contribution ?? 0).toFixed(2)}). The search will trade RTP away to satisfy it. That is a legitimate choice — but it should be one you made, not one you find out about after 150 iterations.</div>`;
+
+  return `<div style="font-size: 0.78em; color: #9ab; margin-bottom: 8px;">
+      measured once at the starting point · total loss ${total.toFixed(2)} ·
+      ${penaltyNormalization === 'normalized'
+        ? 'penalties normalized, so a weight of 1 is worth about one RTP point'
+        : 'RAW penalty units — these are not comparable to each other or to RTP error'}
+    </div>
+    <table style="border-collapse: collapse; font-size: 0.82em; width: 100%;">${rows}</table>
+    ${verdict}`;
+}
+
+export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null, sensitivity = null, structuralRecommendation = null, lossPreview = null } = {}) {
   const sections = [];
 
   const card = (title, accent, body) => `
@@ -144,6 +188,16 @@ export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null
       </div>
       <table style="border-collapse: collapse; font-size: 0.82em; width: 100%;">${knobs.map(knobRow).join('')}</table>
       ${routes}`));
+  }
+
+  // ---- What the search is actually optimizing ----
+  // Last, because it is a statement about everything above it: given this config and these
+  // weights, here is what the loss is made of before a single iteration is spent.
+  if (lossPreview?.terms?.length) {
+    sections.push(card(
+      lossPreview.rtpIsDominant ? 'What the search will optimize' : 'What the search will optimize — not RTP',
+      lossPreview.rtpIsDominant ? '#7fbfff' : '#e6b800',
+      renderLossBudgetHtml(lossPreview)));
   }
 
   // ---- What to set them to (Phase 0d) ----
@@ -1277,7 +1331,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   // the log line by line. Held as data (not markup) so a later phase's findings can join an
   // earlier phase's without either having to know how the other is drawn.
   const diagnosisEl = tuneContainer.querySelector('#tune-diagnosis');
-  const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null, structuralRecommendation: null };
+  const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null, structuralRecommendation: null, lossPreview: null };
   function renderDiagnosis() {
     if (!diagnosisEl) return;
     const html = renderDiagnosisHtml(diagnosis);
@@ -1641,6 +1695,14 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
               ? `✓ Sensitivity swept - highest leverage: ${top.knob} (${top.elasticityRtpPerUnit.toFixed(1)}pp per unit). Full report above.`
               : '✓ Sensitivity swept - see the report above.');
           }
+          return;
+        }
+        if (phase === 'loss-preview') {
+          diagnosis.lossPreview = r;
+          renderDiagnosis();
+          appendLog(r.rtpIsDominant
+            ? `✓ Loss budget: RTP error is the largest term (${r.terms[0].contribution.toFixed(2)} of ${r.total.toFixed(2)}).`
+            : `⚠ Loss budget: ${r.terms[0].label} outweighs RTP error — the search will trade RTP away for it. See the panel above.`);
           return;
         }
         if (phase === 'structural') {
