@@ -3,6 +3,33 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.6.1 — 2026-07-27
+
+Documentation only. No behaviour changed — 0.6.0 shipped a fifth game and a substantially
+rebuilt tuner without the docs catching up, and this is that catch-up.
+
+### Documentation
+
+- **`CHANGELOG.md`** — this file, starting at 0.6.0. Earlier releases keep their annotated tags
+  as the record; reconstructing notes for them from commit subjects alone would be less accurate
+  than what is already there.
+- **Mayan Tumble's README** — a screenshot, and what building the game actually taught us. It is
+  the first pairing of `CascadeEngine` with a *line* evaluator, which `CascadeSpinMechanic`'s doc
+  had long claimed was possible but nothing had exercised. The claim held: no engine or mechanic
+  change was needed. What did need changing was everything around it that had quietly started
+  using "cascade" and "cluster" as the same word — now written up as its own sections on payline
+  indicators and playfield theming, alongside the tuning failure and its real error text.
+- **Top-level README** — Mayan Tumble in the games table, the modules 0.6.0 added to the layout
+  list, and two new sections on tuning: why penalty weights are normalized, and why structural
+  knobs move RTP far more than frequencies do.
+- **`docs/ARCHITECTURE.md`** — the layering diagram gained the tuner-support modules and the
+  Worker pool, split into search-side and reporting-side because the imports genuinely differ.
+  `CascadeEngine`'s config table gained `paylines` and `playfield`; new sections cover payline
+  indicators, playfield theming, a paragraph per tuner-support module, and the rule the Mayan
+  Tumble tuning bug came from — **a game's `tuneConfig` must carry every primitive its
+  `winEvaluator` closes over**, because a Worker rebuilds that evaluator from names and
+  primitives alone.
+
 ## 0.6.0 — 2026-07-27
 
 37 files changed, ~9,800 lines added, across 38 commits. Two themes: a fifth game, and a
@@ -107,4 +134,4 @@ and ends, not decorations parked beside it.
   that is not a plain multiplier. It now distinguishes the three, which have different fixes.
 
 ---
-_Docs last synced with the codebase: 2026-07-27, commit `3664600`._
+_Docs last synced with the codebase: 2026-07-27, commit `66218c8`._

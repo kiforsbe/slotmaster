@@ -13,14 +13,20 @@ open `index.html` (via a local server, see below) and play.
 | Lucky Fruits | <img src="games/fruitmachine/screenshot.png" width="160"> | 3x3, 1-5 lines | None — wilds only | [games/fruitmachine](games/fruitmachine/README.md) |
 | Bar Fruits | <img src="games/barfruits/screenshot.png" width="160"> | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
 | Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
+| Mayan Tumble | <img src="games/mayantumble/screenshot.png" width="160"> | 5x3, 10 lines, cascading | Gold scatter → free spins with growing multiplier tiles, cascading wins | [games/mayantumble](games/mayantumble/README.md) |
 
-All four games share the same `core/` foundation, debug tooling (SPIN LOG, RUN SIMULATION,
+All five games share the same `core/` foundation, debug tooling (SPIN LOG, RUN SIMULATION,
 TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic actually runs
 is pluggable per game via `core/LineMechanic.js` (the first three) or `core/CascadeSpinMechanic.js`
-(Candy Frenzy's cluster-pays cascade engine: `core/CascadeEngine.js` + `core/CascadeMath.js` +
-`core/ClusterMath.js` + `core/FreeSpinsModes.js` for its pluggable free-spins payout modes) -
-see `docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section for how the two share one
-architecture instead of two. Each README covers only what's specific to that game.
+(the two cascade games: `core/CascadeEngine.js` + `core/CascadeMath.js` + `core/FreeSpinsModes.js`
+for its pluggable free-spins payout modes) - see `docs/ARCHITECTURE.md`'s "pluggable gameplay
+mechanics" section for how they share one architecture instead of two. Each README covers only
+what's specific to that game.
+
+The two cascade games are the same engine with different win evaluators, which is the point of
+the split: Candy Frenzy supplies `core/ClusterMath.js`'s cluster evaluator, Mayan Tumble supplies
+its own that maps `core/SlotMath.js`'s payline wins into the same shape. Nothing in
+`CascadeEngine`/`CascadeSpinMechanic` knows which it got.
 
 ## Running it
 
@@ -56,14 +62,31 @@ tests/   node --test suite for core/
 docs/    Design specs and implementation plans (docs/superpowers/)
 ```
 
+Release notes live in [CHANGELOG.md](CHANGELOG.md).
+
 - **`core/SlotEngine.js`** — rendering/animation and input handling for the live game.
 - **`core/SlotMath.js`** — pure math: building reel strips (`generateReel`), evaluating
   spins (`checkWildLineWins`, `checkWins`).
+- **`core/CascadeEngine.js`** — `SlotEngine.js`'s sibling for the cascade games, built around
+  `core/CascadeMath.js`'s `resolveCascadeSequence`. Knows nothing about clusters or paylines: the
+  win evaluator is a closure the game supplies (`core/ClusterMath.js`'s for Candy Frenzy, a
+  payline one for Mayan Tumble), and the playfield's own look is a per-game `playfield` config.
 - **`core/SpinSimulator.js`** — runs many simulated spins to measure RTP/trigger rate, and
   `tuneFrequencies`, which automatically adjusts a game's reel frequencies to hit a target RTP.
 - **`core/SimulationPanel.js`** — the in-browser RUN SIMULATION / TUNE FREQUENCIES UI (a debug
   panel included in each game's `index.html`), plus the formatter that turns a tuned result
   back into pasteable `FREQUENCY_REELn` source.
+- **Tuner support modules**, all pure and separately tested — `core/TuningValidation.js` (static
+  config checks that refuse to tune on arithmetic errors), `core/TuningUnits.js` (converting
+  between what a developer asks for and what the search optimizes: spins-per-trigger ↔ percent,
+  volatility bands ↔ sigma, intent ↔ penalty weight), `core/StructuralSensitivity.js` and
+  `core/StructuralSearch.js` (which structural knob actually moves RTP, and what to set it to),
+  `core/PlayerExperience.js` (what a tuned result feels like to play), and `core/TuneLog.js`
+  (every config that became the best, exportable as JSON or as pasteable source).
+- **`core/SimulationWorkerPool.js`** / **`core/simulationTrialWorker.js`** /
+  **`core/mechanicRegistry.js`** — the Worker pool tuning trials are dispatched to, one trial per
+  message, and the registry that resolves a mechanic/evaluator/free-spins-mode back from the name
+  it crossed `postMessage` as (a function cannot cross directly).
 - **`core/SpinLog.js`** — pure per-spin log entry building and CSV serialization, shared by
   both `SpinSimulator.js` (a batch run) and `SlotEngine.js` (live play) so the two can't drift
   apart on what a logged spin looks like. See "Spin logging" below.
@@ -167,6 +190,30 @@ exactly as before.
 `core/SpinSimulator.js` is the canonical reference for all of them, deliberately not duplicated
 here.
 
+### Tuning: penalty weights are normalized
+
+Penalty weights mean the same thing on every game. Raw penalty totals are incommensurable —
+ordering is measured in frequency units, spacing as a violation *count* — and summing those with
+an RTP error in percentage points makes a weight's meaning depend on the game it is applied to.
+Under `penaltyNormalization: 'normalized'` (the panel's default) each penalty is re-expressed as
+a scale-free fraction, so **weight 1 ≈ 1pp of RTP** and the same weights transfer between games.
+The panel names them by intent ("Insist", "Prefer") rather than by magnitude for the same reason.
+
+Typing a raw weight into any of those controls switches the whole run back to `'raw'`, on purpose:
+the named levels are calibrated against normalized penalties, so reinterpreting a hand-written
+number in a denomination its author did not choose would silently change what they asked for.
+A game whose `tuneConfig` sets a weight the named levels don't offer (Mayan Tumble's
+`triggerRatePenaltyWeight: 0.1`) therefore opens the panel in raw mode.
+
+### Structural knobs move RTP more than frequencies do
+
+On a cluster-cascade game `stackChance`/`maxStack`/`minStack` move RTP by one to two orders of
+magnitude more than the entire per-symbol frequency search can. Tuning frequencies against a
+structure that cannot reach the target is the expensive way to discover that, so the tuner's
+**CHECK MY CONFIG** action measures the structure first — see `core/StructuralSensitivity.js`
+(rank the knobs by leverage) and `core/StructuralSearch.js` (sweep them jointly, and refuse to
+name a winner when the measurement noise floor is wider than the tolerance).
+
 ## Spin logging
 
 Every real spin (base and free, live in the browser) is recorded to `engine.spinLog` — one
@@ -197,4 +244,4 @@ Portions of this project (code, docs, and image assets) were developed with the 
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `97dc0d6`._
+_Docs last synced with the codebase: 2026-07-27, commit `66218c8`._

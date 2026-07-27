@@ -13,7 +13,7 @@ flowchart TB
     SlotEngine["core/SlotEngine.js<br/>line-pays live game"]
     SlotMath["core/SlotMath.js<br/>win eval, reel building, seeded RNG"]
 
-    CascadeEngine["core/CascadeEngine.js<br/>cascade-cluster live game (Candy Frenzy)"]
+    CascadeEngine["core/CascadeEngine.js<br/>cascade live game (Candy Frenzy, Mayan Tumble)"]
     CascadeMath["core/CascadeMath.js<br/>gravity/refill mechanics"]
     ClusterMath["core/ClusterMath.js<br/>cluster win evaluator"]
     FreeSpinsModes["core/FreeSpinsModes.js<br/>pluggable free-spins payout modes"]
@@ -22,6 +22,10 @@ flowchart TB
     CascadeSpinMechanic["core/CascadeSpinMechanic.js<br/>resolveSequence component pair"]
 
     SpinSimulator["core/SpinSimulator.js<br/>headless sim + auto-tune, mechanic-agnostic"]
+    TuningSearch["Tuner support - search side, pure<br/>TuningValidation · StructuralSensitivity<br/>StructuralSearch · TuningUnits"]
+    TuningReport["Tuner support - reporting side, pure<br/>PlayerExperience · TuneLog · TuningUnits"]
+    WorkerPool["core/SimulationWorkerPool.js<br/>+ simulationTrialWorker.js"]
+    MechanicRegistry["core/mechanicRegistry.js<br/>name -> mechanic/evaluator/mode"]
     SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION / TUNE FREQUENCIES UI"]
     SlotAudio["core/SlotAudio.js<br/>synthesized sound effects"]
 
@@ -40,7 +44,7 @@ flowchart TB
 
     CascadeEngine -. "config.mechanic, default" .-> CascadeSpinMechanic
     CascadeSpinMechanic --> CascadeMath
-    CascadeEngine -. "config.winEvaluator" .-> ClusterMath
+    CascadeEngine -. "config.winEvaluator (cluster: ClusterMath, line: the game's own)" .-> ClusterMath
     CascadeEngine -. "config.freeSpinsMode, free spins only" .-> FreeSpinsModes
     CascadeEngine --> SlotAudio
     CascadeEngine --> SpinLog
@@ -48,7 +52,12 @@ flowchart TB
 
     SpinSimulator -. "config.mechanic" .-> LineMechanic
     SpinSimulator -. "config.mechanic" .-> CascadeSpinMechanic
+    SpinSimulator --> TuningSearch
+    SpinSimulator -. "options.runTrial" .-> WorkerPool
+    WorkerPool --> MechanicRegistry
     SimulationPanel --> SpinSimulator
+    SimulationPanel --> TuningReport
+    SimulationPanel --> WorkerPool
     SpinLogPanel --> SpinLog
     SpinLog --> FileIO
 ```
@@ -67,9 +76,15 @@ composed from those same methods for batch simulation. `SlotEngine.js`/`CascadeE
 the component methods directly for live, animated play; `SpinSimulator.js` calls `resolveSpin`
 for a synchronous batch run — same components, same results, no duplicated win logic between
 live play and simulation. `config.mechanic` defaults to `LineMechanic`/`CascadeSpinMechanic`
-respectively, so no existing game had to change anything to keep working. A future gameplay
-mechanic (e.g. a line-win-based cascade game) is a new module implementing the same shape,
-pluggable into either its engine or the simulator without changing either.
+respectively, so no existing game had to change anything to keep working.
+
+Mayan Tumble is what tested that claim. It is a *line-pay cascade* — `CascadeSpinMechanic`
+unmodified, with a win evaluator that runs `SlotMath.js`'s `checkWins` and maps its `lineWins`
+into the `clusterWins` shape `resolveCascadeSequence` expects. No engine or mechanic change was
+needed, which is the design working. What did need changing was everything that had quietly
+started using "cascade" and "cluster" as the same word: `CascadeEngine` had no way to draw *which
+line* paid (see `_renderWinLine`), and its playfield colours were Candy Frenzy's hardcoded (see
+`config.playfield`). Both are now per-game, defaulting to the previous behaviour.
 
 ## `core/SlotMath.js` — pure math, no side effects
 
@@ -111,10 +126,10 @@ usable from all three contexts above (game engine, simulator, tests) without ada
 
 ## `core/CascadeMath.js` / `core/ClusterMath.js` — cascade pure math
 
-Same "pure function, no side effects" rule as `SlotMath.js` above - this is Candy Frenzy's
-(and any future cascade-cluster game's) equivalent of that module, split in two: generic
-cascade mechanics (`CascadeMath.js`, knows nothing about clusters or paylines) and this game's
-own win evaluator (`ClusterMath.js`).
+Same "pure function, no side effects" rule as `SlotMath.js` above - the cascade games' equivalent
+of that module, split in two: generic cascade mechanics (`CascadeMath.js`, knows nothing about
+clusters or paylines) and Candy Frenzy's own win evaluator (`ClusterMath.js`). Mayan Tumble
+supplies its own evaluator instead, in its `game.js`, and touches neither of these differently.
 
 - **`nextStripSymbol(strip, cursorState)`** (`CascadeMath.js`) — reads the symbol at
   `cursorState.index`, advances the cursor by 1 (wrapping circularly), and never re-rolls -
@@ -145,9 +160,11 @@ own win evaluator (`ClusterMath.js`).
   `paytable[symbol].clusterPayout` (an array of `{ min, multiplier }` breakpoints - a cluster
   can run all the way up to the full grid, not a small fixed line-length like a payline game's
   `payout[i]` array). Returns `{ clusterWins, totalPayoutMultiplier, scatterWin }`, the exact
-  shape `resolveCascadeSequence`'s `winEvaluator` parameter expects - a future cascade game
-  with a different win rule (e.g. payline-based) would supply its own evaluator with this same
-  shape instead, unchanged elsewhere.
+  shape `resolveCascadeSequence`'s `winEvaluator` parameter expects - a cascade game with a
+  different win rule supplies its own evaluator with this same shape instead, unchanged
+  elsewhere. Mayan Tumble's `checkLineCascadeWins` is exactly that: `checkWins`' `lineWins`
+  mapped into `clusterWins`, each payout divided by the line count so it stays relative to the
+  total bet, and each carrying the `lineIndex` it was paid on.
 
 ## `core/SlotEngine.js` — the live game: state machine + canvas renderer
 
@@ -225,11 +242,11 @@ Rendering (`render()` and everything below it) is internal — a game never call
 directly, only supplies the sprite atlas and reacts to `onStateChange`/`onWin` to update its
 own DOM (balance display, spin button label, etc.).
 
-## `core/CascadeEngine.js` — the cascade-cluster live game
+## `core/CascadeEngine.js` — the cascade live game
 
-`SlotEngine.js`'s sibling for cascade-cluster games (currently just Candy Frenzy, but nothing
-about this class is Candy-Frenzy-specific) - same "one class instance, owns balance/bet/
-animation, delegates win logic to config" shape, built around `resolveCascadeSequence`
+`SlotEngine.js`'s sibling for cascade games (Candy Frenzy's cluster-pays and Mayan Tumble's
+line-pays, with nothing in the class specific to either) - same "one class instance, owns
+balance/bet/animation, delegates win logic to config" shape, built around `resolveCascadeSequence`
 (`CascadeMath.js`) instead of `generateTargetGrid`. `config.winEvaluator` here is a
 single-argument closure the game supplies (e.g. `(grid) => checkClusterWins(grid, PAYTABLE, 5,
 'bonus', 3)`) - `CascadeEngine` itself knows nothing about clusters or paylines, only about
@@ -243,12 +260,38 @@ grids, cascades, and free spins.
 | `paytable`, `reelStrips` | `{}`, `[]` | Passed straight through to `winEvaluator` / `resolveCascadeSequence` |
 | `winEvaluator` | no-op (no wins) | `(grid) => { clusterWins, totalPayoutMultiplier, scatterWin }` |
 | `scatterSymbol` | `null` | Which symbol name triggers free spins |
+| `paylines` | `null` | Line-pay cascade games only. Purely presentational here: the engine draws the path of whichever win is being paid, for any win carrying a `lineIndex` (see below) |
+| `playfield` | Candy Frenzy's palette | How the playfield itself is drawn - see below |
 | `freeSpinsMode` | `createFlatMultiplierMode()` | Pluggable free-spins payout mode - see `core/FreeSpinsModes.js` below |
 | `betAmount` | `1` | This game's single flat bet (no bet-per-line/lines concept) |
 | `symbolsConfig`, `spritesheetUrl` | — | Sprite atlas, same shape as `SlotEngine`'s |
 | `onStateChange(state)` | no-op | Fired on every state transition |
 | `onScatterTrigger(scatterCount, isInFreeSpins)` | no-op | Fired instead of auto-advancing when the resolved spin's `scatterWin.triggerFreeSpins` is set |
 | `onWin({amount})` | no-op | Fired whenever a spin pays out |
+
+**Payline indicators.** A cascade win is normally just a set of cells, which is the whole story
+for a cluster. It is not for a line-pay cascade: three matching symbols on a 5×3 grid sit on
+several paylines at once, the payout differs per line, and the highlighted cells cannot say which
+line paid. So a win may carry a **`lineIndex`**, and `_renderWinLine` draws that payline's path
+across the grid with its 1-based number at both ends, for the win currently being cleared - one at
+a time, matching how the engine already sequences glow, particles, popup and ding. A cluster win
+carries no `lineIndex` and a cluster game passes no `paylines`, so the whole feature is a no-op
+for Candy Frenzy. The stroke runs from one numbered tag's centre to the other: the tags are where
+a line begins and ends, not decorations beside it.
+
+**Playfield theming.** Everything behind and around the symbols - backdrop gradient, outline and
+its glow radius, inner frame, grid lines, loading screen - comes from `config.playfield`, merged
+over defaults that *are* the Candy Frenzy look, so a game passing nothing is unchanged. Two fields
+are choices rather than colours:
+
+- **`gridLines`** (a colour, or `null` to omit them). A cluster game wants its cells ruled,
+  because a cluster *is* a set of cells and the ruling is what makes its shape legible. A payline
+  win is a path across the grid, and ruling it anyway makes the playfield look like a spreadsheet
+  with art in it.
+- **`noise`** (`{ color, strength, scale, seed }`, or `null`) — a fixed grain across the playfield,
+  texture where the ruling used to be. Generated once into an offscreen canvas and blitted, never
+  regenerated per frame: a crawling backdrop reads as a rendering fault rather than as texture.
+  Seeded, so it is identical on every load. Rebuilt only when the grid is resized.
 
 **State machine** (`engine.state`): `idle` → `dropping_in` → (`clearing` → `falling`)* →
 `showing_wins` → `idle`, plus `free_spins_intro`/`game_over` (free-spins lifecycle, same
@@ -514,11 +557,23 @@ supplies `options.runTrial`:
 pool of persistent Worker threads (`navigator.hardwareConcurrency - 1`, one core left for the
 UI), each running `core/simulationTrialWorker.js` — a small script that resolves one
 `simulateSpins()` trial per message and replies with just the three numbers `measure()` needs
-(`rtpRaw`/`freeSpinsTriggered`/`baseSpins`), not the full result. `config.mechanic`/
-`winEvaluator`/`freeSpinsMode` cross into a pool Worker by name (`core/mechanicRegistry.js`
-resolves them back to the real objects/functions), the same convention every other
-postMessage-crossing config in this codebase uses. Omitting `runTrial` (the default) runs
-exactly the original in-process sequential loop — every existing caller/test is unaffected.
+(`rtpRaw`/`freeSpinsTriggered`/`baseSpins`) plus `roundStats`, not the full result.
+`config.mechanic`/`winEvaluator`/`freeSpinsMode` cross into a pool Worker by name
+(`core/mechanicRegistry.js` resolves them back to the real objects/functions), the same convention
+every other postMessage-crossing config in this codebase uses. Omitting `runTrial` (the default)
+runs exactly the original in-process sequential loop — every existing caller/test is unaffected.
+
+**A rebuilt evaluator is only as good as what travels with it.** A cascade game's `winEvaluator`
+is a closure, so it cannot cross `postMessage`; the registry rebuilds an equivalent one on the
+worker side from the evaluator's *name* plus loose primitives off the config. That makes a game's
+`tuneConfig` responsible for carrying everything its evaluator closes over — and Mayan Tumble's
+did not carry `paylines`, so its first trial threw `Cannot read properties of undefined (reading
+'length')` from inside a Worker, surfacing with a stack that pointed at the pool's own settle
+function and named neither the game, the evaluator, nor the field. Each builder now declares what
+it cannot be rebuilt without (`REQUIRED_BY_BUILDER`) and throws naming both. `tests/
+mayantumble.test.mjs` additionally asserts the rebuild is **field-for-field** identical to the
+evaluator the game plays with, not merely payout-equivalent: that is what catches a dropped field
+like `lineIndex`, which RTP alone would never notice.
 
 ### Pluggable search algorithm (`options.searchAlgorithm`)
 
@@ -544,6 +599,57 @@ Independent of which algorithm is chosen, `tuneFrequencies`' own cross-round `be
 than their combined `trialRtpStdError`-based margin (scaled by `options.bestAcceptanceZ`,
 default `1.0`) — so a "better" result that's really just a luckier Monte Carlo sample can't
 silently become the new best, regardless of which algorithm produced it.
+
+## Tuner support modules — pure, separately tested
+
+Six small modules the tuner is built from, all pure (no DOM, no simulation of their own) and each
+with its own `tests/*.test.mjs`. They exist as separate files rather than as more of
+`SpinSimulator.js` because each answers a different question, and because a formatter or a
+classifier is far easier to test when it takes numbers and returns a value.
+
+- **`core/TuningValidation.js`** — `validateTuningConfig({ paytable, reelFrequencyTables,
+  reelLength, reelsCount, rowsCount, minClusterSize, scatterTriggerCount })` → an array of
+  `{ severity, code, message, suggestion, details }`. Pure arithmetic on the config, no reels
+  built and no spins run, so it costs nothing and runs before everything else (Phase 0a). An
+  `'error'` finding stops the tune: it describes a config no amount of searching can compensate
+  for, and spending 150 iterations to report a confident number derived from a broken paytable is
+  worse than failing immediately. Candy Frenzy is the case in point - it ran for days against a
+  ladder where a 7-cluster paid less than a 5-cluster, which makes "raise RTP" and "make big
+  clusters rarer" the same instruction. Warnings and notes are reported and the run proceeds;
+  `skipValidation: true` exists for the developer who has read a finding and disagrees, and the
+  findings still travel in `diagnostics.validation` either way.
+- **`core/TuningUnits.js`** — the conversions between what a developer asks for and what the
+  search optimizes: `spinsPerTriggerToPct`/`pctToSpinsPerTrigger` ("1 in 167 spins" ↔ 0.5988%),
+  `volatilityBandToSigma`/`sigmaToVolatilityBand` over `VOLATILITY_BANDS`, and
+  `intentToWeight`/`weightToIntent` over `INTENT_LEVELS`. One table per conversion, in both
+  directions, so the band a developer *asks* for and the band a result is *classified* into can
+  never disagree - otherwise picking "Low" and being told the answer is "Low" would prove nothing.
+- **`core/StructuralSensitivity.js`** — `buildLadders` produces a ladder of values to try per
+  structural knob; `summarize` ranks them by elasticity against a measured baseline and routes to
+  a target. This is the module that makes the tuner's most important point: on a cluster-cascade
+  game `stackChance`/`maxStack`/`minStack` move RTP by one to two orders of magnitude more than
+  the entire per-symbol frequency search can.
+- **`core/StructuralSearch.js`** — `structuralSearch(...)` sweeps `SEARCHABLE_KNOBS` jointly.
+  `buildGrid` enumerates the combinations and `predictRtp` ranks every one of them *for free* by
+  composing the sensitivity ladders' own ratios, so only the top `maxMeasurements` are actually
+  simulated. It refuses to name a winner when the measurement noise floor is wider than the RTP
+  tolerance (`resolvable: false`), rather than reporting a confident recommendation drawn from
+  noise - measuring N cells at a noise floor wider than the acceptance band guarantees a spurious
+  "hit".
+- **`core/PlayerExperience.js`** — `describePlayerExperience(roundStats, { bet, rtp, triggerRate,
+  sessionSpins })` → plain-language lines, a volatility class, and bootstrap-resampled session
+  outcomes. Reads the round histogram `simulateSpins` already accumulates, so it costs no extra
+  simulation, and the bootstrap is seeded so the same result always describes itself the same way.
+  A ROUND here is one paid spin plus every free spin it bought - keying on individual spins would
+  inflate the hit rate and deflate the mean win, since free spins are charged no bet.
+- **`core/TuneLog.js`** — `createTuneLogEntry` per accepted best, plus `describeTuneEntryQuality`
+  (a one-line verdict and the specific reasons behind it), `summarizeTuneLogEntry`,
+  `tuneLogToJson` and `exportTuneLogJson`. A search reports one final answer and used to discard
+  every candidate it accepted on the way there - several of which may be better for a purpose the
+  loss function knows nothing about, since "best" means lowest *loss*, a weighted blend. Each
+  entry therefore carries enough to judge it without re-running anything: what it achieved against
+  what was asked for, its own error bar, the payout shape, what it violated, and a deep-copied
+  snapshot of the frequencies themselves.
 
 ## `core/SimulationPanel.js` — browser UI for the simulator
 
@@ -571,11 +677,29 @@ UI — it calls these instead:
   `winEvaluator` is a per-game closure, not a reusable bare function its own `.name` can
   identify) cross into each pool Worker by name, resolved back to real objects via
   `core/mechanicRegistry.js` on that side of `postMessage` (`winEvaluatorName:
-  'checkClusterWins'` alongside `minClusterSize`/`scatterTriggerCount` for a cascade game).
-- **`formatReelFrequencyTablesForCopy(reelFrequencyTables)`** — renders an array of
+  'checkClusterWins'` alongside `minClusterSize`/`scatterTriggerCount` for a cascade game, or
+  `'checkLineCascadeWins'` alongside `paylines`/`wildSymbol` for a line-pay cascade).
+- **`formatReelFrequencyTablesForCopy(reelFrequencyTables, context)`** — renders an array of
   `{ defaults, symbols }` tables back into pasteable `export const FREQUENCY_REELn = {...}`
   source text (4-significant-figure frequencies, so values under 1 don't collapse into each
-  other — see the top-level README).
+  other — see the top-level README), above a header recording what produced them. Frequencies
+  alone are not a reproducible artifact: they mean nothing without the search seed, reel seeds,
+  reel length, targets and loss weights they were tuned against, and `REEL_LENGTH` in particular
+  is part of the *result* rather than a separate setting. `context.tuneLogEntry` additionally
+  marks the output as one candidate out of a run's history rather than its final answer, and
+  carries that entry's verdict and error bar with it.
+- **`formatScaledPaytableForCopy(scaledPaytable, payoutScale)`** — the payout-scale solve as
+  pasteable source. Cluster ladders are grouped by *value* (not by reference, which
+  `scalePaytable`'s per-entry copy has already broken) and named after whatever their members
+  have in common: the sole symbol when a ladder has only one, otherwise the shared `type`. Both
+  spellings reproduce the real games' own constant names — Candy Frenzy declares one ladder per
+  symbol, so it gets `COTTONCANDY_PAYOUT`/`GUM_PAYOUT`/… rather than `PREMIUM_PAYOUT_2`.
+- The panel's other renderers (`renderPayoutScaleHtml`, `renderLossBudgetHtml`,
+  `renderTargetChipsHtml`, `renderPlayerExperienceHtml`, `renderTuneLogHtml`,
+  `describePenaltyStateNow`, `renderDiagnosisHtml`) are all **pure functions returning HTML
+  strings**, rendering nothing themselves. That is what lets `tests/simulationpanel.test.mjs`
+  assert on the tuner's UI wording and numbers under `node --test` with no DOM at all — the
+  panel's own reasoning is testable, not just the math beneath it.
 
 ## `core/SpinLog.js` / `core/SpinLogPanel.js` / `core/FileIO.js` — spin logging
 
@@ -619,12 +743,18 @@ free-spins-intro flow. Every sound is a small Web Audio oscillator patch built a
 A game is a folder `games/<name>/` with three files, wired together by convention rather than
 a plugin registry — there's no central list of games to update.
 
-This section covers a line-pays game (`SlotEngine`) specifically. A cascade-cluster game
-follows the same three-file convention but plugs into `CascadeEngine`/`CascadeMath.js`/
-`ClusterMath.js`/`FreeSpinsModes.js` instead (see their sections above), and wires RUN
-SIMULATION/TUNE FREQUENCIES the same way step 6 below describes just with `mechanic:
-CascadeSpinMechanic`/`linesCount: 1` in its own config - Candy Frenzy's own README is the
-worked example, not duplicated here.
+This section covers a line-pays game (`SlotEngine`) specifically. A cascade game follows the same
+three-file convention but plugs into `CascadeEngine`/`CascadeMath.js`/`FreeSpinsModes.js` instead
+(see their sections above), and wires RUN SIMULATION/TUNE FREQUENCIES the same way step 6 below
+describes just with `mechanic: CascadeSpinMechanic`/`linesCount: 1` in its own config. Two worked
+examples, deliberately different in their win rule and nothing else: Candy Frenzy (cluster-pays,
+using `ClusterMath.js`) and Mayan Tumble (line-pays, using its own evaluator over
+`SlotMath.js`'s `checkWins`) — see their own READMEs rather than a copy here.
+
+Whichever it is, `tuneConfig` must carry **every primitive the game's `winEvaluator` closes
+over**, because tuning trials rebuild that evaluator inside a Worker from its name (see "Parallel
+tuning" above). For a cluster game that is `minClusterSize`/`scatterTriggerCount`; for a line-pay
+cascade it is also `paylines`/`wildSymbol`.
 
 ### 1. `game.js` — data + engine instantiation
 
@@ -737,4 +867,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-26, commit `7ba3a2b`._
+_Docs last synced with the codebase: 2026-07-27, commit `66218c8`._
