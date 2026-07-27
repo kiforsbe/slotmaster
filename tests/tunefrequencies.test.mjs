@@ -1672,3 +1672,61 @@ test('reelCoupling rejects reels that do not carry the same symbols', async () =
     () => tuneFrequencies(couplingPaytable, mismatched, { ...couplingOptions, reelCoupling: 'linked' }),
     /reel 2.*missing.*lo/s);
 });
+
+test('reelCoupling "linked-then-refine" bounds per-reel deviation from the linked result', async () => {
+  // Phase 2b exists so a reel CAN differ - "reel 4 runs a little heavier on cake" is a real design
+  // choice. What it must not do is re-invent the spread linking just removed, so every refined
+  // weight stays within maxReelDeviation of the linked value it started from.
+  //
+  // The tolerance below is deliberately loose relative to maxReelDeviation: the bound clamps each
+  // dimension's PRE-renormalization raw weight, and projectPoint then renormalizes each reel
+  // against its own budget, which shifts the realized frequency somewhat. This asserts the bound
+  // is doing real work, not an exact arithmetic identity.
+  const result = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, reelCoupling: 'linked-then-refine', maxReelDeviation: 0.25, maxIterations: 12,
+  });
+
+  const c = result.diagnostics.rtpPhase.coupling;
+  assert.equal(c.mode, 'linked-then-refine');
+  assert.equal(c.dimsLinked, 2, 'stage A searches one dim per symbol');
+  assert.equal(c.dimsRefined, 6, 'stage B reopens one dim per (symbol, reel)');
+  assert.ok(Number.isFinite(c.linkedRtp), 'the linked stage always runs and always reports its RTP');
+
+  for (const symbol of ['hi', 'lo']) {
+    const values = result.reelFrequencyTables.map(rt => rt.symbols[symbol].frequency);
+    const mean = values.reduce((a, b) => a + b, 0) / values.length;
+    values.forEach(v => assert.ok(Math.abs(v - mean) / mean <= 0.6,
+      `${symbol} spread [${values.join(', ')}] exceeds what maxReelDeviation 0.25 should allow`));
+  }
+});
+
+test('reelCoupling "linked-then-refine" keeps the linked answer when refinement does not beat it', async () => {
+  // 2b replacing 2a unconditionally would let a noisier refinement quietly undo a better linked
+  // answer - the same failure 7ba9259 fixed for stall restarts. maxReelDeviation 0 pins stage B
+  // to exactly stage A's point, so refinement can only ever match, never beat, and the linked
+  // result must survive.
+  const result = await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, reelCoupling: 'linked-then-refine', maxReelDeviation: 0, maxIterations: 10,
+  });
+  assert.equal(result.diagnostics.rtpPhase.coupling.refinementAccepted, false);
+  for (const symbol of ['hi', 'lo']) {
+    const values = result.reelFrequencyTables.map(rt => rt.symbols[symbol].frequency);
+    values.forEach(v => assert.ok(Math.abs(v - values[0]) < 1e-9,
+      `${symbol} must still be identical across reels, got ${values.join(', ')}`));
+  }
+});
+
+test('the two coupling stages number their progress events continuously', async () => {
+  // Without an iteration offset, stage B restarts its 'shape' numbering at 0 and the live log
+  // reads as two searches rather than one - a caller cannot tell a refinement from a crash-restart.
+  const shapeIterations = [];
+  await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, reelCoupling: 'linked-then-refine', maxIterations: 12,
+    onProgress: (phase, i) => { if (phase === 'shape') shapeIterations.push(i); },
+  });
+  assert.ok(shapeIterations.length > 1);
+  for (let i = 1; i < shapeIterations.length; i++) {
+    assert.ok(shapeIterations[i] >= shapeIterations[i - 1],
+      `iteration numbering went backwards at ${i}: ${shapeIterations.join(', ')}`);
+  }
+});

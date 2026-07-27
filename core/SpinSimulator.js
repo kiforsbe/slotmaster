@@ -1768,6 +1768,16 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return { minX: Math.log(base * 0.001), maxX: Math.log(base * 1000) };
     });
 
+    // Which dimensions and bounds the CURRENTLY RUNNING search stage is exploring. `reelCoupling:
+    // 'linked-then-refine'` runs two stages back to back - a linked one over `activeDims`, then a
+    // per-reel one over `dims` bounded tightly around the linked answer - and every closure below
+    // (projectPoint, and through it makeEvaluate) reads whichever pair is active. Stages run
+    // strictly sequentially and never interleave, so a mutable pair here is simpler and harder to
+    // get wrong than threading both through every call site. For every other coupling mode these
+    // are set once and never change, i.e. exactly the previous behavior.
+    let stageDims = activeDims;
+    let stageBounds = dimBounds;
+
     // Turns a raw parameter vector into a full N-reel array: clamp each dimension to its
     // bounds, exponentiate out of log-space, then renormalize each reel's value-symbol
     // weights back to that reel's fixed budget - every other reel/symbol not in `dims`
@@ -1776,8 +1786,8 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     function projectPoint(x) {
       const reelTables = currentReelTables.map(rt => JSON.parse(JSON.stringify(rt)));
       const rawByReel = {};
-      activeDims.forEach((d, i) => {
-        const xi = Math.min(dimBounds[i].maxX, Math.max(dimBounds[i].minX, x[i]));
+      stageDims.forEach((d, i) => {
+        const xi = Math.min(stageBounds[i].maxX, Math.max(stageBounds[i].minX, x[i]));
         const value = Math.exp(xi);
         // `reelIndex: null` is a LINKED dimension - the same raw weight goes to every reel. Each
         // reel is still renormalized against its OWN valueBudget below, which is what preserves
@@ -2038,7 +2048,17 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // up early rather than spending the rest of `maxIterations` on a dead end - see the design
     // doc for the barfruits case (a genuinely infeasible target that used to run the full
     // budget with no way to notice or explain that) that motivated this.
-    let point = initialPoint;
+    // One complete run of the round loop over one set of dimensions. Factored out of the loop
+    // body it used to be so `reelCoupling: 'linked-then-refine'` can run it twice - once linked,
+    // once per-reel - without duplicating any of the stall/restart/acceptance logic, which is the
+    // subtlest code in this file and the last thing that should exist in two copies.
+    //
+    // `iterationOffset` keeps the 'shape' progress events numbered continuously across both
+    // stages, so a caller's log reads as one search rather than two restarting from zero.
+    async function runSearchStage({ dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0 }) {
+    stageDims = sDims;
+    stageBounds = sBounds;
+    let point = startPoint;
     let stepSize = initialStepSize;
     let restarts = 0;
     let iterationsUsed = 0;
@@ -2064,7 +2084,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // "continue tuning from this result" must never do. Measured under `baseNmSeed` - the same
     // seed the first round's own candidates use - so it's directly comparable to them.
     if (searchAlgorithm === 'cmaes') {
-      const baseline = { point: initialPoint, ...(await makeEvaluate(baseNmSeed)(initialPoint)) };
+      const baseline = { point: startPoint, ...(await makeEvaluate(baseNmSeed)(startPoint)) };
       best = baseline;
       bestOrderingPenalty = baseline.orderingPenalty;
       bestLimitPenalty = baseline.limitPenalty;
@@ -2083,10 +2103,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // restart (same mechanism as Nelder-Mead's) is a legitimate "try a wider net after
       // genuine convergence" step, not a premature interruption.
       const roundIterations = searchAlgorithm === 'cmaes'
-        ? maxIterations - iterationsUsed
-        : Math.min(stallWindowIterations, maxIterations - iterationsUsed);
+        ? iterationBudget - iterationsUsed
+        : Math.min(stallWindowIterations, iterationBudget - iterationsUsed);
       const nmSeed = baseNmSeed + restarts * 1300021;
-      const roundStartIterations = iterationsUsed;
+      const roundStartIterations = iterationOffset + iterationsUsed;
       // Which function actually runs this round - both return the same
       // { point, loss, result, iterations, converged } shape (see `searchAlgorithm`'s own doc
       // above), so nothing below this call needs to know or care which one it got.
@@ -2168,7 +2188,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // view: the per-iteration log line looks the same whether or not a restart just fired,
         // even though the search jumped back to `best.point` with a wider step underneath it.
         if (onProgress) {
-          await onProgress('restart', iterationsUsed, null,
+          await onProgress('restart', iterationOffset + iterationsUsed, null,
             {
               stepSize, restarts, stallStreak, maxStallRestarts, willStopNow: stallStreak >= maxStallRestarts,
               // Whether the round that just stalled actually became the new incumbent `best`
@@ -2185,7 +2205,102 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
           break;
         }
       }
-    } while (iterationsUsed < maxIterations);
+    } while (iterationsUsed < iterationBudget);
+
+    return {
+      best, iterationsUsed, restarts, stalledOut, userStopped, stillImproving,
+      bestOrderingPenalty, bestLimitPenalty, bestUniformityPenalty,
+    };
+    }
+
+    // ---- Run the stage(s) ----
+    // Every coupling mode except 'linked-then-refine' is a single stage, identical to the single
+    // pass this loop always was. 'linked-then-refine' splits the budget: 70% to the linked stage,
+    // where the real RTP movement happens on a fraction of the dimensions, and the remainder to a
+    // per-reel refinement bounded to +/-maxReelDeviation around the linked answer. The split is
+    // deliberate - giving 2b the full budget would hand back exactly the freedom 2a exists to
+    // remove, just from a better starting point.
+    let stage = null;
+    let coupling = null;
+    if (reelCoupling === 'linked-then-refine' && dims.length > activeDims.length) {
+      const linkedBudget = Math.max(1, Math.round(maxIterations * 0.7));
+      const stageA = await runSearchStage({
+        dims: activeDims, bounds: dimBounds, startPoint: initialPoint, iterationBudget: linkedBudget,
+      });
+      // Phase 2b starts from what 2a actually produced, read back off the projected tables rather
+      // than off stage A's point vector - the two differ, because projectPoint renormalizes each
+      // reel against its own budget, and it is the renormalized frequencies that were measured.
+      const refineStart = dims.map(d => Math.log(stageA.best.trial[d.reelIndex].symbols[d.symbol].frequency));
+      const refineBounds = refineStart.map(x => ({
+        minX: x + Math.log(1 - maxReelDeviation),
+        maxX: x + Math.log(1 + maxReelDeviation),
+      }));
+      const remaining = maxIterations - stageA.iterationsUsed;
+      const stageB = remaining > 0 && !stageA.userStopped
+        ? await runSearchStage({
+            dims, bounds: refineBounds, startPoint: refineStart,
+            iterationBudget: remaining, iterationOffset: stageA.iterationsUsed,
+          })
+        : null;
+      // 2b only replaces 2a if it beat it on the same statistically-gated test `best` itself uses.
+      // Without that check a noisier refinement could quietly undo a better linked answer - the
+      // precise failure 7ba9259 fixed for restarts, which would otherwise reappear here.
+      //
+      // Both sides are RE-MEASURED under one common seed before being compared, rather than
+      // compared on the losses each stage happens to carry. Those carried losses are not
+      // commensurable: a stage's `best` was measured under whichever round seed was current when
+      // it was found, and the round loop shifts that seed on every stall restart. Comparing them
+      // directly compares two different Monte Carlo draws, and the gap that shows up is noise at
+      // least as often as signal - observed here as stage B "winning" at maxReelDeviation 0, where
+      // it is pinned to stage A's exact point and cannot possibly have improved on it. Two extra
+      // measurements buy a comparison that means what it claims to, and the winner's reported RTP
+      // is then the one it was actually judged on.
+      let linkedFinal = null, refinedFinal = null, refineWon = false;
+      if (stageB != null) {
+        linkedFinal = { ...stageA.best, point: refineStart, ...(await makeEvaluate(baseNmSeed)(refineStart)) };
+        refinedFinal = { ...stageB.best, ...(await makeEvaluate(baseNmSeed)(stageB.best.point)) };
+        refineWon = beatsIncumbent(refinedFinal, linkedFinal, bestAcceptanceZ);
+      }
+      stage = refineWon ? stageB : stageA;
+      if (stageB) {
+        stage = {
+          ...stage,
+          best: refineWon ? refinedFinal : linkedFinal,
+          iterationsUsed: stageA.iterationsUsed + stageB.iterationsUsed,
+          userStopped: stageA.userStopped || stageB.userStopped,
+        };
+      }
+      coupling = {
+        mode: reelCoupling,
+        dimsLinked: activeDims.length,
+        dimsRefined: dims.length,
+        // Both under the common comparison seed when a refinement ran, so the two are directly
+        // comparable to each other and to whichever one `rtp` ends up reporting.
+        linkedRtp: linkedFinal ? linkedFinal.rtp : stageA.best.rtp,
+        refinedRtp: refinedFinal ? refinedFinal.rtp : null,
+        // Whether the per-reel refinement earned its budget, or the linked answer stood. A run
+        // where this is repeatedly false is a run whose Phase 2b budget would be better spent on
+        // Phase 2a - worth being able to see rather than infer.
+        refinementAccepted: refineWon,
+      };
+    } else {
+      stage = await runSearchStage({
+        dims: activeDims, bounds: dimBounds, startPoint: initialPoint, iterationBudget: maxIterations,
+      });
+      coupling = {
+        mode: reelCoupling,
+        dimsLinked: linkedCoupling ? activeDims.length : 0,
+        dimsRefined: linkedCoupling ? 0 : dims.length,
+        linkedRtp: linkedCoupling ? stage.best.rtp : null,
+        refinedRtp: linkedCoupling ? null : stage.best.rtp,
+        refinementAccepted: null,
+      };
+    }
+
+    const {
+      best, iterationsUsed, restarts, stalledOut, userStopped, stillImproving,
+      bestOrderingPenalty, bestLimitPenalty, bestUniformityPenalty,
+    } = stage;
 
     currentReelTables = best.trial;
     const reason = (() => {
@@ -2210,13 +2325,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // to look at: identical-looking frequencies from a linked run and an independent run came
       // out of searches with very different degrees of freedom, and the diagnostics should say
       // which one produced this result rather than leaving it to be inferred from the tables.
-      coupling: {
-        mode: reelCoupling,
-        dimsLinked: linkedCoupling ? activeDims.length : 0,
-        dimsRefined: linkedCoupling ? 0 : dims.length,
-        linkedRtp: linkedCoupling ? best.rtp : null,
-        refinedRtp: linkedCoupling ? null : best.rtp,
-      },
+      coupling,
       rtpRange: { min: rtpMin, max: rtpMax },
       orderingPenaltyRemaining: bestOrderingPenalty,
       limitPenaltyRemaining: bestLimitPenalty,
