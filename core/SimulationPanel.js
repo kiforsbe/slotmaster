@@ -601,6 +601,18 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
         <button id="tune-start-btn" class="btn-close-sim">START TUNING</button>
         <button id="tune-stop-btn" class="btn-icon btn-sim-btn" style="display: none; padding: 6px 14px; font-size: 0.9em; background: rgba(255,90,90,0.2); border-color: #ff8080;">STOP</button>
       </div>
+      <!-- "Where am I, what is running, and why" - answered continuously rather than left to be
+           reconstructed from the numbers. The stats cards below say how the search is DOING; this
+           says what it is DOING, which is the question that was unanswerable while a two-stage
+           Phase 2 reported "Step 9" identically in either stage. -->
+      <div id="tune-phase-banner" style="display: none; margin-top: 12px; background: rgba(127,191,255,0.09); border-left: 3px solid #7fbfff; border-radius: 6px; padding: 8px 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;">
+          <span id="tune-phase-name" style="font-size: 0.9em; font-weight: bold; color: #cfe6ff;">—</span>
+          <span id="tune-phase-progress" style="font-size: 0.75em; color: #9ab;"></span>
+        </div>
+        <div id="tune-phase-strategy" style="font-size: 0.8em; color: #ddd; margin-top: 3px;"></div>
+        <div id="tune-phase-why" style="font-size: 0.75em; color: #9ab; margin-top: 3px; font-style: italic;"></div>
+      </div>
       <div id="tune-live-stats" style="display: none; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px;">
         <div style="background: rgba(255,255,255,0.06); border-radius: 8px; padding: 10px 14px;">
           <div style="display: flex; justify-content: space-between; align-items: baseline;">
@@ -873,6 +885,32 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
   const liveStatsBestEl = tuneContainer.querySelector('#tune-live-stats-best');
   const liveStatsBestImprovedEl = tuneContainer.querySelector('#tune-live-stats-best-improved');
   const liveStatsViolationsEl = tuneContainer.querySelector('#tune-live-stats-violations');
+  const phaseBannerEl = tuneContainer.querySelector('#tune-phase-banner');
+  const phaseNameEl = tuneContainer.querySelector('#tune-phase-name');
+  const phaseProgressEl = tuneContainer.querySelector('#tune-phase-progress');
+  const phaseStrategyEl = tuneContainer.querySelector('#tune-phase-strategy');
+  const phaseWhyEl = tuneContainer.querySelector('#tune-phase-why');
+
+  // The strategy currently running in Phase 2, as announced by the engine's 'coupling-stage'
+  // events. Held here so every per-iteration line can be tagged with it - without that, a
+  // two-stage run logs "Step 9" identically whether it is still sharing one weight per symbol or
+  // has already handed over to the bounded per-reel refinement, and the handover is invisible.
+  let currentStage = null;
+  const STAGE_LABELS = {
+    linked: 'same mix', refine: 'vary per reel', independent: 'per-reel mix',
+  };
+
+  // One place that answers "where am I / what is running / why", updated by every phase rather
+  // than only by Phase 2. `progress` is optional and shows position within the phase when there
+  // is one to show.
+  function setPhaseBanner({ name, strategy, why, progress }) {
+    if (!phaseBannerEl) return;
+    phaseBannerEl.style.display = 'block';
+    phaseNameEl.textContent = name;
+    phaseProgressEl.textContent = progress ?? '';
+    phaseStrategyEl.textContent = strategy ?? '';
+    phaseWhyEl.textContent = why ?? '';
+  }
   // reelIdx -> symbol -> { min, max } actually assigned during the search so far this run -
   // grows as Phase 2 explores, reset fresh on every START TUNING click.
   const testedRangeByReel = reelFrequencyTables.map(() => ({}));
@@ -1128,7 +1166,50 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
         // hadn't taken effect until well after the fact.
         if (phase === 'initial') {
           appendLog(`Starting point selected (${initialWeightStrategyLabels[options.initialWeightStrategy] || options.initialWeightStrategy})`);
+          setPhaseBanner({
+            name: 'Phase 0 · Checking the ground',
+            strategy: 'measuring what this config pays before changing anything',
+            why: 'a target the current structure cannot reach is not a search problem, and it is cheaper to find out now',
+          });
           if (r.trial) updateLiveTable(r.trial, null);
+          return;
+        }
+        // Phase 2's strategy handover. The engine announces which search is about to run, what it
+        // is allowed to move, and why - so a two-stage run reads as two deliberate stages rather
+        // than as one long list of steps whose meaning silently changed partway through.
+        if (phase === 'coupling-stage') {
+          const stageName = { linked: 'Same mix on every reel', refine: 'Vary slightly per reel', independent: 'Independent per reel' }[r.stage] ?? r.stage;
+          if (r.event === 'start') {
+            currentStage = r.stage;
+            const phaseLabel = r.onlyStage ? 'Phase 2' : (r.stage === 'linked' ? 'Phase 2a' : 'Phase 2b');
+            // Phrased per stage rather than from one template: "84 weights (of 12 possible)" is
+            // what a shared template produced for the refinement, and it reads as nonsense because
+            // `comparedTo` means opposite things in the two directions - a reduction going in, and
+            // the thing being reopened coming out.
+            const scope = r.stage === 'linked' && r.comparedTo != null
+              ? `${r.dimensions} shared weights, one per symbol, in place of ${r.comparedTo} per-reel ones`
+              : r.stage === 'refine'
+              ? `all ${r.dimensions} per-reel weights, reopened from the ${r.comparedTo} shared ones`
+              : `${r.dimensions} weight${r.dimensions === 1 ? '' : 's'}`;
+            appendLog(`▶ ${phaseLabel} - ${stageName}: searching ${scope}, up to ${r.iterationBudget} iterations. ${r.strategy}.`);
+            setPhaseBanner({
+              name: `${phaseLabel} · ${stageName}`,
+              strategy: `${r.strategy} — ${r.dimensions} free weight${r.dimensions === 1 ? '' : 's'}, up to ${r.iterationBudget} iterations`,
+              why: r.why,
+              progress: `targeting RTP ${options.targetRtp}% ±${options.rtpTolerancePct}`,
+            });
+          } else if (r.event === 'skipped') {
+            appendLog(`⤼ Phase 2b - ${stageName} skipped: ${r.why}`);
+          } else if (r.event === 'end') {
+            if (r.accepted != null) {
+              // The comparison that decides whether the reels stay on one mix. Both figures are
+              // measured under one common seed (see tuneFrequencies) so the difference is real
+              // rather than two Monte Carlo draws being read against each other.
+              appendLog(`${r.accepted ? '✓' : '✗'} Phase 2b - per-reel refinement ${r.accepted ? 'ACCEPTED' : 'REJECTED'}: shared ${r.linkedRtp.toFixed(2)}% (loss ${r.linkedLoss.toFixed(4)}) vs per-reel ${r.refinedRtp.toFixed(2)}% (loss ${r.refinedLoss.toFixed(4)}). ${r.why}.`);
+            } else {
+              appendLog(`■ ${stageName} finished after ${r.iterationsUsed} iterations at RTP ${r.rtp.toFixed(2)}% (error ${r.error.toFixed(4)}) - ${r.reason}.`);
+            }
+          }
           return;
         }
         // Phase 0: this game's own minGap spacing cannot be honored at this reel length, and
@@ -1257,8 +1338,23 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
           appendOrUpdateBusyLog(`${i}-${r.operation}`, `… [${label}] ${message}`);
           return;
         }
-        const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}`;
+        // Every Phase 2 line carries the stage that produced it. "Step 9" alone is ambiguous in a
+        // two-stage run - it could be the shared-weight search or the per-reel refinement, and
+        // those mean opposite things about what the numbers below are free to do.
+        const stageSuffix = (phase === 'shape' && (r.stage ?? currentStage))
+          ? ` [${STAGE_LABELS[r.stage ?? currentStage] ?? (r.stage ?? currentStage)}]` : '';
+        const label = phase === 'scatter' ? `Scatter frequency ${i + 1}` : `Step ${i + 1}${stageSuffix}`;
         const multLabel = mult == null ? '' : `  mult=${mult.toFixed(3)}`;
+        if (phase === 'scatter') {
+          setPhaseBanner({
+            name: 'Phase 1 · Free-spin trigger rate',
+            strategy: 'scaling the trigger symbol by one shared multiplier, bisecting toward the target',
+            why: 'trigger rate is a coarse step function of that multiplier, so bisection cannot overshoot the way a slope-based search does',
+            progress: `targeting ${options.targetTriggerRatePct}% ±${options.triggerRateTolerancePct} · measurement ${i + 1}`,
+          });
+        } else if (phase === 'shape' && phaseProgressEl) {
+          phaseProgressEl.textContent = `iteration ${i + 1} · targeting RTP ${options.targetRtp}% ±${options.rtpTolerancePct}`;
+        }
 
         // `r` (Phase 1/'scatter') or `r.attempted` (Phase 2/'shape') is what THIS iteration's
         // own work actually just tried - for 'scatter', gradientDescent1D always reports a

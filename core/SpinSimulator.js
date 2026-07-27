@@ -2055,7 +2055,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     //
     // `iterationOffset` keeps the 'shape' progress events numbered continuously across both
     // stages, so a caller's log reads as one search rather than two restarting from zero.
-    async function runSearchStage({ dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0 }) {
+    async function runSearchStage({ dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0, stageTag = null }) {
     stageDims = sDims;
     stageBounds = sBounds;
     let point = startPoint;
@@ -2121,8 +2121,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // positional argument here, so tuneFrequencies' own onProgress signature stays the
         // fixed `(phase, iteration, multiplier, result, best)` shape documented above for every
         // phase - a caller that doesn't know about `attempted` yet just never looks at it.
+        // `stage` rides along on every 'shape' event so a caller can say WHICH search is running.
+        // Without it a two-stage run reports "Step 9" identically whether that is the linked stage
+        // or the per-reel refinement, and a developer watching the log cannot tell whether the
+        // handover ever happened - only that the numbers changed.
         onProgress: onProgress
-          ? (i, pt, result, roundBest, attempted) => onProgress('shape', roundStartIterations + i, null, { ...result, attempted }, roundBest)
+          ? (i, pt, result, roundBest, attempted) => onProgress('shape', roundStartIterations + i, null, { ...result, attempted, stage: stageTag }, roundBest)
           : null,
         onBusy: onProgress
           ? (info) => onProgress('busy', roundStartIterations + info.iteration, null, { ...info, sourcePhase: 'shape' }, null)
@@ -2222,11 +2226,29 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // remove, just from a better starting point.
     let stage = null;
     let coupling = null;
+
+    // Announces which search is about to run, what it can move, and why - fired before every
+    // stage, single-stage runs included. A search that silently changes strategy partway through
+    // is indistinguishable from one that never changed at all: the per-iteration numbers move
+    // either way. `stage` identifies it, `strategy`/`why` explain it in a form a caller can show
+    // verbatim rather than having to reconstruct from `coupling` after the fact.
+    const announceStage = async (stage, extra) => {
+      if (!onProgress) return;
+      await onProgress('coupling-stage', 0, null, { stage, mode: reelCoupling, ...extra }, null);
+    };
+
     if (reelCoupling === 'linked-then-refine' && dims.length > activeDims.length) {
       const linkedBudget = Math.max(1, Math.round(maxIterations * 0.7));
+      await announceStage('linked', {
+        event: 'start', dimensions: activeDims.length, comparedTo: dims.length, iterationBudget: linkedBudget,
+        strategy: 'one shared weight per symbol, applied to every reel',
+        why: 'reel index carries no meaning on a cluster grid, so per-reel spread is search noise rather than design - sharing one weight makes it unrepresentable instead of merely penalized',
+      });
       const stageA = await runSearchStage({
         dims: activeDims, bounds: dimBounds, startPoint: initialPoint, iterationBudget: linkedBudget,
+        stageTag: 'linked',
       });
+      await announceStage('linked', { event: 'end', rtp: stageA.best.rtp, error: stageA.best.error, iterationsUsed: stageA.iterationsUsed, reason: stageA.stalledOut ? 'stalled' : stageA.userStopped ? 'stopped' : 'budget spent' });
       // Phase 2b starts from what 2a actually produced, read back off the projected tables rather
       // than off stage A's point vector - the two differ, because projectPoint renormalizes each
       // reel against its own budget, and it is the renormalized frequencies that were measured.
@@ -2236,12 +2258,26 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         maxX: x + Math.log(1 + maxReelDeviation),
       }));
       const remaining = maxIterations - stageA.iterationsUsed;
-      const stageB = remaining > 0 && !stageA.userStopped
-        ? await runSearchStage({
-            dims, bounds: refineBounds, startPoint: refineStart,
-            iterationBudget: remaining, iterationOffset: stageA.iterationsUsed,
-          })
-        : null;
+      let stageB = null;
+      if (remaining > 0 && !stageA.userStopped) {
+        await announceStage('refine', {
+          event: 'start', dimensions: dims.length, comparedTo: activeDims.length, iterationBudget: remaining,
+          maxReelDeviation,
+          strategy: `one weight per (symbol, reel), each held within +/-${(maxReelDeviation * 100).toFixed(0)}% of the shared value`,
+          why: 'a deliberate per-reel tilt is a real design choice, so refinement can express one - the bound is what stops it re-inventing the spread the linked stage just removed',
+        });
+        stageB = await runSearchStage({
+          dims, bounds: refineBounds, startPoint: refineStart,
+          iterationBudget: remaining, iterationOffset: stageA.iterationsUsed,
+          stageTag: 'refine',
+        });
+      } else {
+        await announceStage('refine', {
+          event: 'skipped',
+          why: stageA.userStopped ? 'the run was stopped before refinement could start'
+            : 'the linked stage used the whole iteration budget - raise Max Iterations to leave room for a refinement pass',
+        });
+      }
       // 2b only replaces 2a if it beat it on the same statistically-gated test `best` itself uses.
       // Without that check a noisier refinement could quietly undo a better linked answer - the
       // precise failure 7ba9259 fixed for restarts, which would otherwise reappear here.
@@ -2260,6 +2296,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         linkedFinal = { ...stageA.best, point: refineStart, ...(await makeEvaluate(baseNmSeed)(refineStart)) };
         refinedFinal = { ...stageB.best, ...(await makeEvaluate(baseNmSeed)(stageB.best.point)) };
         refineWon = beatsIncumbent(refinedFinal, linkedFinal, bestAcceptanceZ);
+        await announceStage('refine', {
+          event: 'end', accepted: refineWon,
+          linkedRtp: linkedFinal.rtp, refinedRtp: refinedFinal.rtp,
+          linkedLoss: linkedFinal.loss, refinedLoss: refinedFinal.loss,
+          iterationsUsed: stageB.iterationsUsed,
+          why: refineWon
+            ? 'the per-reel refinement beat the shared answer by more than their combined measurement error, so it is kept'
+            : 'the per-reel refinement did not beat the shared answer by more than their combined measurement error, so the shared answer is kept and the reels stay on one mix',
+        });
       }
       stage = refineWon ? stageB : stageA;
       if (stageB) {
@@ -2284,8 +2329,25 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         refinementAccepted: refineWon,
       };
     } else {
+      // Single-stage runs announce themselves too. "Which strategy is this?" is a question worth
+      // answering even when there is only one answer - silence reads as "nothing decided this",
+      // and a developer who has just switched coupling modes needs to see that the switch took.
+      await announceStage(linkedCoupling ? 'linked' : 'independent', {
+        event: 'start', dimensions: activeDims.length, iterationBudget: maxIterations, onlyStage: true,
+        strategy: linkedCoupling
+          ? 'one shared weight per symbol, applied to every reel'
+          : 'one weight per (symbol, reel), each free of the others',
+        why: linkedCoupling
+          ? 'reel index carries no meaning on a cluster grid, so per-reel spread is search noise rather than design'
+          : 'reel position genuinely matters on a payline game, so each reel is tuned on its own',
+      });
       stage = await runSearchStage({
         dims: activeDims, bounds: dimBounds, startPoint: initialPoint, iterationBudget: maxIterations,
+        stageTag: linkedCoupling ? 'linked' : 'independent',
+      });
+      await announceStage(linkedCoupling ? 'linked' : 'independent', {
+        event: 'end', rtp: stage.best.rtp, error: stage.best.error, iterationsUsed: stage.iterationsUsed,
+        reason: stage.stalledOut ? 'stalled' : stage.userStopped ? 'stopped' : 'budget spent',
       });
       coupling = {
         mode: reelCoupling,

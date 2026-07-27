@@ -895,7 +895,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // tune. A new phase emitting null `best` must be added here consciously - which is the prompt to
   // give core/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
-    'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete',
+    'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
   ]);
   const offenders = new Set();
   await tuneFrequencies(PAYTABLE, REEL_TABLES, {
@@ -1743,4 +1743,42 @@ test('the two coupling stages number their progress events continuously', async 
     assert.ok(shapeIterations[i] >= shapeIterations[i - 1],
       `iteration numbering went backwards at ${i}: ${shapeIterations.join(', ')}`);
   }
+});
+
+test('every Phase 2 stage announces itself, and every shape event says which stage it came from', async () => {
+  // Without this a two-stage run reports "Step 9" identically whether it is still sharing one
+  // weight per symbol or has handed over to the bounded per-reel refinement. The numbers move
+  // either way, so a developer watching the log cannot tell whether the handover happened at all -
+  // which is exactly the question "am I still on same-mix, or vary-slightly?".
+  const stageEvents = [];
+  const shapeStages = new Set();
+  await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, reelCoupling: 'linked-then-refine', maxIterations: 12,
+    onProgress: (phase, i, mult, r) => {
+      if (phase === 'coupling-stage') stageEvents.push(`${r.stage}:${r.event}`);
+      if (phase === 'shape') shapeStages.add(r.stage);
+    },
+  });
+
+  assert.ok(stageEvents.includes('linked:start'), `expected a linked start, got ${stageEvents.join(', ')}`);
+  assert.ok(stageEvents.includes('linked:end'));
+  assert.ok(stageEvents.some(e => e.startsWith('refine:')), 'the refinement stage must announce itself even when skipped');
+  assert.deepEqual([...shapeStages].sort(), ['linked', 'refine'],
+    'each shape event must name its own stage, and both stages must actually run');
+});
+
+test('a stage announcement carries the strategy and the reason, not just a name', async () => {
+  // A label alone ("Phase 2a") says where you are but not what is being done or why - which is
+  // the difference between a progress indicator and an explanation. These strings are rendered
+  // verbatim by the panel, so the engine is where they have to be right.
+  let start = null;
+  await tuneFrequencies(couplingPaytable, [couplingTable(), couplingTable(), couplingTable()], {
+    ...couplingOptions, reelCoupling: 'linked', maxIterations: 4,
+    onProgress: (phase, i, mult, r) => { if (phase === 'coupling-stage' && r.event === 'start' && !start) start = r; },
+  });
+  assert.equal(start.stage, 'linked');
+  assert.equal(start.dimensions, 2, 'the announcement must say how many weights are actually free');
+  assert.ok(start.strategy && start.strategy.length > 10, 'strategy must be a sentence a panel can show verbatim');
+  assert.ok(start.why && start.why.length > 10, 'why must explain the choice, not restate the name');
+  assert.equal(start.onlyStage, true, 'a single-stage run must say so, so "Phase 2a" is not implied when there is no 2b');
 });
