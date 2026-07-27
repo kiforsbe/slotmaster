@@ -71,7 +71,7 @@ export const PAYTABLE = {
 export const REEL_LENGTH = 500;
 
 export const FREQUENCY_REEL1 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.08325 },
     gum:         { frequency: 0.06154 },
@@ -90,7 +90,7 @@ export const FREQUENCY_REEL1 = {
 };
 
 export const FREQUENCY_REEL2 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.08327 },
     gum:         { frequency: 0.06155 },
@@ -109,7 +109,7 @@ export const FREQUENCY_REEL2 = {
 };
 
 export const FREQUENCY_REEL3 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.04626 },
     gum:         { frequency: 0.0342 },
@@ -128,7 +128,7 @@ export const FREQUENCY_REEL3 = {
 };
 
 export const FREQUENCY_REEL4 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.08324 },
     gum:         { frequency: 0.06153 },
@@ -147,7 +147,7 @@ export const FREQUENCY_REEL4 = {
 };
 
 export const FREQUENCY_REEL5 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.08324 },
     gum:         { frequency: 0.06154 },
@@ -166,7 +166,7 @@ export const FREQUENCY_REEL5 = {
 };
 
 export const FREQUENCY_REEL6 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.08326 },
     gum:         { frequency: 0.06155 },
@@ -185,7 +185,7 @@ export const FREQUENCY_REEL6 = {
 };
 
 export const FREQUENCY_REEL7 = {
-  defaults: { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
+  defaults: { minGap: 2, maxStack: 4, minStack: 2, stackChance: 0.2, minFrequency: 0.005, maxFrequency: 0.5 },
   symbols: {
     cottoncandy: { frequency: 0.08326 },
     gum:         { frequency: 0.06155 },
