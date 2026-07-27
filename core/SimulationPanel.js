@@ -452,6 +452,140 @@ function formatFrequencyForCopy(freq) {
   return Number(freq.toPrecision(4)).toString();
 }
 
+// Payouts, unlike frequencies, are read back by humans as design values ("a 5-cluster of a
+// premium pays 0.75x"), so they keep more precision than formatFrequencyForCopy's 4 s.f. - a
+// scale of 0.6922 turns 0.75 into 0.51915, and rounding that to 0.5192 is a silent 0.01% RTP
+// drift the developer never asked for.
+// Greedy word wrap into `// ` comment lines at the same 100-column budget the surrounding source
+// uses, so an emitted explanation reads like the file it is pasted into.
+function wrapAsComment(text, width = 96) {
+  const lines = [];
+  let line = '';
+  text.split(/\s+/).filter(Boolean).forEach(word => {
+    if (line && (line.length + 1 + word.length) > width) { lines.push(line); line = word; }
+    else line = line ? `${line} ${word}` : word;
+  });
+  if (line) lines.push(line);
+  return lines.map(l => `// ${l}`).join('\n');
+}
+
+function formatPayoutForCopy(v) {
+  if (typeof v !== 'number') return JSON.stringify(v);
+  if (v === 0) return '0';
+  return Number(v.toPrecision(6)).toString();
+}
+
+/**
+ * Renders a `scaledPaytable` (from tuneFrequencies' `solvePayoutScale`) as paste-ready code.
+ *
+ * Cluster games declare a small number of SHARED ladders - Candy Frenzy has exactly two,
+ * `PREMIUM_PAYOUT` and `REGULAR_PAYOUT`, with six symbols pointing at each - so emitting one
+ * literal per symbol would be technically correct and practically useless: the developer's source
+ * has two constants to paste over, not twelve object literals to reassemble by hand. Ladders are
+ * therefore grouped by VALUE (not by reference, which `scalePaytable`'s per-entry copy has already
+ * broken), and each group is named after the `type` its members share - which on the real target
+ * game reproduces the source's own constant names exactly.
+ *
+ * Line-pay games instead carry a distinct `payout` array per symbol with no shared structure to
+ * preserve, so those are emitted as per-symbol replacement lines. The asymmetry is deliberate: in
+ * both cases the output matches the shape of the declaration it is meant to replace.
+ */
+export function formatScaledPaytableForCopy(scaledPaytable, payoutScale = null) {
+  if (!scaledPaytable) return '';
+  const scale = payoutScale?.scale;
+
+  // ---- cluster ladders, grouped by value ----
+  const groups = new Map(); // serialized ladder -> { tiers, symbols, types }
+  // ---- line-pay payout arrays, per symbol ----
+  const lineRows = [];
+
+  Object.keys(scaledPaytable).forEach(sym => {
+    const entry = scaledPaytable[sym];
+    if (Array.isArray(entry.clusterPayout)) {
+      const key = JSON.stringify(entry.clusterPayout);
+      if (!groups.has(key)) groups.set(key, { tiers: entry.clusterPayout, symbols: [], types: new Set() });
+      const g = groups.get(key);
+      g.symbols.push(sym);
+      if (entry.type) g.types.add(entry.type);
+    } else if (Array.isArray(entry.payout)) {
+      lineRows.push([sym, entry.payout]);
+    }
+    // Everything else - scatters, wilds, anything with no payout data - is carried through
+    // unchanged by scalePaytable and has nothing to paste, so it is omitted rather than
+    // emitted as an empty stub the developer would have to recognize as a no-op.
+  });
+
+  const blocks = [];
+  const usedNames = new Set();
+  groups.forEach(g => {
+    // Unanimous type -> the name the source almost certainly already uses. Mixed or missing
+    // type -> an indexed fallback, since guessing a name wrong is worse than not guessing.
+    let base = g.types.size === 1 ? `${[...g.types][0].toUpperCase()}_PAYOUT` : `CLUSTER_PAYOUT_${blocks.length + 1}`;
+    let name = base;
+    for (let n = 2; usedNames.has(name); n++) name = `${base}_${n}`;
+    usedNames.add(name);
+
+    const minWidth = Math.max(...g.tiers.map(t => String(t.min).length));
+    const lines = g.tiers.map(t => `  { min: ${String(t.min).padStart(minWidth)}, multiplier: ${formatPayoutForCopy(t.multiplier)} },`);
+    blocks.push(`// Used by: ${g.symbols.join(', ')}\nexport const ${name} = [\n${lines.join('\n')}\n];`);
+  });
+
+  if (lineRows.length > 0) {
+    const keyWidth = Math.max(...lineRows.map(([s]) => s.length + 1));
+    const rows = lineRows.map(([sym, payout]) =>
+      `//   ${`${sym}:`.padEnd(keyWidth)} payout: [${payout.map(formatPayoutForCopy).join(', ')}],`);
+    blocks.push(`// Replace each symbol's \`payout:\` array in PAYTABLE:\n${rows.join('\n')}`);
+  }
+
+  if (blocks.length === 0) return '';
+
+  const header = [
+    `// ---- Scaled paytable (payout scale ${scale != null ? Number(scale.toPrecision(6)) : '?'}) ----`,
+    `// RTP is strictly proportional to a global multiplier on every payout, so this is exact`,
+    `// arithmetic rather than a search result${payoutScale?.rtpBeforeScaling != null
+      ? `: ${payoutScale.rtpBeforeScaling.toFixed(2)}% x ${Number(scale.toPrecision(6))} = target.`
+      : '.'}`,
+    payoutScale?.verified === true
+      ? `// Confirmed by measurement under the scaled paytable: ${payoutScale.verifiedRtp?.toFixed(2)}% RTP.`
+      : payoutScale?.verified === false
+      // Wrapped rather than emitted as one line: this note runs to several sentences (it has to -
+      // it distinguishes three different causes with different fixes), and a 400-column comment
+      // pasted into game.js is a comment nobody reads.
+      ? wrapAsComment(`NOT CONFIRMED by measurement. ${payoutScale.verificationNote ?? `Measured ${payoutScale.verifiedRtp?.toFixed(2)}%.`}`)
+      : null,
+  ].filter(l => l !== null).join('\n');
+
+  return `${header}\n${blocks.join('\n\n')}`;
+}
+
+/**
+ * The payout-scale solve as it appears in the results panel. Pure - returns HTML, renders nothing.
+ * Empty string when no solve was run, so the caller can drop it in unconditionally.
+ */
+export function renderPayoutScaleHtml(payoutScale, { targetRtp } = {}) {
+  if (!payoutScale) return '';
+  const scale = Number(payoutScale.scale.toPrecision(6));
+  const direction = scale < 1 ? 'down' : 'up';
+  const pct = Math.abs((scale - 1) * 100).toFixed(1);
+  // Confirmed and unconfirmed are drawn differently on purpose. The scale is exact arithmetic
+  // either way, but a game whose winEvaluator captured its own paytable measures the ORIGINAL
+  // payouts on the verification run - and presenting that identically to a confirmed result is
+  // how a paytable nobody checked ends up shipped.
+  const ok = payoutScale.verified === true;
+  return `<div style="margin: 10px 0; padding: 10px 12px; border-radius: 6px; background: rgba(127,191,255,0.1); border-left: 3px solid ${ok ? '#7fbfff' : '#e6b800'};">
+      <div style="font-size: 0.85em; color: #cfe6ff; font-weight: bold;">Payout scale ${scale} &mdash; every payout ${direction} ${pct}%</div>
+      <div style="font-size: 0.78em; color: #ccc; margin-top: 4px;">
+        These frequencies pay <strong>${payoutScale.rtpBeforeScaling.toFixed(2)}%</strong>; scaling every payout by
+        <strong>${scale}</strong> lands on ${targetRtp != null ? `${targetRtp}%` : 'target'}. RTP is strictly proportional to a
+        global payout multiplier, so this is exact rather than another thing to search for.
+      </div>
+      ${ok
+        ? `<div style="font-size: 0.75em; color: #7fd97f; margin-top: 4px;">Confirmed by measurement under the scaled paytable: <strong>${payoutScale.verifiedRtp.toFixed(2)}%</strong>.</div>`
+        : `<div style="font-size: 0.75em; color: #e6b800; margin-top: 4px;"><strong>Not confirmed</strong> &mdash; ${esc(payoutScale.verificationNote ?? `the check run measured ${payoutScale.verifiedRtp.toFixed(2)}%, not the ${targetRtp ?? 'target'}% the arithmetic requires.`)}</div>`}
+      <div style="font-size: 0.75em; color: #888; margin-top: 4px;">The scaled paytable is in the copyable output below. Nothing here has changed your game's paytable.</div>
+    </div>`;
+}
+
 export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = null) {
   const tables = reelFrequencyTables.map((table, i) => {
     const defaults = table.defaults || {};
@@ -531,7 +665,14 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     ``,
   ].filter(l => l !== null).join('\n');
 
-  return `${header}\n${tables}`;
+  // Same reasoning as REEL_LENGTH directly above: a result that depends on a rescaled paytable is
+  // not reproducible from frequencies alone. Pasting these frequencies back WITHOUT the scaled
+  // payouts reproduces the RTP the search started from, not the one reported at the top.
+  const paytableBlock = context.scaledPaytable
+    ? `${formatScaledPaytableForCopy(context.scaledPaytable, context.payoutScale)}\n\n`
+    : '';
+
+  return `${header}\n${paytableBlock}${tables}`;
 }
 
 /**
@@ -623,6 +764,16 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
             <span id="tune-trigger-pct-echo" style="display: block; font-size: 0.85em; color: #888; margin-top: 3px;">&nbsp;</span>
           </label>
         </div>
+        <!-- Sits with Target RTP because it is a way of REACHING Target RTP, not a search knob:
+             RTP is strictly proportional to a global payout multiplier, so the value that lands
+             exactly on target is closed-form. Off by default - it rewrites the game's paytable,
+             which is a design artifact nobody should have changed for them by a checkbox they
+             didn't tick. -->
+        <label title="After the frequency search finishes, compute the single multiplier that would put RTP exactly on target if applied to every payout value, and report it (plus a verification measurement and a paste-ready scaled paytable). Nothing is changed for you - this only ever produces a suggestion, exactly like the frequency tables. Worth knowing why this is different from everything else here: frequencies are a poor RTP lever, which is precisely why the search has to torture them into the over-abundance that then breaks reel spacing and cluster behavior. Payout values are an EXACT lever - k = target / measured, verified linear to 5 significant figures. Using it frees the frequency search to do what it is actually good at: ordering, uniformity, spacing and trigger rate." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 10px;">
+          <input id="tune-solve-payout-scale" type="checkbox" style="vertical-align: middle; margin-right: 6px;">
+          Also work out the exact payout multiplier that hits this RTP
+          <span style="color: #888;">&mdash; suggestion only, your paytable is never changed</span>
+        </label>
       </div>
 
       <!-- 2. HOW THE REELS SHOULD LOOK - shaping preferences and per-reel ordering. Opened
@@ -1032,6 +1183,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     searchAlgorithm: tuneContainer.querySelector('#tune-search-algorithm'),
     reelCoupling: tuneContainer.querySelector('#tune-reel-coupling'),
     maxReelDeviation: tuneContainer.querySelector('#tune-max-reel-deviation'),
+    solvePayoutScale: tuneContainer.querySelector('#tune-solve-payout-scale'),
   };
   const biasSelects = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-${r}`));
   const biasStrengthInputs = Array.from({ length: tuneConfig.reelsCount }, (_, r) => tuneContainer.querySelector(`#tune-bias-strength-${r}`));
@@ -1148,6 +1300,10 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // On in the panel, off in the library. ~30 extra measurements is right for a developer who
     // just clicked TUNE and wrong for every programmatic caller that never asked for it.
     measureSensitivity: true,
+    // A checkbox, so `.checked` rather than `.value` - and gated on `!diagnoseOnly` because the
+    // solve runs AFTER the search, off the final frequencies. A diagnosis has no final
+    // frequencies; the exact scale from HERE is already in the sensitivity report's routes.
+    solvePayoutScale: !diagnoseOnly && inputs.solvePayoutScale.checked,
     winEvaluatorFactory: tuneConfig.winEvaluatorFactory ?? null,
     // Number.isFinite rather than `|| 0.25`, so an explicit 0 - "pin the refinement to the linked
     // answer entirely" - survives instead of being silently replaced by the default.
@@ -1266,7 +1422,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
       liveTableEl.innerHTML = renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, testedRangeByReel, trial, bestTrial, paytable, bestOrderingViolations, bestLimitViolations);
     };
 
-    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, diagnostics } = await runTuneFrequenciesWithPool(paytable, reelFrequencyTables, options,
+    const { reelFrequencyTables: tunedReelTables, rtp, triggerRatePct, scaledPaytable, diagnostics } = await runTuneFrequenciesWithPool(paytable, reelFrequencyTables, options,
       (phase, i, mult, r, best) => {
         // Every reported RTP is shown WITH its own measurement uncertainty attached, always -
         // never a bare number on its own. With only 1 trial there's no repeat measurement to
@@ -1854,6 +2010,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     const varianceColor = options.trialsPerPoint <= 1 ? '#888' : (isUnreliable ? '#ff8080' : '#7fd97f');
     let html = `<p style="font-size: 0.85em; color: #ccc; margin: 12px 0 8px;">Achieved RTP: <strong>${rtp.toFixed(2)}%</strong><span style="color: ${varianceColor};">${varianceText}</span> &nbsp;|&nbsp; Free spin trigger rate: <strong>${triggerRatePct.toFixed(3)}%</strong> (1 in ${(100 / triggerRatePct).toFixed(0)})</p>`;
 
+    // Directly under the achieved RTP, because it is a statement ABOUT that number: "this is what
+    // the frequencies pay, and here is the exact multiplier that would put it on target". Empty
+    // string when the box was unticked, so this line costs nothing when unused.
+    html += renderPayoutScaleHtml(diagnostics.payoutScale, { targetRtp: options.targetRtp });
+
     // A trigger-rate target that no multiplier can reach is a fundamentally different problem
     // from one the search merely ran out of budget on, and it has a different fix - the trigger
     // rate moves in coarse jumps because generateReel rounds each symbol's share to a whole
@@ -2046,7 +2207,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
 
     html += `<div style="margin-top: 12px;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                  <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Copy-paste ready FREQUENCY_REEL tables</span>
+                  <span style="font-size: 0.7em; color: #999; text-transform: uppercase;">Copy-paste ready FREQUENCY_REEL tables${scaledPaytable ? ' + scaled payouts' : ''}</span>
                   <button id="tune-copy-btn" class="btn-icon btn-sim-btn" style="padding: 4px 10px; font-size: 0.75em;">COPY</button>
                 </div>
                 <textarea id="tune-paytable-output" readonly style="width: 100%; height: 200px; box-sizing: border-box; font-family: monospace; font-size: 0.75em; background: rgba(0,0,0,0.4); color: #ddd; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 8px; resize: vertical;"></textarea>
@@ -2098,6 +2259,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
       inputParameters: diagnostics.inputParameters,
       rtp,
       triggerRatePct,
+      // Both, not just the table: the scaled ladders are the pasteable artifact, and
+      // `payoutScale` is what lets the emitted header say where the number came from and
+      // whether measurement actually confirmed it.
+      scaledPaytable,
+      payoutScale: diagnostics.payoutScale,
     });
 
     const copyBtn = resultsEl.querySelector('#tune-copy-btn');

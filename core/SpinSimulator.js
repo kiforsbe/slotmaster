@@ -770,6 +770,63 @@ export function scalePaytable(paytable, scale) {
   return scaled;
 }
 
+/**
+ * Decides whether a payout-scale verification run actually confirmed the scaled paytable, and if
+ * not, WHICH of the three possible reasons it was - rather than asserting one of them.
+ *
+ * The first version of this named a single culprit unconditionally ("your winEvaluator captured
+ * its own paytable"). That is one real cause, and it is the one that motivated the check, but a
+ * check run measured at 150k spins on a high-variance cascade game misses by more than the
+ * tolerance routinely, and being told the wrong cause is worse than being told the result is
+ * inconclusive: the developer goes and rewrites an evaluator that was never broken.
+ *
+ * The three cases are distinguishable from the numbers already in hand:
+ *  - the run came back essentially where it started, i.e. scaling had NO effect -> the evaluator
+ *    never read the paytable it was handed;
+ *  - the miss is inside the run's own measurement noise -> the sample is too small to resolve a
+ *    difference this size, and nothing is wrong except the spin count;
+ *  - it moved, and moved further than noise explains, but not to where linearity requires -> this
+ *    mechanic has a payout component that is not a plain multiplier.
+ */
+export function describePayoutScaleVerification({ rtpBeforeScaling, verifiedRtp, targetRtp, stdError = 0, tolerance }) {
+  const miss = Math.abs(verifiedRtp - targetRtp);
+  if (miss <= tolerance) return { verified: true, note: null };
+
+  const shouldHaveMovedBy = Math.abs(targetRtp - rtpBeforeScaling);
+  const movedBy = Math.abs(verifiedRtp - rtpBeforeScaling);
+  // "Barely moved" is only meaningful when there was a real distance to cover in the first place;
+  // a scale already within noise of 1 has nothing to detect.
+  if (shouldHaveMovedBy > tolerance && movedBy < shouldHaveMovedBy * 0.25) {
+    return {
+      verified: false,
+      note: 'Could not verify the scaled paytable: the check run came back at '
+        + `${verifiedRtp.toFixed(2)}%, essentially unchanged from the ${rtpBeforeScaling.toFixed(2)}% measured before scaling, `
+        + 'which means the win evaluator never read the scaled payouts at all. That is what happens when a game\'s '
+        + 'winEvaluator is a closure over its own paytable (e.g. `(grid) => checkClusterWins(grid, PAYTABLE, ...)`) - '
+        + 'overriding config.paytable has no effect on it. The scale itself is exact (RTP is strictly proportional to '
+        + 'payout multipliers); pass `winEvaluatorFactory` so the check run can rebuild the evaluator around the scaled paytable.',
+    };
+  }
+
+  if (stdError > 0 && miss <= stdError * 3) {
+    return {
+      verified: false,
+      note: `Could not confirm the scaled paytable at this sample size: the check run measured ${verifiedRtp.toFixed(2)}% `
+        + `against the ${targetRtp}% exact linearity requires, but its own standard error is ±${stdError.toFixed(2)}pp - `
+        + 'the measurement is too noisy to resolve a difference this small. Nothing here suggests the scale is wrong; '
+        + 'raise Trial Spins and/or Trials Averaged to confirm it.',
+    };
+  }
+
+  return {
+    verified: false,
+    note: `Could not verify the scaled paytable: the check run measured ${verifiedRtp.toFixed(2)}% where exact linearity `
+      + `requires ${targetRtp}%, and it moved too far to be explained by its own ±${stdError.toFixed(2)}pp measurement noise. `
+      + 'Either this mechanic has a payout component that is not a plain multiplier (which would break the proportionality '
+      + 'the solve relies on), or the check run needs more spins. Treat the scale as unconfirmed until one of those is ruled out.',
+  };
+}
+
 export function beatsIncumbent(candidate, incumbent, z) {
   if (!incumbent) return true;
   const margin = z * Math.sqrt((candidate.trialRtpStdError ?? 0) ** 2 + (incumbent.trialRtpStdError ?? 0) ** 2);
@@ -2628,20 +2685,23 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // paytable that misses the target would be worse than reporting the discrepancy.
     const verified = await measure(finalReelTables, searchSeed + 990002, undefined, scaledPaytable);
     // The verification run is only meaningful if the win evaluator actually READS the paytable it
-    // was handed. A cascade game's `winEvaluator` is typically a per-game closure that captured
-    // its own paytable (e.g. `(grid) => checkClusterWins(grid, PAYTABLE, ...)`), so overriding
-    // `config.paytable` has no effect on it and the run measures the ORIGINAL payouts. Detected
-    // rather than assumed: if the measurement didn't move to where exact linearity says it must,
-    // the scale is still correct arithmetic but nothing here has confirmed it, and saying so is
-    // the only honest option. Caller's fix is to rebuild the evaluator around `scaledPaytable`.
-    const verificationLandedOnTarget = Math.abs(verified.rtp - targetRtp) <= Math.max(rtpTolerancePct * 3, targetRtp * 0.1);
+    // was handed - and when it misses, WHICH reason it missed for decides what the developer
+    // should go and do about it. See describePayoutScaleVerification for why that is worked out
+    // from the numbers rather than asserted.
+    const { verified: verificationLandedOnTarget, note } = describePayoutScaleVerification({
+      rtpBeforeScaling: finalResult.rtp,
+      verifiedRtp: verified.rtp,
+      targetRtp,
+      stdError: verified.trialRtpStdError,
+      tolerance: Math.max(rtpTolerancePct * 3, targetRtp * 0.1),
+    });
     payoutScale = {
       scale,
       rtpBeforeScaling: finalResult.rtp,
       verifiedRtp: verified.rtp,
+      verifiedStdError: verified.trialRtpStdError,
       verified: verificationLandedOnTarget,
-      verificationNote: verificationLandedOnTarget ? null
-        : 'Could not verify the scaled paytable: this game\'s winEvaluator captured its own paytable, so the verification run still measured the ORIGINAL payouts. The scale itself is exact (RTP is strictly proportional to payout multipliers) - rebuild the evaluator around `scaledPaytable` to confirm it.',
+      verificationNote: note,
       scaledPaytable,
     };
   }
@@ -2695,7 +2755,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // Closed-form payout-value solve, when requested: the exact multiplier applied to every
       // payout to hit targetRtp, plus a verification measurement under the scaled paytable.
       payoutScale: payoutScale
-        ? { scale: payoutScale.scale, rtpBeforeScaling: payoutScale.rtpBeforeScaling, verifiedRtp: payoutScale.verifiedRtp, verified: payoutScale.verified, verificationNote: payoutScale.verificationNote }
+        ? { scale: payoutScale.scale, rtpBeforeScaling: payoutScale.rtpBeforeScaling, verifiedRtp: payoutScale.verifiedRtp, verifiedStdError: payoutScale.verifiedStdError, verified: payoutScale.verified, verificationNote: payoutScale.verificationNote }
         : null,
       // Symbols whose own spacing constraints CANNOT be satisfied at this reel length, checked
       // against the untuned baseline before any search runs. Empty is the healthy case. A

@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatReelFrequencyTablesForCopy, renderDiagnosisHtml } from '../core/SimulationPanel.js';
+import {
+  formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
+  formatScaledPaytableForCopy, renderPayoutScaleHtml,
+} from '../core/SimulationPanel.js';
+import { scalePaytable } from '../core/SpinSimulator.js';
 
 test('formatReelFrequencyTablesForCopy preserves distinct small frequencies instead of collapsing them', () => {
   // Reproduces the bookbookbook bug: several genuinely distinct tuned frequencies under 1
@@ -281,4 +285,98 @@ test('renderDiagnosisHtml surfaces a broken payoutScale measurement instead of h
   const payoutLine = out.split('\n').find(l => l.includes('payoutScale') && !l.includes('scale every payout'));
   assert.ok(!/no measurable effect/i.test(payoutLine),
     'a knob whose measurement failed must not be described as having no effect - the two mean opposite things');
+});
+
+// ---- Task 1.8: the payout-scale solve reaching the panel ----------------------------------
+// Until this landed there were ZERO references to solvePayoutScale/payoutScale/scaledPaytable
+// anywhere in SimulationPanel.js: the one EXACT RTP lever the tuner has was unreachable from the
+// UI, while the diagnosis panel above it printed "scale every payout by 0.6922 (exact)" as its
+// top recommendation. These cover the two halves of closing that - the emitted code and the
+// rendered result.
+
+test('formatScaledPaytableForCopy groups symbols sharing a payout ladder into one named constant', () => {
+  // Candy Frenzy declares TWO ladders (PREMIUM_PAYOUT, REGULAR_PAYOUT) and points six symbols at
+  // each. Emitting twelve inline copies would be technically correct and practically useless -
+  // the developer's source has two constants to paste over, not twelve object literals to
+  // reassemble. Grouping is by ladder VALUE, so the shared-reference structure survives.
+  const PREMIUM = [{ min: 5, multiplier: 0.75 }, { min: 7, multiplier: 1.75 }];
+  const REGULAR = [{ min: 5, multiplier: 0.2 }];
+  const original = {
+    gum:   { type: 'premium', clusterPayout: PREMIUM, friendlyName: 'Bubble Gum' },
+    cake:  { type: 'premium', clusterPayout: PREMIUM, friendlyName: 'Cake Slice' },
+    mint:  { type: 'regular', clusterPayout: REGULAR, friendlyName: 'Mint' },
+    bonus: { type: 'scatter', triggerFreeSpins: true, friendlyName: 'Bonus' },
+  };
+  const out = formatScaledPaytableForCopy(scalePaytable(original, 0.5), { scale: 0.5 });
+
+  assert.equal((out.match(/export const PREMIUM_PAYOUT/g) || []).length, 1,
+    'the six-symbol premium ladder must be emitted once, not once per symbol');
+  assert.match(out, /export const REGULAR_PAYOUT/);
+  assert.match(out, /multiplier: 0\.375/, 'premium 0.75 x 0.5');
+  assert.match(out, /multiplier: 0\.1\b/, 'regular 0.2 x 0.5');
+  // Which symbols a ladder belongs to is the only way to know where to paste it.
+  assert.match(out, /gum, cake/);
+  // A scatter has no payout ladder at all and must not invent one.
+  assert.ok(!/bonus/.test(out), 'a symbol with no payout ladder must not appear');
+});
+
+test('formatScaledPaytableForCopy emits per-symbol payout arrays for a line-pay paytable', () => {
+  const original = {
+    bar:    { type: 'regular', payout: [0, 0, 5, 20, 100] },
+    seven:  { type: 'premium', payout: [0, 0, 10, 50, 250] },
+  };
+  const out = formatScaledPaytableForCopy(scalePaytable(original, 0.5), { scale: 0.5 });
+  assert.match(out, /bar\b[^\n]*\[0, 0, 2\.5, 10, 50\]/);
+  assert.match(out, /seven\b[^\n]*\[0, 0, 5, 25, 125\]/);
+});
+
+test('formatReelFrequencyTablesForCopy emits the scaled paytable as real code when one was solved', () => {
+  // Same reasoning as REEL_LENGTH in 2548ac2: a result that depends on a rescaled paytable is not
+  // reproducible from frequencies alone, and a comment is not something you can paste.
+  const output = formatReelFrequencyTablesForCopy([{ defaults: {}, symbols: { bar: { frequency: 2 } } }], {
+    rtp: 96.0, triggerRatePct: 0.6,
+    inputParameters: { reelLength: 500, searchSeed: 12345, reelSeeds: [101] },
+    scaledPaytable: { bar: { type: 'regular', clusterPayout: [{ min: 5, multiplier: 0.709 }] } },
+    payoutScale: { scale: 0.946, verified: true, verifiedRtp: 96.02, rtpBeforeScaling: 101.5 },
+  });
+  assert.match(output, /payout scale 0\.946/);
+  assert.match(output, /multiplier: 0\.709/);
+  // Still emits the frequencies it was always emitting - the paytable is an addition, not a swap.
+  assert.match(output, /export const FREQUENCY_REEL1/);
+});
+
+test('formatReelFrequencyTablesForCopy is unchanged when no payout scale was solved', () => {
+  const context = {
+    rtp: 96.0, triggerRatePct: 0.6,
+    inputParameters: { reelLength: 500, searchSeed: 12345, reelSeeds: [101] },
+  };
+  const out = formatReelFrequencyTablesForCopy([{ defaults: {}, symbols: { bar: { frequency: 2 } } }], context);
+  assert.ok(!/payout scale/i.test(out), 'off by default means absent from the output entirely');
+});
+
+test('renderPayoutScaleHtml states the arithmetic AND whether measurement confirmed it', () => {
+  const out = renderPayoutScaleHtml({
+    scale: 0.6922, rtpBeforeScaling: 138.68, verifiedRtp: 96.02, verified: true, verificationNote: null,
+  }, { targetRtp: 96 });
+  assert.match(out, /0\.6922/);
+  assert.match(out, /138\.68/);
+  assert.match(out, /96\.02/);
+});
+
+test('renderPayoutScaleHtml says so loudly when the verification run could not confirm the scale', () => {
+  // The failure mode this exists for: a cascade game's winEvaluator captured its own paytable, so
+  // the verification run measured the ORIGINAL payouts. The scale is still exact arithmetic - but
+  // presenting an unconfirmed number identically to a confirmed one is how a wrong paytable ships.
+  const out = renderPayoutScaleHtml({
+    scale: 0.6922, rtpBeforeScaling: 138.68, verifiedRtp: 138.7, verified: false,
+    verificationNote: 'Could not verify the scaled paytable: this game\'s winEvaluator captured its own paytable.',
+  }, { targetRtp: 96 });
+  assert.match(out, /could not verify/i);
+  assert.match(out, /winEvaluator captured its own paytable/);
+  assert.ok(!/verified/i.test(out.replace(/could not verify/ig, '')) || /not verif/i.test(out),
+    'must not read as verified');
+});
+
+test('renderPayoutScaleHtml renders nothing at all when the solve was not requested', () => {
+  assert.equal(renderPayoutScaleHtml(null, { targetRtp: 96 }), '');
 });

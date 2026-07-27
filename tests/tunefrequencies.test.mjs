@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent } from '../core/SpinSimulator.js';
+import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent, describePayoutScaleVerification } from '../core/SpinSimulator.js';
 import { checkWildLineWins } from '../core/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
@@ -1962,4 +1962,57 @@ test('diagnoseConfig still refuses a config with validation errors', async () =>
       trialSpins: 500, sensitivitySpins: 200, trialsPerPoint: 1,
     }),
     /pays LESS for a bigger cluster/);
+});
+
+// ---- payout-scale verification: WHICH reason it failed, not a guess -----------------------
+// The first version of this named one culprit unconditionally ("your winEvaluator captured its
+// own paytable"). Observed live on Candy Frenzy - which DOES pass winEvaluatorFactory, so that
+// cause was ruled out - the check run at a small spin count missed by 20pp on noise alone and was
+// reported as a closure bug. Being told the wrong cause is worse than being told "inconclusive":
+// the developer goes and rewrites an evaluator that was never broken.
+
+test('a check run that did not move at all is reported as an evaluator that ignored the paytable', () => {
+  const { verified, note } = describePayoutScaleVerification({
+    rtpBeforeScaling: 138.68, verifiedRtp: 138.7, targetRtp: 96, stdError: 0.4, tolerance: 9.6,
+  });
+  assert.equal(verified, false);
+  assert.match(note, /winEvaluatorFactory/, 'this is the one cause with a concrete fix - name it');
+  assert.match(note, /unchanged/i);
+});
+
+test('a miss inside the check run\'s own noise is reported as too few spins, not a broken evaluator', () => {
+  const { verified, note } = describePayoutScaleVerification({
+    rtpBeforeScaling: 96.96, verifiedRtp: 117.76, targetRtp: 96, stdError: 8.0, tolerance: 9.6,
+  });
+  assert.equal(verified, false);
+  assert.match(note, /Trial Spins/i);
+  assert.ok(!/winEvaluator/.test(note),
+    'the evaluator is not implicated by a noisy sample - blaming it sends the developer to rewrite working code');
+});
+
+test('a miss too large for noise and too large to be "unchanged" blames neither, and says so', () => {
+  const { verified, note } = describePayoutScaleVerification({
+    rtpBeforeScaling: 96.96, verifiedRtp: 130, targetRtp: 96, stdError: 0.5, tolerance: 9.6,
+  });
+  assert.equal(verified, false);
+  assert.match(note, /not a plain multiplier/);
+  assert.ok(!/winEvaluatorFactory/.test(note));
+});
+
+test('a check run that landed on target verifies with no note at all', () => {
+  const { verified, note } = describePayoutScaleVerification({
+    rtpBeforeScaling: 138.68, verifiedRtp: 96.4, targetRtp: 96, stdError: 0.5, tolerance: 9.6,
+  });
+  assert.equal(verified, true);
+  assert.equal(note, null);
+});
+
+test('a scale already within tolerance of 1 cannot be diagnosed as "did not move"', () => {
+  // shouldHaveMovedBy is tiny here, so "barely moved" carries no information - every outcome looks
+  // like it barely moved. Guarding on it is what keeps the closure accusation off a run whose
+  // frequencies were already essentially on target.
+  const { note } = describePayoutScaleVerification({
+    rtpBeforeScaling: 96.5, verifiedRtp: 120, targetRtp: 96, stdError: 0.5, tolerance: 9.6,
+  });
+  assert.ok(!/winEvaluatorFactory/.test(note));
 });
