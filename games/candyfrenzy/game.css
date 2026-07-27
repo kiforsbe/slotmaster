@@ -312,6 +312,12 @@ header {
   white-space: nowrap;
 }
 
+/* Equal-width digits, so a column of multipliers lines up on its decimal point instead of
+   drifting with each value's magnitude. */
+.paytable-table td {
+  font-variant-numeric: tabular-nums;
+}
+
 .paytable-table tbody tr:nth-child(even) {
   background: rgba(255, 255, 255, 0.04);
 }

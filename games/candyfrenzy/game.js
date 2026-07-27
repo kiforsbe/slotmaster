@@ -610,8 +610,10 @@ function symbolIconHtml(symbol, themeAssets, size = 36) {
     + `</span>`;
 }
 
+// Two decimals on every cell, including whole numbers. Trimming them ("300x" beside "0.4x") makes
+// a column of numbers that are meant to be compared against each other line up on nothing.
 function formatMultiplier(multiplier) {
-  return `${Number(multiplier.toFixed(2))}x`;
+  return `${multiplier.toFixed(2)}x`;
 }
 
 // A matrix, not a list of cards: cluster size down the side, symbol across the top. Every symbol
