@@ -1011,7 +1011,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
              which is a design artifact nobody should have changed for them by a checkbox they
              didn't tick. -->
         <label title="After the frequency search finishes, compute the single multiplier that would put RTP exactly on target if applied to every payout value, and report it (plus a verification measurement and a paste-ready scaled paytable). Nothing is changed for you - this only ever produces a suggestion, exactly like the frequency tables. Worth knowing why this is different from everything else here: frequencies are a poor RTP lever, which is precisely why the search has to torture them into the over-abundance that then breaks reel spacing and cluster behavior. Payout values are an EXACT lever - k = target / measured, verified linear to 5 significant figures. Using it frees the frequency search to do what it is actually good at: ordering, uniformity, spacing and trigger rate." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 10px;">
-          <input id="tune-solve-payout-scale" type="checkbox" style="vertical-align: middle; margin-right: 6px;">
+          <input id="tune-solve-payout-scale" type="checkbox" checked style="vertical-align: middle; margin-right: 6px;">
           Also work out the exact payout multiplier that hits this RTP
           <span style="color: #888;">&mdash; suggestion only, your paytable is never changed</span>
         </label>
@@ -1022,7 +1022,7 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
              of each knob chosen separately. Cheap because the grid is RANKED from Phase 0c's
              already-paid-for ladders and only a handful of cells are ever simulated. -->
         <label title="After checking which knobs matter, search them TOGETHER for one combination of stackChance / maxStack / minStack / minGap that reaches your target RTP at even symbol frequencies - and report it for you to accept or reject. Nothing is applied. Knobs the sweep found no measurable effect for are left out rather than multiplying the search for nothing. Among combinations that hit the target it prefers the SMALLEST change from what you already chose, so the answer is a tweak you can judge rather than a redesign you have to argue with. This matters most when even frequencies pay nowhere near target: the frequency search's only way to close that gap is concentrating symbols, which is exactly the over-abundance complaint - fixing it structurally means the search never has to." style="display: block; font-size: 0.8em; color: #ccc; margin-top: 6px;">
-          <input id="tune-tune-structural" type="checkbox" style="vertical-align: middle; margin-right: 6px;">
+          <input id="tune-tune-structural" type="checkbox" checked style="vertical-align: middle; margin-right: 6px;">
           Also suggest what to set the stacking/spacing settings to
           <span style="color: #888;">&mdash; searched together, not one at a time</span>
         </label>
@@ -1150,6 +1150,9 @@ ${PENALTY_INTENTS.map(p => `
           </label>
           <label title="Base PRNG seed for the whole search. A given seed always explores the same sequence, so a run is reproducible end to end - the copyable output records whichever seed produced it. Change it to explore a different path through the same search space without changing any other setting." style="font-size: 0.8em; color: #ccc;">Search Seed<br>
             <input id="tune-search-seed" type="number" value="12345" step="1" min="0" style="width: 100%; margin-top: 4px;">
+          </label>
+          <label title="How many spins each point of the Phase 0c knob sweep and the Phase 0d structural grid is measured over. This is the setting that decides whether CHECK MY CONFIG can tell two structural settings apart: its measured noise floor scales as 1/sqrt(this). Measured on Candy Frenzy - 10,000 spins gives a noise floor of ±17.9pp, 150,000 gives ±2.9pp. Ranking knobs by leverage survives a lot of noise (the top knobs measure in the hundreds of pp per unit), but deciding WHICH COMBINATION hits your target does not, which is why Phase 0d refuses to name a winner when the floor is wider than your RTP tolerance and tells you to raise this. Lower is faster: the whole point of CHECK MY CONFIG is that it answers in seconds." style="font-size: 0.8em; color: #ccc;">Diagnosis Spins / Point<br>
+            <input id="tune-sensitivity-spins" type="number" value="50000" step="10000" min="1000" style="width: 100%; margin-top: 4px;">
           </label>
           <label title="Which denomination the loss weights are expressed in. NORMALIZED re-denominates every penalty into a scale-free fraction, so a weight of 1 is worth roughly one RTP percentage point on any game and any term - which is what makes the named levels above mean anything. RAW uses the penalties' own units, which are incommensurable: ordering is in frequency units, spacing is a violation COUNT. Measured on Candy Frenzy, a raw spacing weight of 0.25 contributes 43.75 to a loss whose RTP error term is 1.76, so the search spends 96% of its effort on spacing while appearing to tune RTP. Raw is the library default and is kept here for reproducing older runs exactly." style="font-size: 0.8em; color: #ccc;">Penalty Denomination<br>
             <select id="tune-penalty-normalization" style="width: 100%; margin-top: 4px;">
@@ -1306,7 +1309,8 @@ ${PENALTY_INTENTS.map(p => `
           `${fmt(num('#tune-trial-spins'))} spins x${num('#tune-trials-per-point')} · reel ${num('#tune-reel-length')}`;
       }
       if (summaryEls.advanced) {
-        summaryEls.advanced.textContent = `— seed ${num('#tune-search-seed')} · max std error ${num('#tune-max-rtp-std-error')}%`;
+        summaryEls.advanced.textContent = `— seed ${num('#tune-search-seed')} · max std error ${num('#tune-max-rtp-std-error')}% · `
+          + `diagnosis ${fmt(num('#tune-sensitivity-spins'))} spins/point`;
       }
     }
     // ---- Intent dropdowns <-> raw weights ----
@@ -1519,6 +1523,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     maxReelDeviation: tuneContainer.querySelector('#tune-max-reel-deviation'),
     penaltyNormalization: tuneContainer.querySelector('#tune-penalty-normalization'),
     targetVolatility: tuneContainer.querySelector('#tune-target-volatility'),
+    sensitivitySpins: tuneContainer.querySelector('#tune-sensitivity-spins'),
     solvePayoutScale: tuneContainer.querySelector('#tune-solve-payout-scale'),
     tuneStructural: tuneContainer.querySelector('#tune-tune-structural'),
   };
@@ -1656,6 +1661,11 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // On in the panel, off in the library. ~30 extra measurements is right for a developer who
     // just clicked TUNE and wrong for every programmatic caller that never asked for it.
     measureSensitivity: true,
+    // Explicit rather than the library's implicit trialSpins/4. How carefully candidates are
+    // measured and how carefully the structural KNOBS are measured are different questions:
+    // one wants a converged RTP, the other wants a ranking, and tying them together means you
+    // cannot make the diagnosis fast without also making the tune untrustworthy.
+    sensitivitySpins: parseInt(inputs.sensitivitySpins.value, 10) || 50000,
     // A checkbox, so `.checked` rather than `.value` - and gated on `!diagnoseOnly` because the
     // solve runs AFTER the search, off the final frequencies. A diagnosis has no final
     // frequencies; the exact scale from HERE is already in the sensitivity report's routes.
