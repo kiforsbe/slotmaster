@@ -85,7 +85,10 @@ export function describePlayerExperience(roundStats, { bet = 1, rtp, triggerRate
     fractionAhead: nets.filter(n => n > 0).length / nets.length,
   };
 
-  const money = (multiple) => `${multiple >= 0 ? '' : '-'}${Math.abs(multiple * bet).toFixed(bet >= 1 ? 0 : 2)}`;
+  // Magnitude only. Every call site already supplies the direction in words ("ends down", "end
+  // up"), so a sign here reads as "down -65" - which is either a double negative or a typo,
+  // depending on how carefully the reader is looking.
+  const money = (multiple) => Math.abs(multiple * bet).toFixed(bet >= 1 ? 0 : 2);
   const lines = [];
 
   lines.push(`Something pays on ${(hitRate * 100).toFixed(0)}% of spins${

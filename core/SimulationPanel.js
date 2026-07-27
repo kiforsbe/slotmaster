@@ -5,7 +5,7 @@ import { resolveFrequencyBounds } from './SlotMath.js';
 import { exportSpinLogCsv } from './SpinLog.js';
 import { tuneFrequencies } from './SpinSimulator.js';
 import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
-import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent } from './TuningUnits.js';
+import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent, volatilityBandToSigma } from './TuningUnits.js';
 import { describePlayerExperience } from './PlayerExperience.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -992,6 +992,18 @@ export function openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneCo
             </span>
             <span id="tune-trigger-pct-echo" style="display: block; font-size: 0.85em; color: #888; margin-top: 3px;">&nbsp;</span>
           </label>
+          <!-- The third thing a developer actually wants, and until now the only one that was
+               inexpressible. Named band rather than a raw sigma, converted through TuningUnits so
+               the band asked for here and the band reported in the result come from one table. -->
+          <label title="How swingy the game should feel, as the standard deviation of the payout per round in bet multiples - the figure the industry quotes as 'volatility'. Low is frequent small wins and shallow swings; High is long dry spells paid for by rare big wins. IMPORTANT CAVEAT: on a cluster-cascade game volatility is dominated by the payout ladder shape and maxStack, NOT by symbol frequencies. Measured on Candy Frenzy, maxStack moves RTP by 255pp per integer step while the whole frequency search is worth about ±10pp, and volatility follows the same pattern. So this target mostly steers CHECK MY CONFIG's structural recommendation and the payout solve. Setting it and pointing the frequency search alone at it will move volatility very little - worth knowing before you spend 150 iterations finding out." style="font-size: 0.8em; color: #ccc;">How swingy should it feel<br>
+            <select id="tune-target-volatility" style="width: 100%; margin-top: 4px;">
+              <option value="" selected>No preference</option>
+              <option value="low">Low — frequent small wins</option>
+              <option value="medium">Medium — a mix</option>
+              <option value="high">High — rare big wins</option>
+            </select>
+            <span id="tune-volatility-echo" style="display: block; font-size: 0.85em; color: #888; margin-top: 3px;">&nbsp;</span>
+          </label>
         </div>
         <!-- Sits with Target RTP because it is a way of REACHING Target RTP, not a search knob:
              RTP is strictly proportional to a global payout multiplier, so the value that lands
@@ -1259,6 +1271,19 @@ ${PENALTY_INTENTS.map(p => `
           ? `= ${pct.toFixed(3)}% of spins (band ${Math.max(0, pct - tol).toFixed(2)}–${(pct + tol).toFixed(2)}%)`
           : 'no free-spin target';
       }
+      // The band's actual sigma range, shown beside the name - so "Low" is visibly a claim about a
+      // measurable quantity, and the caveat about how little the frequency search can move it is
+      // attached where the choice is made rather than only in a tooltip.
+      const volEchoEl = el('#tune-volatility-echo');
+      if (volEchoEl) {
+        const chosen = el('#tune-target-volatility')?.value;
+        if (!chosen) {
+          volEchoEl.textContent = 'reported either way, just not targeted';
+        } else {
+          const b = volatilityBandToSigma(chosen);
+          volEchoEl.textContent = `= σ ${b.min}–${b.max === Infinity ? '∞' : b.max}× bet · mostly a STRUCTURAL lever, not a frequency one`;
+        }
+      }
       // Only preferences actually turned ON are worth naming. Listing "ordering 0.5, limits 0.5,
       // uniformity 0, trigger 0, spacing 0" would make the two that matter exactly as hard to pick
       // out as they are in the expanded grid, which is the problem this is here to solve.
@@ -1493,6 +1518,7 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     reelCoupling: tuneContainer.querySelector('#tune-reel-coupling'),
     maxReelDeviation: tuneContainer.querySelector('#tune-max-reel-deviation'),
     penaltyNormalization: tuneContainer.querySelector('#tune-penalty-normalization'),
+    targetVolatility: tuneContainer.querySelector('#tune-target-volatility'),
     solvePayoutScale: tuneContainer.querySelector('#tune-solve-payout-scale'),
     tuneStructural: tuneContainer.querySelector('#tune-tune-structural'),
   };
@@ -1620,6 +1646,13 @@ async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneCont
     // to raw), because the named levels in the shape section are only meaningful against
     // normalized penalties - see core/SpinSimulator.js's own penaltyNormalization doc.
     penaltyNormalization: inputs.penaltyNormalization.value,
+    // Empty string means "No preference", which must reach the engine as null rather than as a
+    // band nothing satisfies - the penalty is inert with no target, whatever its weight.
+    targetVolatility: inputs.targetVolatility.value || null,
+    // On only when a band was actually chosen. 'Prefer'-strength: volatility is genuinely hard to
+    // move from frequencies alone (see the control's own tooltip), so a heavier default would buy
+    // a worse RTP for a volatility that barely shifted.
+    volatilityPenaltyWeight: inputs.targetVolatility.value ? 1 : 0,
     // On in the panel, off in the library. ~30 extra measurements is right for a developer who
     // just clicked TUNE and wrong for every programmatic caller that never asked for it.
     measureSensitivity: true,

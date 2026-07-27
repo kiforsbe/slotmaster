@@ -1231,7 +1231,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: option `penaltyNormalization: 'raw' | 'normalized'` (default `'raw'`); each penalty result gains `{ total, normalized, violations }`; diagnostics report both.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('normalized penalties are scale-free, so the same weight means the same thing on any game', () => {
@@ -1251,9 +1251,9 @@ test('penaltyNormalization defaults to raw and leaves existing losses unchanged'
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 | penalty | normalization |
 |---|---|
@@ -1265,9 +1265,9 @@ test('penaltyNormalization defaults to raw and leaves existing losses unchanged'
 
 `makeEvaluate` uses `normalized` when `penaltyNormalization === 'normalized'`, `total` otherwise. Report both in every result object so a weight can be translated between modes.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/SpinSimulator.js tests/tunefrequencies.test.mjs
@@ -1283,7 +1283,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `core/SimulationPanel.js` — replace the five weight inputs in `#tune-section-shape`; move raw numbers to `#tune-section-advanced`
 - Test: `tests/tuningunits.test.mjs`, `tests/simulationpanel.test.mjs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('intent levels map onto normalized weights', () => {
@@ -1297,9 +1297,9 @@ test('intent levels map onto normalized weights', () => {
 });
 ```
 
-- [ ] **Step 2–3: Run, implement**
+- [x] **Step 2–3: Run, implement**
 
-- [ ] **Step 4: Rebuild the shape section around intents**
+- [x] **Step 4: Rebuild the shape section around intents**
 
 Each of ordering / uniformity / spacing / trigger-rate / std-error becomes `Off | Prefer | Insist | Require`, phrased as what it wants rather than what it penalizes:
 
@@ -1316,9 +1316,9 @@ The `now:` column is the point of the exercise: a level is visibly a choice abou
 
 Raw numeric weights move to *Advanced* and stay authoritative — changing one there sets the dropdown to `custom` rather than snapping to a named level. Selecting any named intent implies `penaltyNormalization: 'normalized'`, since the level numbers are only meaningful against normalized penalties; say so in the section's tooltip.
 
-- [ ] **Step 5: Run tests and verify live**
+- [x] **Step 5: Run tests and verify live**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/SimulationPanel.js tests/simulationpanel.test.mjs
@@ -1334,7 +1334,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `core/SimulationPanel.js` — handler + rendering; add `'loss-preview'` to `KNOWN_NULL_BEST_PHASES`
 - Test: `tests/tunefrequencies.test.mjs`, `tests/simulationpanel.test.mjs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('the loss preview reports each term in pp, sorted by contribution', async () => {
@@ -1344,13 +1344,13 @@ test('the loss preview reports each term in pp, sorted by contribution', async (
 });
 ```
 
-- [ ] **Step 2–4: Run, implement, run**
+- [x] **Step 2–4: Run, implement, run**
 
 Reuse `makeEvaluate(baseNmSeed)(initialPoint)` — CMA-ES already measures exactly this point for its baseline anchor, so reuse that measurement rather than paying for a second one.
 
 Rendered by a pure `formatLossBudget` at the **bottom of screen 2**, so it appears both from `CHECK MY CONFIG` and at the start of a tune. Sorted descending, with the dominant term arrowed and called out in words — the failure this prevents is spending 150 iterations before noticing the search was optimizing spacing, not RTP.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/SpinSimulator.js core/SimulationPanel.js tests/
@@ -1374,7 +1374,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `results.roundStats = { rounds, hitRate, meanWin, medianWin, p90, p99, p999, maxWin, top1PctShare, volatilityIndex, histogram }`, carried through `measure()`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('roundStats folds each free-spins round back into the base spin that bought it', () => {
@@ -1395,15 +1395,15 @@ test('roundStats needs no logSpins and holds no per-spin objects', () => {
 });
 ```
 
-- [ ] **Step 2: Run to verify it fails**
+- [x] **Step 2: Run to verify it fails**
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 Accumulate per round: count, sum, sum-of-squares, max, and a fixed log-spaced histogram (~60 buckets, 0.01× to 10,000× bet). Derive percentiles from the histogram; `volatilityIndex` is σ of round return per unit bet. The base-spin loop already brackets each free-spins chain, so the round boundary is exactly where `runOneSpin(false, null)` returns.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add core/SpinSimulator.js tests/spinsimulator.test.mjs
@@ -1422,7 +1422,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Interfaces:**
 - Produces: `describePlayerExperience(roundStats, { bet, rtp, triggerRate, sessionSpins })` → `{ lines: string[], volatilityClass, sessionOutcomes }`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('a flat game is described as low volatility with its big-win drought named', () => {
@@ -1442,11 +1442,11 @@ test('a flat game is described as low volatility with its big-win drought named'
 });
 ```
 
-- [ ] **Step 2–3: Run, implement**
+- [x] **Step 2–3: Run, implement**
 
 Session outcomes by bootstrap resampling the round histogram — no extra simulation. Volatility bands come from `TuningUnits.sigmaToVolatilityBand` (Task 0.3) so the classification shown in the result matches the band the developer asked for in *What do you want*. The bands and the "commercial cluster-cascade games typically run 4–8x" reference are rules of thumb; label them as such in both the code comment and the rendered text.
 
-- [ ] **Step 4: Make it the top of screen 3**
+- [x] **Step 4: Make it the top of screen 3**
 
 The report goes **above** the diagnostics, immediately under a row of pass/fail chips:
 
@@ -1456,7 +1456,7 @@ RTP 96.0% ✓        Bonus 1 in 189 ✓        Volatility LOW ✓
 
 Each chip shows the achieved value against the target from *What do you want*, so the answer to "did I get what I asked for" is one glance. The existing diagnostics block, per-iteration table and progress log collapse into `<details>` below it — they are good, but their job is reassurance during the wait, not the answer afterwards.
 
-- [ ] **Step 5: Verify live and commit**
+- [x] **Step 5: Verify live and commit**
 
 ```bash
 git add core/PlayerExperience.js core/SimulationPanel.js tests/playerexperience.test.mjs
@@ -1472,7 +1472,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Modify: `core/SimulationPanel.js` — target inputs beside RTP and trigger rate
 - Test: `tests/tunefrequencies.test.mjs`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```js
 test('the volatility penalty is exactly zero inside its band', () => {
@@ -1482,17 +1482,17 @@ test('the volatility penalty is exactly zero inside its band', () => {
 });
 ```
 
-- [ ] **Step 2–3: Run, implement**
+- [x] **Step 2–3: Run, implement**
 
-- [ ] **Step 4: Add it to *What do you want* as the third headline control**
+- [x] **Step 4: Add it to *What do you want* as the third headline control**
 
 A named band, not a raw σ: `Low ▾` showing `(σ ≈ 2–3× bet)` beside it, converted through `TuningUnits.volatilityBandToSigma`. It sits alongside target RTP and free-spin frequency because it is one of the three things a developer actually wants, and the only one currently inexpressible.
 
-- [ ] **Step 5: Document the honest caveat**
+- [x] **Step 5: Document the honest caveat**
 
 In the option's JSDoc and in the panel tooltip, state plainly: volatility on a cluster-cascade game is dominated by the payout ladder shape and `maxStack`, not by symbol frequencies. This target therefore mostly steers Package 1's structural search and payout solve. Setting it against Phase 2 alone will move it very little — say so rather than let a developer burn a 150-iteration search discovering it.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add core/SpinSimulator.js core/SimulationPanel.js tests/tunefrequencies.test.mjs

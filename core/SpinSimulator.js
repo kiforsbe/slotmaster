@@ -8,6 +8,7 @@ import { cmaes } from './CMAES.js';
 import { validateTuningConfig } from './TuningValidation.js';
 import { buildLadders, summarize } from './StructuralSensitivity.js';
 import { structuralSearch } from './StructuralSearch.js';
+import { volatilityBandToSigma, sigmaToVolatilityBand } from './TuningUnits.js';
 
 /**
  * Simulates multiple spins and returns statistical analysis. Mechanic-agnostic: how one spin
@@ -1418,6 +1419,21 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // across terms within one game. Normalized re-denominates each into a scale-free fraction, so
     // a weight of 1 buys about one RTP percentage point everywhere.
     penaltyNormalization = 'raw',
+    // Volatility as a soft target: either a named band ('low' | 'medium' | 'high', converted
+    // through core/TuningUnits.js so the band asked for and the band reported come from one table)
+    // or a raw sigma. `volatilityTolerance` widens a raw target into a band; a named band already
+    // is one. Null (default) means no target and the penalty is inert whatever its weight.
+    //
+    // AN HONEST CAVEAT, and the reason this is documented rather than just shipped: on a
+    // cluster-cascade game volatility is dominated by the payout ladder shape and maxStack, NOT by
+    // symbol frequencies. Measured on Candy Frenzy, maxStack moves RTP by 255pp per integer step
+    // while the entire frequency search is worth about +/-10pp, and volatility follows the same
+    // pattern. So this target mostly steers the Phase 0c/0d structural work and the payout solve.
+    // Pointing Phase 2 alone at it will move volatility very little - which is worth knowing
+    // BEFORE spending a 150-iteration search discovering it.
+    targetVolatility = null,
+    volatilityTolerance = 0.5,
+    volatilityPenaltyWeight = 0,
     initialStepSize = 0.5,
     searchAlgorithm = 'nelderMead',
     bestAcceptanceZ = 1.0,
@@ -2192,6 +2208,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return targets;
   });
 
+  // Resolved once: a named band comes straight from core/TuningUnits.js so the band a developer
+  // ASKED for and the band a result is CLASSIFIED into are the same table - otherwise picking
+  // "Low" and being told the answer is "Low" would prove nothing. A raw number becomes a band by
+  // widening with volatilityTolerance. Null when no target was set, which is what makes the weight
+  // inert rather than penalizing against an implied target of zero.
+  const volatilityBand = targetVolatility == null ? null
+    : typeof targetVolatility === 'string' ? volatilityBandToSigma(targetVolatility)
+    : { min: targetVolatility - volatilityTolerance, max: targetVolatility + volatilityTolerance, label: `${targetVolatility}x` };
+
   let rtpPhaseResult = null;
   // What the loss is made of at the starting point - see the "Loss budget preview" block below.
   // Declared out here so it survives into `diagnostics` alongside the phase results.
@@ -2499,6 +2524,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // Which denomination the LOSS is built from. Both are always reported either way, so a
         // weight tuned in one mode can be translated into the other instead of guessed at.
         const norm = penaltyNormalization === 'normalized';
+        // How far this candidate's volatility sits OUTSIDE its target band, in sigma. Zero
+        // anywhere inside, exactly like the trigger-rate term - a band rather than a point target,
+        // so it never competes with RTP over a volatility that was already acceptable.
+        const sigma = measured.roundStats?.volatilityIndex ?? null;
+        const volatilityPenalty = (volatilityBand && sigma != null)
+          ? Math.max(0, sigma - volatilityBand.max, volatilityBand.min - sigma)
+          : 0;
         const error = Math.abs(measured.rtp - targetRtp);
         if (measured.rtp < rtpMin) rtpMin = measured.rtp;
         if (measured.rtp > rtpMax) rtpMax = measured.rtp;
@@ -2515,8 +2547,12 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
             // point is to bring the others onto THIS scale, not to invent a third one.
             + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0)
             + triggerRatePenaltyWeight * triggerPenalty
+            // Already in sigma, which is a bet-multiple - dimensionally the same kind of quantity
+            // as the RTP error term, so it needs no normalization either.
+            + volatilityPenaltyWeight * volatilityPenalty
             + spacingPenaltyWeight * (norm ? spacingNorm : spacingPenalty),
           triggerRatePenalty: triggerPenalty,
+          volatilityPenalty,
           spacingPenalty,
           spacingPenaltyNormalized: spacingNorm,
           spacingViolations,
@@ -3063,7 +3099,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     trialSpins, trialsPerPoint, maxIterations,
     orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
     triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
-    penaltyNormalization,
+    penaltyNormalization, targetVolatility, volatilityTolerance, volatilityPenaltyWeight,
     reelCoupling, maxReelDeviation,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
@@ -3195,6 +3231,19 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // concentrated the payout is, volatility. Measured as part of evaluating it, so describing
         // what the tuned game feels like costs no extra simulation. See roundStats in simulateSpins.
         roundStats: rtpPhaseResult.roundStats ?? null,
+        // Achieved volatility beside the target that was asked for, and the band it classifies
+        // into - so "did I get the shape I wanted" is answerable without the caller re-deriving
+        // the classification and possibly disagreeing with the search about it.
+        volatility: rtpPhaseResult.roundStats
+          ? {
+              achieved: rtpPhaseResult.roundStats.volatilityIndex,
+              achievedBand: sigmaToVolatilityBand(rtpPhaseResult.roundStats.volatilityIndex),
+              target: targetVolatility,
+              targetSigma: volatilityBand ? { min: volatilityBand.min, max: volatilityBand.max } : null,
+              penaltyRemaining: rtpPhaseResult.volatilityPenalty ?? 0,
+              withinTarget: !volatilityBand || (rtpPhaseResult.volatilityPenalty ?? 0) === 0,
+            }
+          : null,
         iterationsRun: rtpPhaseResult.iterations,
         iterationsBudget: maxIterations,
         restarts: rtpPhaseResult.restarts,

@@ -2268,3 +2268,56 @@ test('a diagnosis leaves the trigger symbol frequency exactly where it found it'
   assert.equal(tables[0].symbols.scat.frequency, before);
   assert.equal(out.diagnoseOnly, true);
 });
+
+// ---- Package 3.3: volatility as a tuning target --------------------------------------------
+
+test('the volatility penalty is exactly zero inside its band', async () => {
+  // Same shape as triggerRatePenaltyWeight: a BAND, not a point target, so it never competes with
+  // the RTP term over a volatility that was already acceptable.
+  // A RAW target with a huge tolerance, so nothing can fall outside. Not a named band: those have
+  // a floor as well as a ceiling ('high' is 6x and up), so a low-volatility game sits outside
+  // 'high' by being BELOW it - correct behavior, and what the first draft of this test tripped on.
+  const opts = {
+    ...scaleOptions, searchSeed: 99, maxIterations: 1,
+    targetVolatility: 5, volatilityTolerance: 1000,
+  };
+  const off = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], { ...opts, volatilityPenaltyWeight: 0 });
+  const on = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], { ...opts, volatilityPenaltyWeight: 5 });
+  assert.equal(off.diagnostics.rtpPhase.loss, on.diagnostics.rtpPhase.loss,
+    'inside the band the penalty must contribute exactly nothing, whatever its weight');
+});
+
+test('a volatility outside the band costs the search something', async () => {
+  const opts = {
+    ...scaleOptions, searchSeed: 99, maxIterations: 1,
+    // A band no real game reaches, so every candidate sits outside it.
+    targetVolatility: 500, volatilityTolerance: 0.1,
+  };
+  const off = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], { ...opts, volatilityPenaltyWeight: 0 });
+  const on = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], { ...opts, volatilityPenaltyWeight: 5 });
+  assert.ok(on.diagnostics.rtpPhase.loss > off.diagnostics.rtpPhase.loss,
+    `outside the band the penalty must bite: ${on.diagnostics.rtpPhase.loss} vs ${off.diagnostics.rtpPhase.loss}`);
+});
+
+test('volatility targeting is off by default and changes nothing when unset', async () => {
+  const opts = { ...scaleOptions, searchSeed: 101 };
+  const a = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], opts);
+  const b = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], { ...opts, volatilityPenaltyWeight: 5 });
+  assert.deepEqual(a.reelFrequencyTables, b.reelFrequencyTables,
+    'a weight with no target set must be inert - there is nothing to be far from');
+  assert.equal(a.diagnostics.rtpPhase.loss, b.diagnostics.rtpPhase.loss);
+});
+
+test('a named volatility band converts to the same sigma the panel shows', async () => {
+  // The band the developer picked and the band the result is classified into must come from one
+  // table, or picking "Low" and being told the result is "Low" would prove nothing.
+  const out = await tuneFrequencies(couplingPaytable, [scaleTable(1), scaleTable(1)], {
+    ...scaleOptions, searchSeed: 102, maxIterations: 1,
+    targetVolatility: 'low', volatilityPenaltyWeight: 1,
+  });
+  const v = out.diagnostics.rtpPhase.volatility;
+  assert.ok(v, 'the achieved volatility must be reported alongside the target');
+  assert.equal(v.target, 'low');
+  assert.ok(v.targetSigma.min === 0 && v.targetSigma.max === 3, `expected the low band, got ${JSON.stringify(v.targetSigma)}`);
+  assert.equal(typeof v.achieved, 'number');
+});

@@ -94,3 +94,13 @@ test('describePlayerExperience degrades gracefully with nothing measured', () =>
   assert.equal(out.volatilityClass, null);
   assert.equal(out.sessionOutcomes, null);
 });
+
+test('money figures carry no sign, because the sentence already says the direction', () => {
+  // Observed live: "the middle player ends down -65". The word and the sign say the same thing
+  // twice, which reads as a double negative or as a typo depending on how closely you look.
+  const out = describePlayerExperience(FLAT, { bet: 1, rtp: 96.0, triggerRate: 0.53, sessionSpins: 500 });
+  const session = out.lines.find(l => /middle player/.test(l));
+  assert.ok(session, out.lines.join('\n'));
+  assert.ok(!/down -/.test(session), `sign doubled with the direction word: ${session}`);
+  assert.ok(!/up -/.test(session), `sign doubled with the direction word: ${session}`);
+});
