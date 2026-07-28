@@ -1,6 +1,6 @@
 // Core Slot Game Engine Renderer & State Controller
 import { checkWins, createSeededRng } from './math/SlotMath.js';
-import { audio } from './SlotAudio.js';
+import { audio } from './audio/SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
 import { LineMechanic } from './LineMechanic.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';

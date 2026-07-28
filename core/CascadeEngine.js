@@ -10,7 +10,7 @@ import { ParticleSystem } from './rendering/ParticleSystem.js';
 import { applyCascade } from './math/CascadeMath.js';
 import { createCascadeSpinLogEntry } from './SpinLog.js';
 import { createSeededRng } from './math/SlotMath.js';
-import { audio } from './SlotAudio.js';
+import { audio } from './audio/SlotAudio.js';
 import { createFlatMultiplierMode } from './FreeSpinsModes.js';
 import { CascadeSpinMechanic } from './CascadeSpinMechanic.js';
 import { simulateSpins } from './SpinSimulator.js';
