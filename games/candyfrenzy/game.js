@@ -460,12 +460,11 @@ async function initGame() {
   const particleSystem = new ParticleSystem();
   engine = new CoreSlotEngine(canvas, {
     mechanic: CascadeSpinMechanic,
-    animator: new CascadeDropAnimator(renderer, particleSystem),
+    animator: new CascadeDropAnimator(renderer, particleSystem, {popupAnimatePosition: false, popupAnimateSize: true, popupSizeDurationMs: 700, popupSizeEasing: 'easeInOut', popupSizeStartScale: 1, popupSizeEndScale: 1.5}),
     renderer,
     particleSystem,
     spinLogRecorder: new SpinLogRecorder({ betAmount: BET_AMOUNT, scatterSymbol: 'bonus' }),
     audioController: new AudioController(),
-
     reelsCount: REELS_COUNT,
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,

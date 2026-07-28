@@ -12,6 +12,16 @@
 // theme renders exactly as CascadeEngine.js did.
 import { drawSpriteSymbol } from './SpriteDrawer.js';
 
+// Named easing curves for the cluster win popup's size tween (see drawClusterWinPopups) -
+// t/return both range 0-1, standard shapes (cubic in/out/in-out), keyed by CascadeDropAnimator's
+// popupSizeEasing option so a game can pick without writing its own easing math.
+const POPUP_SIZE_EASINGS = {
+  linear: t => t,
+  easeIn: t => t * t * t,
+  easeOut: t => 1 - Math.pow(1 - t, 3),
+  easeInOut: t => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+};
+
 // How far outside the grid a payline's numbered tag sits - matches both engines' own
 // LINE_TAG_OFFSET constant, so the line runs tag to tag either way.
 const LINE_TAG_OFFSET = 15;
@@ -573,9 +583,31 @@ export class SlotRenderer {
   drawClusterWinPopups(ctx, popups, symbolHeight, now = Date.now()) {
     popups.forEach(p => {
       const progress = Math.min((now - p.startTime) / p.duration, 1);
-      const rise = symbolHeight * 0.9 * progress;
+      // Each popup carries its own animate/show/font-size fields (set by the animator at spawn
+      // time from its own config) - undefined (an older/stubbed popup shape) defaults to the
+      // original always-on, both-lines, 26px/16px behavior.
+      const animatePosition = p.animatePosition !== false;
+      const animateSize = p.animateSize !== false;
+      const showAmount = p.showAmount !== false;
+      const showDetail = p.showDetail !== false;
+      const amountFontSize = p.amountFontSize ?? 26;
+      const detailFontSize = p.detailFontSize ?? 16;
+      // Multipliers of standard size (1 = amountFontSize/detailFontSize as-is) - default grows
+      // from standard (1) up to a modest emphasis (1.15), not from zero.
+      const sizeStartScale = p.sizeStartScale ?? 1;
+      const sizeEndScale = p.sizeEndScale ?? 1.15;
+
+      const rise = animatePosition ? symbolHeight * 0.9 * progress : 0;
       const y = p.y - rise;
-      const scale = progress < 0.15 ? 0.5 + (0.5 * (progress / 0.15)) : 1;
+      // Fixed ms-based grow window, not a fraction of p.duration - a turbo popup only lives
+      // 750ms total, too short for a duration-relative window to read as a real animation.
+      const sizeDurationMs = p.sizeDurationMs ?? 300;
+      let scale = 1;
+      if (animateSize) {
+        const t = Math.min((now - p.startTime) / sizeDurationMs, 1);
+        const easingFn = POPUP_SIZE_EASINGS[p.sizeEasing] || POPUP_SIZE_EASINGS.easeOut;
+        scale = sizeStartScale + (sizeEndScale - sizeStartScale) * easingFn(t);
+      }
       const alpha = progress < 0.6 ? 1 : Math.max(0, 1 - (progress - 0.6) / 0.4);
 
       ctx.save();
@@ -587,17 +619,26 @@ export class SlotRenderer {
       ctx.lineWidth = 4;
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
 
-      ctx.font = "bold 20px Outfit, sans-serif";
-      const amountText = `+$${p.amount.toFixed(2)}`;
-      ctx.strokeText(amountText, 0, -8);
-      ctx.fillStyle = '#ffe94a';
-      ctx.fillText(amountText, 0, -8);
+      // Split above/below (-8/+12) when both lines show; a lone line centers on 0 instead of
+      // sitting offset toward the other (now-empty) line's spot.
+      const amountY = showDetail ? -8 : 0;
+      const detailY = showAmount ? 12 : 0;
 
-      ctx.font = "600 12px Outfit, sans-serif";
-      const detailText = `${p.count}x ${p.symbol}`;
-      ctx.strokeText(detailText, 0, 12);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText(detailText, 0, 12);
+      if (showAmount) {
+        ctx.font = `bold ${amountFontSize}px Outfit, sans-serif`;
+        const amountText = `+$${p.amount.toFixed(2)}`;
+        ctx.strokeText(amountText, 0, amountY);
+        ctx.fillStyle = '#ffe94a';
+        ctx.fillText(amountText, 0, amountY);
+      }
+
+      if (showDetail) {
+        ctx.font = `600 ${detailFontSize}px Outfit, sans-serif`;
+        const detailText = `${p.count}x ${p.symbol}`;
+        ctx.strokeText(detailText, 0, detailY);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(detailText, 0, detailY);
+      }
 
       ctx.restore();
     });

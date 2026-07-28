@@ -18,11 +18,51 @@ import { applyCascade } from '../../math/CascadeMath.js';
 const CLEAR_VARIANTS = ['scaleFade', 'stretch', 'jump', 'spin'];
 
 export class CascadeDropAnimator {
-  constructor(renderer, particleSystem, { normalClearDurationMs = 760, turboClearDurationMs = 300 } = {}) {
+  constructor(renderer, particleSystem, {
+    normalClearDurationMs = 760,
+    turboClearDurationMs = 300,
+    // Cluster win popup ("+$X.XX" / "Nx symbol") tween toggles - independent, so a game can
+    // pick position-only (rise, no pop-in), size-only (pop-in, stays put), both (default,
+    // matches the original always-on behavior), or neither (static, just fades).
+    popupAnimatePosition = true,
+    popupAnimateSize = true,
+    // Which line(s) of text a popup shows - both by default. A game with no per-cluster amount
+    // to show (or that finds the symbol/count line redundant) can turn either off; turning off
+    // one re-centers the other vertically instead of leaving it offset toward empty space (see
+    // SlotRenderer.drawClusterWinPopups).
+    popupShowAmount = true,
+    popupShowDetail = true,
+    // 26px/16px - 30% larger than this popup's original 20px/12px.
+    popupAmountFontSize = 26,
+    popupDetailFontSize = 16,
+    // popupAnimateSize's start/end points, as a multiplier of the popup's standard size (1 =
+    // amountFontSize/detailFontSize as-is). Default grows FROM standard size, not from zero -
+    // a game wanting the old "pops in from nothing" look sets popupSizeStartScale near 0.
+    popupSizeStartScale = 1,
+    popupSizeEndScale = 1.15,
+    // Tween shape for the start->end size interpolation above - 'linear', 'easeIn', 'easeOut'
+    // (default - fast start, gentle settle), or 'easeInOut'. See SlotRenderer's
+    // POPUP_SIZE_EASINGS for the actual curves.
+    popupSizeEasing = 'easeOut',
+    // How long the start->end size tween takes, in ms - fixed, not a fraction of the popup's
+    // total on-screen duration (see SlotRenderer.drawClusterWinPopups for why: a percentage of
+    // turbo mode's short 750ms lifetime reads as an instant pop, not a visible animation).
+    popupSizeDurationMs = 300,
+  } = {}) {
     this.renderer = renderer;
     this.particleSystem = particleSystem;
     this.normalClearDurationMs = normalClearDurationMs;
     this.turboClearDurationMs = turboClearDurationMs;
+    this.popupAnimatePosition = popupAnimatePosition;
+    this.popupAnimateSize = popupAnimateSize;
+    this.popupShowAmount = popupShowAmount;
+    this.popupShowDetail = popupShowDetail;
+    this.popupAmountFontSize = popupAmountFontSize;
+    this.popupDetailFontSize = popupDetailFontSize;
+    this.popupSizeStartScale = popupSizeStartScale;
+    this.popupSizeEndScale = popupSizeEndScale;
+    this.popupSizeDurationMs = popupSizeDurationMs;
+    this.popupSizeEasing = popupSizeEasing;
 
     this.grid = null;
     this.cellOffsets = null;
@@ -258,6 +298,16 @@ export class CascadeDropAnimator {
         y: engine.reelsY + (centroidRow + 0.5) * engine.symbolHeight,
         startTime: now,
         duration,
+        animatePosition: this.popupAnimatePosition,
+        animateSize: this.popupAnimateSize,
+        showAmount: this.popupShowAmount,
+        showDetail: this.popupShowDetail,
+        amountFontSize: this.popupAmountFontSize,
+        detailFontSize: this.popupDetailFontSize,
+        sizeStartScale: this.popupSizeStartScale,
+        sizeEndScale: this.popupSizeEndScale,
+        sizeEasing: this.popupSizeEasing,
+        sizeDurationMs: this.popupSizeDurationMs,
       });
     });
   }
