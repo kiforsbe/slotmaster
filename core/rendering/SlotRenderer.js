@@ -99,6 +99,71 @@ export class SlotRenderer {
     drawSpriteSymbol(ctx, spritesheet, symbolsConfig[name], x, y, width, height, blurSpeed);
   }
 
+  // Book-of-Dead-style expanding-wild reveal overlay - extracted from SlotEngine.js's
+  // renderExpandingAnimation. Reel columns expand one at a time (reelExpandDuration ms each,
+  // staggered per ReelScrollAnimator.playExpandingReveal's own start-time schedule); each
+  // column grows outward from its center row while fading in a neon aura, then draws the
+  // expanding symbol scaled up across all three rows once far enough along.
+  drawExpandingAnimation(ctx, layout, spritesheet, symbolsConfig, expandingSymbol, expansionReelsToAnimate, expansionReelStartTimes) {
+    const tile = symbolsConfig[expandingSymbol];
+    if (!tile) return;
+
+    const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
+    const reelExpandDuration = 900;
+
+    expansionReelsToAnimate.forEach((colIdx, i) => {
+      const cx = reelsX + (colIdx * symbolWidth);
+      const reelStartTime = expansionReelStartTimes[i];
+      const elapsed = Date.now() - reelStartTime;
+      const reelProgress = Math.min(elapsed / reelExpandDuration, 1);
+
+      if (reelProgress <= 0) return;
+
+      const centerRowY = reelsY + (1 * symbolHeight);
+
+      ctx.save();
+      ctx.globalAlpha = reelProgress * 0.9;
+
+      const fullH = symbolHeight * 3;
+      const animH = fullH * reelProgress;
+      const animY = centerRowY + (symbolHeight / 2) - (animH / 2);
+
+      ctx.fillStyle = 'rgba(212, 175, 55, 0.2)';
+      ctx.fillRect(cx, animY, symbolWidth, animH);
+
+      ctx.shadowColor = '#d4af37';
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = '#d4af37';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(cx + 2, animY, symbolWidth - 4, animH);
+      ctx.shadowBlur = 0;
+
+      for (let r = 0; r < 3; r++) {
+        const finalY = reelsY + (r * symbolHeight);
+
+        if (finalY + (symbolHeight / 2) >= animY && finalY + (symbolHeight / 2) <= animY + animH) {
+          const margin = symbolWidth * 0.08;
+          const scale = 0.5 + (0.5 * reelProgress);
+
+          ctx.save();
+          ctx.translate(cx + symbolWidth / 2, finalY + symbolHeight / 2);
+          ctx.scale(scale, scale);
+
+          ctx.drawImage(
+            spritesheet,
+            tile.x, tile.y, tile.w, tile.h,
+            -symbolWidth / 2 + margin, -symbolHeight / 2 + margin,
+            symbolWidth - (2 * margin), symbolHeight - (2 * margin),
+          );
+
+          ctx.restore();
+        }
+      }
+
+      ctx.restore();
+    });
+  }
+
   // Extracted from SlotEngine.js's renderReelsSymbols - draws each reel's rolling symbol window
   // (see ReelScrollAnimator, which owns the `reels` array's physics/state) at its current
   // scroll offset, with motion blur while spinning fast.
@@ -536,6 +601,12 @@ export class SlotRenderer {
     this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
     if (engine.animator?.reels) {
       this.drawReelsSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.animator.reels);
+    }
+    if (engine.state === 'expanding' && engine.animator?.expansionReelsToAnimate) {
+      this.drawExpandingAnimation(
+        ctx, layout, engine.spritesheet, engine.symbolsConfig, engine.config.expandingSymbol,
+        engine.animator.expansionReelsToAnimate, engine.animator.expansionReelStartTimes,
+      );
     }
 
     ctx.restore();

@@ -142,6 +142,57 @@ export class ReelScrollAnimator {
     requestAnimationFrame(tick);
   }
 
+  // Book-of-Dead-style expanding-wild reveal (bookbookbook only) - not part of the SpinAnimator
+  // interface every animator implements (playEntrance/playTransition), called directly by
+  // CoreSlotEngine.spin() only when a mechanic exposes evaluateExpandingWin and reports a win.
+  // Ported from SlotEngine.js's own 'expanding' state handling in update(): reel columns expand
+  // one at a time, each taking reelExpandDuration ms, staggered so column i+1 starts the instant
+  // column i finishes. this.expansionReelsToAnimate/expansionReelStartTimes are exposed as
+  // instance fields so SlotRenderer.drawExpandingAnimation can read the same per-column timing
+  // for the aura/symbol-scale overlay while this tween is in progress.
+  playExpandingReveal(engine, expandingSymbol, expandingReels, onDone) {
+    const reelExpandDuration = 900;
+    this.expansionReelsToAnimate = expandingReels;
+    this.expansionReelStartTimes = [];
+    let currentTime = Date.now();
+    for (let i = 0; i < expandingReels.length; i++) {
+      if (i > 0) currentTime += reelExpandDuration;
+      this.expansionReelStartTimes[i] = currentTime;
+    }
+
+    const tick = () => {
+      const now = Date.now();
+      let allDone = true;
+
+      for (let i = 0; i < expandingReels.length; i++) {
+        const reelIdx = expandingReels[i];
+        const elapsed = now - this.expansionReelStartTimes[i];
+        const progress = Math.min(elapsed / reelExpandDuration, 1);
+        if (progress < 1) {
+          allDone = false;
+        } else {
+          // Fully expanded: bake the symbol into this reel's visible window so it stays shown
+          // (by drawReelsSymbols, the normal path) once the overlay animation itself ends.
+          const reel = this.reels[reelIdx];
+          if (reel) {
+            for (let row = 0; row < engine.config.rowsCount; row++) {
+              reel.symbols[row + 1] = expandingSymbol;
+            }
+          }
+        }
+      }
+
+      if (allDone) {
+        this.expansionReelsToAnimate = null;
+        onDone();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+
+    requestAnimationFrame(tick);
+  }
+
   playTransition(engine, prevStep, nextStep, onDone) {
     onDone();
   }

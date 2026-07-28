@@ -67,6 +67,7 @@ export class CoreSlotEngine {
     this.pendingSpinRequest = false;
     this.autoPlayTimer = null;
     this._forcedGrid = null;
+    this._spinInProgress = false;
 
     // Win-presentation state a Renderer reads (see core/rendering/SlotRenderer.js's
     // drawWinEffects). winCycleIndex is fixed at -1 ("show every active win at once") rather
@@ -181,6 +182,25 @@ export class CoreSlotEngine {
   }
 
   async spin(seed = Math.floor(Math.random() * 0xFFFFFFFF)) {
+    // Re-entrancy guard. spin() is async and genuinely suspends across multiple
+    // requestAnimationFrame-driven animation steps (unlike SlotEngine.js's own spin(), which
+    // sets up reel timers and returns immediately, doing its actual waiting via a separately
+    // polled update() loop) - two overlapping calls here would interleave and corrupt shared
+    // state like this.grid/this.spinSequence mid-flight, not just "last write wins" the way the
+    // original's synchronous setup did. This can genuinely happen: a free-spins auto-progression
+    // timer (handleAutoPlay) and a debug forceWinResult() click, or two rapid legitimate
+    // requestSpin() calls, can both observe a valid starting state and both call spin() before
+    // either one's animation has finished.
+    if (this._spinInProgress) return;
+    this._spinInProgress = true;
+    try {
+      await this._spin(seed);
+    } finally {
+      this._spinInProgress = false;
+    }
+  }
+
+  async _spin(seed) {
     this.updateBet();
     if (!this.inFreeSpins) {
       // SlotEngine.js showed a blocking alert() here; dropped since it isn't safe for
@@ -233,10 +253,23 @@ export class CoreSlotEngine {
       const expandingResult = this.mechanic.evaluateExpandingWin(
         this.grid, this.config.expandingSymbol, this.config, this.linesCount,
       );
-      if (expandingResult.totalPayoutMultiplier > 0) {
+      // checkExpandingWins (core/math/SlotMath.js) returns null, not a zero-payout object, when
+      // the expanding symbol doesn't land enough reels to pay anything - a real, expected
+      // outcome (most spins), not an error case.
+      //
+      // Only plays the reveal when it actually pays - a disclosed simplification versus
+      // SlotEngine.js, which enters 'expanding' whenever evaluateExpandingWin runs at all
+      // (even with zero matching reels). Skipping a reveal animation for zero expanded columns
+      // is a no-op either way; this just also skips it for a non-winning expansion.
+      if (expandingResult && expandingResult.totalPayoutMultiplier > 0) {
+        this.expandingWinData = expandingResult;
+        this._setState('expanding');
+        this.audioController?.onExpand();
+        if (this.animator.playExpandingReveal) {
+          await new Promise((resolve) => this.animator.playExpandingReveal(this, this.config.expandingSymbol, expandingResult.expandingReels, resolve));
+        }
         // betPerLine, not totalBet - matches SlotEngine.js's own expanding-win math.
         this.lastWin += expandingResult.totalPayoutMultiplier * this.betPerLine;
-        this.audioController?.onExpand();
       }
     }
 
