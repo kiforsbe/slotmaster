@@ -15,18 +15,19 @@ open `index.html` (via a local server, see below) and play.
 | Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
 | Mayan Tumble | <img src="games/mayantumble/screenshot.png" width="160"> | 5x3, 10 lines, cascading | Gold scatter → free spins with growing multiplier tiles, cascading wins | [games/mayantumble](games/mayantumble/README.md) |
 
-All five games share the same `core/` foundation, debug tooling (SPIN LOG, RUN SIMULATION,
-TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic actually runs
-is pluggable per game via `core/LineMechanic.js` (the first three) or `core/CascadeSpinMechanic.js`
-(the two cascade games: `core/CascadeEngine.js` + `core/CascadeMath.js` + `core/FreeSpinsModes.js`
-for its pluggable free-spins payout modes) - see `docs/ARCHITECTURE.md`'s "pluggable gameplay
-mechanics" section for how they share one architecture instead of two. Each README covers only
-what's specific to that game.
+All five games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug tooling (SPIN LOG,
+RUN SIMULATION, TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic
+actually runs is pluggable per game via a **mechanic** component, `core/engine/mechanics/
+LineMechanic.js` (the first three) or `core/engine/mechanics/CascadeSpinMechanic.js` (the two
+cascade games: `core/math/CascadeMath.js` + `core/engine/FreeSpinsModes.js` for its pluggable
+free-spins payout modes) - see `docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section
+for how they share one architecture instead of two. Each README covers only what's specific to
+that game.
 
-The two cascade games are the same engine with different win evaluators, which is the point of
-the split: Candy Frenzy supplies `core/ClusterMath.js`'s cluster evaluator, Mayan Tumble supplies
-its own that maps `core/SlotMath.js`'s payline wins into the same shape. Nothing in
-`CascadeEngine`/`CascadeSpinMechanic` knows which it got.
+The two cascade games are the same engine and mechanic with different win evaluators, which is
+the point of the split: Candy Frenzy supplies `core/math/ClusterMath.js`'s cluster evaluator,
+Mayan Tumble supplies its own that maps `core/math/SlotMath.js`'s payline wins into the same
+shape. Nothing in `CoreSlotEngine`/`CascadeSpinMechanic` knows which it got.
 
 ## Running it
 
@@ -64,13 +65,17 @@ docs/    Design specs and implementation plans (docs/superpowers/)
 
 Release notes live in [CHANGELOG.md](CHANGELOG.md).
 
-- **`core/SlotEngine.js`** — rendering/animation and input handling for the live game.
-- **`core/SlotMath.js`** — pure math: building reel strips (`generateReel`), evaluating
+- **`core/engine/CoreSlotEngine.js`** — the live game: a skeleton owning only the state machine
+  and animation loop. Everything else - grid resolution, animation style, drawing, particles,
+  audio, free-spins payout rules, spin logging - is a separate component class plugged in through
+  its config. See `docs/ARCHITECTURE.md` for the full component list.
+- **`core/math/SlotMath.js`** — pure math: building reel strips (`generateReel`), evaluating
   spins (`checkWildLineWins`, `checkWins`).
-- **`core/CascadeEngine.js`** — `SlotEngine.js`'s sibling for the cascade games, built around
-  `core/CascadeMath.js`'s `resolveCascadeSequence`. Knows nothing about clusters or paylines: the
-  win evaluator is a closure the game supplies (`core/ClusterMath.js`'s for Candy Frenzy, a
-  payline one for Mayan Tumble), and the playfield's own look is a per-game `playfield` config.
+- **`core/math/CascadeMath.js`** / **`core/math/ClusterMath.js`** — the cascade games' pure math:
+  generic cascade/gravity mechanics (`resolveCascadeSequence`) and Candy Frenzy's own cluster win
+  evaluator. Knows nothing about clusters or paylines itself: the win evaluator is a closure the
+  game supplies (`ClusterMath.js`'s for Candy Frenzy, a payline one for Mayan Tumble), and the
+  playfield's own look is a per-game `playfield` config passed to `CoreSlotEngine`.
 - **`core/SpinSimulator.js`** — runs many simulated spins to measure RTP/trigger rate, and
   `tuneFrequencies`, which automatically adjusts a game's reel frequencies to hit a target RTP.
 - **`core/SimulationPanel.js`** — the in-browser RUN SIMULATION / TUNE FREQUENCIES UI (a debug
@@ -88,12 +93,14 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
   message, and the registry that resolves a mechanic/evaluator/free-spins-mode back from the name
   it crossed `postMessage` as (a function cannot cross directly).
 - **`core/SpinLog.js`** — pure per-spin log entry building and CSV serialization, shared by
-  both `SpinSimulator.js` (a batch run) and `SlotEngine.js` (live play) so the two can't drift
-  apart on what a logged spin looks like. See "Spin logging" below.
+  both `SpinSimulator.js` (a batch run) and `core/engine/SpinLogRecorder.js` (live play, plugged
+  into `CoreSlotEngine`) so the two can't drift apart on what a logged spin looks like. See
+  "Spin logging" below.
 - **`core/SpinLogPanel.js`** / **`core/FileIO.js`** — the in-browser SPIN LOG viewer (reads
-  `SlotEngine.spinLog`) and a small generic "download this text as a file" helper it uses for
+  `engine.spinLog`) and a small generic "download this text as a file" helper it uses for
   CSV export.
-- **`core/SlotAudio.js`** — sound effects.
+- **`core/audio/SlotAudio.js`** — synthesized sound effects, played via `core/engine/
+  AudioController.js` (another pluggable `CoreSlotEngine` component).
 
 Each game (`games/<name>/game.js`) owns its own `PAYTABLE`, paylines, and per-reel frequency
 tables, and wires them into the shared `core/` modules. See each game's own README for its
@@ -102,7 +109,7 @@ specific mechanics.
 ## Reel frequency tables
 
 Every game defines one frequency table per reel (`FREQUENCY_REEL1`, `FREQUENCY_REEL2`, ...),
-passed to `generateReel` (`core/SlotMath.js`) to build that reel's physical strip. All tables
+passed to `generateReel` (`core/math/SlotMath.js`) to build that reel's physical strip. All tables
 share one shape:
 
 ```js
@@ -156,7 +163,7 @@ touched by auto-tuning (e.g. a wild that's deliberately rare).
 **`minFrequency`/`maxFrequency`** on a symbol are soft bounds `tuneFrequencies` tries to keep
 that symbol's tuned frequency within, on that reel — a discouraged-but-not-forbidden
 preference, not a hard clamp. Resolved the same per-symbol → reel `defaults` → unconstrained
-way as `minGap`/`maxStack` (see `resolveFrequencyBounds` in `core/SlotMath.js`).
+way as `minGap`/`maxStack` (see `resolveFrequencyBounds` in `core/math/SlotMath.js`).
 
 ### `triggerFreeSpins`, not `type: 'scatter'`
 
@@ -244,4 +251,4 @@ Portions of this project (code, docs, and image assets) were developed with the 
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-07-27, commit `66218c8`._
+_Docs last synced with the codebase: 2026-07-28, commit `4ed60a2`._

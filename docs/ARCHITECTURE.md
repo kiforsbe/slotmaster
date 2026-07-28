@@ -8,18 +8,24 @@ reel-frequency-table data model specifically.
 
 ```mermaid
 flowchart TB
-    Game["games/&lt;name&gt;/game.js<br/>per-game glue: data + DOM wiring"]
+    Game["games/&lt;name&gt;/game.js<br/>per-game glue: data + DOM wiring + component wiring"]
 
-    SlotEngine["core/SlotEngine.js<br/>line-pays live game"]
-    SlotMath["core/SlotMath.js<br/>win eval, reel building, seeded RNG"]
+    CoreSlotEngine["core/engine/CoreSlotEngine.js<br/>skeleton: state machine + animation dispatch only"]
 
-    CascadeEngine["core/CascadeEngine.js<br/>cascade live game (Candy Frenzy, Mayan Tumble)"]
-    CascadeMath["core/CascadeMath.js<br/>gravity/refill mechanics"]
-    ClusterMath["core/ClusterMath.js<br/>cluster win evaluator"]
-    FreeSpinsModes["core/FreeSpinsModes.js<br/>pluggable free-spins payout modes"]
+    LineMechanic["core/engine/mechanics/LineMechanic.js<br/>getTargetGrid + evaluateWin + resolveLiveSpin"]
+    CascadeSpinMechanic["core/engine/mechanics/CascadeSpinMechanic.js<br/>resolveSequence + resolveLiveSpin"]
+    SlotMath["core/math/SlotMath.js<br/>win eval, reel building, seeded RNG"]
+    CascadeMath["core/math/CascadeMath.js<br/>gravity/refill mechanics"]
+    ClusterMath["core/math/ClusterMath.js<br/>cluster win evaluator"]
 
-    LineMechanic["core/LineMechanic.js<br/>getTargetGrid + evaluateWin component pair"]
-    CascadeSpinMechanic["core/CascadeSpinMechanic.js<br/>resolveSequence component pair"]
+    ReelScrollAnimator["core/engine/animators/ReelScrollAnimator.js<br/>reel spin-up/land/expanding-reveal"]
+    CascadeDropAnimator["core/engine/animators/CascadeDropAnimator.js<br/>drop-in/clear/fall"]
+    SlotRenderer["core/rendering/SlotRenderer.js<br/>canvas drawing primitives, line-pay + cascade"]
+    ParticleSystem["core/rendering/ParticleSystem.js<br/>win/clear particle effects"]
+    AudioController["core/engine/AudioController.js<br/>lifecycle hooks -> SlotAudio"]
+    SpinLogRecorder["core/engine/SpinLogRecorder.js<br/>per-spin log entries"]
+    FreeSpinsModes["core/engine/FreeSpinsModes.js<br/>pluggable free-spins payout modes, cascade only"]
+    SlotAudio["core/audio/SlotAudio.js<br/>synthesized sound effects"]
 
     SpinSimulator["core/SpinSimulator.js<br/>headless sim + auto-tune, mechanic-agnostic"]
     TuningSearch["Tuner support - search side, pure<br/>TuningValidation · StructuralSensitivity<br/>StructuralSearch · TuningUnits"]
@@ -27,28 +33,40 @@ flowchart TB
     WorkerPool["core/SimulationWorkerPool.js<br/>+ simulationTrialWorker.js"]
     MechanicRegistry["core/mechanicRegistry.js<br/>name -> mechanic/evaluator/mode"]
     SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION / TUNE FREQUENCIES UI"]
-    SlotAudio["core/SlotAudio.js<br/>synthesized sound effects"]
 
     SpinLog["core/SpinLog.js<br/>per-spin log entries + CSV"]
     SpinLogPanel["core/SpinLogPanel.js<br/>SPIN LOG UI"]
     FileIO["core/FileIO.js<br/>file-download helper"]
 
-    Game --> SlotEngine
-    Game --> CascadeEngine
+    Game -- "constructs, passes components via config" --> CoreSlotEngine
+    Game -. "config.mechanic" .-> LineMechanic
+    Game -. "config.mechanic" .-> CascadeSpinMechanic
+    Game -- "new ReelScrollAnimator(renderer) or\nnew CascadeDropAnimator(renderer, particleSystem)" --> ReelScrollAnimator
+    Game --> CascadeDropAnimator
+    Game -- "new SlotRenderer()" --> SlotRenderer
+    Game -. "cascade games only" .-> ParticleSystem
+    Game --> AudioController
+    Game --> SpinLogRecorder
+    Game -. "config.freeSpinsMode, cascade free spins only" .-> FreeSpinsModes
 
-    SlotEngine -. "config.mechanic, default" .-> LineMechanic
+    CoreSlotEngine -- "spin(): mechanic.resolveLiveSpin(...)" --> LineMechanic
+    CoreSlotEngine --> CascadeSpinMechanic
     LineMechanic --> SlotMath
-    SlotEngine --> SlotAudio
-    SlotEngine --> SpinLog
-    SlotEngine --> SpinSimulator
-
-    CascadeEngine -. "config.mechanic, default" .-> CascadeSpinMechanic
     CascadeSpinMechanic --> CascadeMath
-    CascadeEngine -. "config.winEvaluator (cluster: ClusterMath, line: the game's own)" .-> ClusterMath
-    CascadeEngine -. "config.freeSpinsMode, free spins only" .-> FreeSpinsModes
-    CascadeEngine --> SlotAudio
-    CascadeEngine --> SpinLog
-    CascadeEngine --> SpinSimulator
+    CascadeSpinMechanic -. "config.winEvaluator (cluster: ClusterMath, line: the game's own)" .-> ClusterMath
+    CoreSlotEngine -- "_playStep(): animator.playEntrance/playTransition" --> ReelScrollAnimator
+    CoreSlotEngine --> CascadeDropAnimator
+    CoreSlotEngine -- "animate(): renderer.draw(engine, ctx) every frame" --> SlotRenderer
+    ReelScrollAnimator --> SlotRenderer
+    CascadeDropAnimator --> SlotRenderer
+    CascadeDropAnimator --> ParticleSystem
+    CoreSlotEngine -- "lifecycle hooks (onSpinStart, onWin, ...)" --> AudioController
+    AudioController --> SlotAudio
+    CoreSlotEngine -- "engine.audio, UI mute control only" --> SlotAudio
+    CoreSlotEngine -- "_finishSpin(): spinLogRecorder.record(...)" --> SpinLogRecorder
+    SpinLogRecorder --> SpinLog
+    CoreSlotEngine -. "inFreeSpins: wrapWinEvaluator/onClusterCleared/renderOverlay" .-> FreeSpinsModes
+    CoreSlotEngine --> SpinSimulator
 
     SpinSimulator -. "config.mechanic" .-> LineMechanic
     SpinSimulator -. "config.mechanic" .-> CascadeSpinMechanic
@@ -68,32 +86,47 @@ name, payout shape, or grid size. This is what lets `SlotMath.js` and `SpinSimul
 identically inside the live browser game, inside the in-browser debug tools, and inside
 `node --test` with no DOM at all.
 
-**Gameplay mechanics** (`LineMechanic.js`/`CascadeSpinMechanic.js`) are the one layer both
-engine families and the simulator share: each mechanic is a plain object exposing "get the
+**`CoreSlotEngine` is a skeleton, not a monolith.** It owns exactly two things: the state
+machine (`idle` → `spinning` → `evaluating` → ...) and the animation dispatch loop
+(`_playStep`, `animate`). Every other concern most engines bake in directly is instead a
+separate component class, constructed by the game and passed into `CoreSlotEngine`'s config:
+a **mechanic** (grid/win resolution), a **`SpinAnimator`** (how a spin's steps play out
+visually), a **`Renderer`** (what actually gets drawn to the canvas each frame), an optional
+**`ParticleSystem`**, an **`AudioController`**, a **`SpinLogRecorder`**, and — cascade games
+only — a **`FreeSpinsMode`**. `CoreSlotEngine` calls each through a small fixed interface and
+never imports a concrete implementation itself, so a new visual style, a new sound backend, or
+a new free-spins payout rule is a new file implementing that interface, not a change to the
+engine. See "`core/engine/CoreSlotEngine.js`" below for the full component list and each
+interface's exact shape.
+
+**Gameplay mechanics** (`LineMechanic.js`/`CascadeSpinMechanic.js`) are the one component both
+the live engine and the simulator share: each mechanic is a plain object exposing "get the
 symbols for the playfield" (`getTargetGrid`/`resolveSequence`) and "calculate wins"
-(`evaluateWin`/the wrapped `winEvaluator`) as named methods, plus a `resolveSpin` entry point
-composed from those same methods for batch simulation. `SlotEngine.js`/`CascadeEngine.js` call
-the component methods directly for live, animated play; `SpinSimulator.js` calls `resolveSpin`
-for a synchronous batch run — same components, same results, no duplicated win logic between
-live play and simulation. `config.mechanic` defaults to `LineMechanic`/`CascadeSpinMechanic`
-respectively, so no existing game had to change anything to keep working.
+(`evaluateWin`/the wrapped `winEvaluator`) as named methods, plus two composed entry points -
+`resolveLiveSpin` (a normalized `{ steps, scatterWin }` sequence, called by `CoreSlotEngine.
+spin()`) and `resolveSpin` (a synchronous batch-simulation result, called by `SpinSimulator.js`).
+Same underlying components, same results, no duplicated win logic between live play and
+simulation. Every game passes its `mechanic` explicitly to `CoreSlotEngine` (`LineMechanic` or
+`CascadeSpinMechanic`) — only `SpinSimulator.js`'s `simulateSpins`/`tuneFrequencies` still
+default `config.mechanic` to `LineMechanic` when omitted, for backward compatibility with a
+caller written before mechanics existed as a concept.
 
 Mayan Tumble is what tested that claim. It is a *line-pay cascade* — `CascadeSpinMechanic`
 unmodified, with a win evaluator that runs `SlotMath.js`'s `checkWins` and maps its `lineWins`
-into the `clusterWins` shape `resolveCascadeSequence` expects. No engine or mechanic change was
-needed, which is the design working. What did need changing was everything that had quietly
-started using "cascade" and "cluster" as the same word: `CascadeEngine` had no way to draw *which
-line* paid (see `_renderWinLine`), and its playfield colours were Candy Frenzy's hardcoded (see
-`config.playfield`). Both are now per-game, defaulting to the previous behaviour.
+into the `clusterWins` shape `resolveCascadeSequence` expects. No mechanic change was needed,
+which is the design working. What did need changing was everything that had quietly started
+using "cascade" and "cluster" as the same word: the shared `SlotRenderer` had no way to draw
+*which line* paid (see `drawWinLine`), and its playfield colours were Candy Frenzy's hardcoded
+(see `config.playfield`). Both are now per-game, defaulting to the previous behaviour.
 
-## `core/SlotMath.js` — pure math, no side effects
+## `core/math/SlotMath.js` — pure math, no side effects
 
 Every export is a pure function: same inputs always produce the same output, nothing touches
 the DOM, nothing holds state between calls. This is deliberate — it's what makes the module
 usable from all three contexts above (game engine, simulator, tests) without adapters.
 
 - **`checkWins(grid, paytable, paylines, activeLinesCount, wildSymbol, scatterSymbol,
-  scatterTriggerCount)`** — the default win evaluator (`SlotEngine`'s `winEvaluator` default).
+  scatterTriggerCount)`** — the default win evaluator (`LineMechanic`'s `winEvaluator` default).
   Evaluates left-to-right line matches (with generic wild substitution via `wildSymbol`) and,
   separately, scatter wins (any symbol equal to `scatterSymbol`, anywhere on the grid, count
   ≥ `scatterTriggerCount`). Returns `{ lineWins, scatterWin, totalLinePayoutMultiplier,
@@ -106,9 +139,9 @@ usable from all three contexts above (game engine, simulator, tests) without ada
   reusable by any game with this specific wild shape. Has no scatter handling at all.
 - **`checkExpandingWins(grid, expandingSymbol, paytable, paylines, activeLinesCount,
   expandingPaytable)`** — Book-of-Dead-style expanding-symbol evaluator, called by
-  `SlotEngine` itself (not chosen via `winEvaluator`) whenever `engine.inFreeSpins &&
-  engine.expandingSymbol` is set after the normal win evaluation. Any reel containing the
-  symbol counts as fully covered by it on every active payline.
+  `LineMechanic.evaluateExpandingWin` (not chosen via `winEvaluator`) whenever
+  `engine.inFreeSpins && config.expandingSymbol` is set after the normal win evaluation. Any
+  reel containing the symbol counts as fully covered by it on every active payline.
 - **`generateReel(reelWeights, targetLength, seed, exclude, defaultTriggerMinGap, paytable)`**
   — builds one weighted, seeded reel strip from a frequency table, with optional per-symbol
   `minGap`/`maxStack` spacing constraints. See the top-level README's "Reel frequency tables"
@@ -116,15 +149,15 @@ usable from all three contexts above (game engine, simulator, tests) without ada
 - **`createSeededRng(seed)`** — deterministic PRNG (mulberry32); returns a `() => number`
   function yielding the same float sequence for a given seed every time. This is the seedable
   RNG threaded through everywhere an outcome needs to be reproducible: a live spin
-  (`SlotEngine.spin(seed)`, so `engine.spin(engine.lastSpinSeed)` replays exactly), reel
+  (`CoreSlotEngine.spin(seed)`, so `engine.spin(engine.lastSpinSeed)` replays exactly), reel
   building, and the tuner's common-random-numbers search.
 - **`generateTargetGrid(reelStrips, rowsCount, rng)`** — picks one random stop position per
   reel strip and reads off the visible window; this is what a spin outcome *is*, independent
-  of animation. `SlotEngine.spin()` calls this once per spin with a fresh (or replayed) seeded
-  rng to get `this.targetGrid`, which every reel's landing animation then just visually
-  catches up to.
+  of animation. `LineMechanic.getTargetGrid` (wrapping this) is called once per spin by
+  `CoreSlotEngine.spin()` with a fresh (or replayed) seeded rng, which the active `SpinAnimator`
+  then visually catches up to.
 
-## `core/CascadeMath.js` / `core/ClusterMath.js` — cascade pure math
+## `core/math/CascadeMath.js` / `core/math/ClusterMath.js` — cascade pure math
 
 Same "pure function, no side effects" rule as `SlotMath.js` above - the cascade games' equivalent
 of that module, split in two: generic cascade mechanics (`CascadeMath.js`, knows nothing about
@@ -151,8 +184,8 @@ supplies its own evaluator instead, in its `game.js`, and touches neither of the
   then every cascade step, synchronously and deterministically, until a step produces no win.
   Returns `{ cascadeSteps, totalPayoutMultiplier, finalGrid, scatterWin }`, where each
   `cascadeSteps[i]` carries that step's `grid`/`fallOffsets`/`clusterWins`/`payout`. This
-  mirrors `SlotEngine`'s own precompute-then-animate pattern (`generateTargetGrid` then a
-  reel's landing tween) - `CascadeEngine`'s job is only to animate playback of an
+  mirrors `LineMechanic`'s own precompute-then-animate pattern (`generateTargetGrid` then a
+  reel's landing tween) - the active `SpinAnimator`'s job is only to animate playback of an
   already-fully-resolved sequence, never to decide it live frame-by-frame.
 - **`checkClusterWins(grid, paytable, minClusterSize, scatterSymbol, scatterTriggerCount)`**
   (`ClusterMath.js`) — Candy Frenzy's win evaluator: orthogonal flood-fill clustering (up/down/
@@ -166,123 +199,63 @@ supplies its own evaluator instead, in its `game.js`, and touches neither of the
   mapped into `clusterWins`, each payout divided by the line count so it stays relative to the
   total bet, and each carrying the `lineIndex` it was paid on.
 
-## `core/SlotEngine.js` — the live game: state machine + canvas renderer
+## `core/engine/CoreSlotEngine.js` — the live game: skeleton + pluggable components
 
-A class, one instance per running game (`new SlotEngine(canvas, config)`). Owns balance,
-bet, reel physics/animation, and win presentation; delegates all win logic to whichever
-`winEvaluator` function the config supplies.
+A class, one instance per running game (`new CoreSlotEngine(canvas, config)`). Owns *only* the
+state machine and the animation dispatch loop — balance/bet bookkeeping is the one piece of
+"game" logic left directly on the engine (it's small, shared by every mechanic, and every
+component needs to read `engine.totalBet`/`engine.balance` anyway). Grid resolution, spin
+animation, drawing, particles, audio, free-spins payout rules, and spin logging are each a
+separate component class, constructed by the game and passed in via config. Construction has
+no browser side effects (no `window.addEventListener`, no asset fetch) — a game must call
+`engine.init()` once, itself, after constructing it; this is what keeps `CoreSlotEngine`
+constructible in `node --test` with a stub canvas and no DOM.
 
-**Construction config** (all optional except `reelStrips`, which must have one entry per
-`reelsCount`):
+**Construction config — components** (all required except `particleSystem`/`freeSpinsMode`,
+which are cascade-specific and default to `null`):
+
+| Field | Shape | Purpose |
+|---|---|---|
+| `mechanic` | `LineMechanic` \| `CascadeSpinMechanic` \| a custom object with the same shape | Grid/win resolution — see "pluggable gameplay mechanics" below |
+| `animator` | a `SpinAnimator` instance | How a spin's steps play out visually |
+| `renderer` | a `Renderer` instance | What gets drawn to the canvas each frame |
+| `particleSystem` | a `ParticleSystem` instance, or `null` | Win/clear particle effects (cascade games) |
+| `audioController` | an `AudioController` instance, or `null` | Spin-lifecycle sound hooks |
+| `spinLogRecorder` | a `SpinLogRecorder` instance, or `null` | Per-spin log entry building |
+| `freeSpinsMode` | a `FreeSpinsModes.js`-shaped object, or `null` | Cascade free-spins payout rule (see below) |
+
+**Construction config — game data** (same fields `LineMechanic`/`CascadeSpinMechanic` and
+`SlotRenderer` read directly off `engine.config`; unchanged from the two engines this replaces):
 
 | Field | Default | Purpose |
 |---|---|---|
 | `reelsCount`, `rowsCount` | `5`, `3` | Grid shape |
 | `paytable` | `{}` | Passed straight through to `winEvaluator` |
 | `reelStrips` | `[]` | One strip per reel, from `generateReel` |
-| `paylines` | *(required, no default)* | One row-index-per-reel array per line |
-| `wildSymbol`, `scatterSymbol` | `null` | Passed positionally to `winEvaluator` — only meaningful to evaluators that read them (`checkWins` does; `checkWildLineWins` ignores them, reading wild rules off `paytable` instead) |
-| `winEvaluator` | `checkWins` | `(grid, paytable, paylines, activeLinesCount, wildSymbol, scatterSymbol) => results` |
-| `betPerLine`, `linesCount` | `1`, `10` | Starting bet |
+| `paylines` | `null` | Line-pay: required, one row-index-per-reel array per line. Cascade: optional, purely presentational — draws whichever payline a win's `lineIndex` names (see "Payline indicators" below) |
+| `wildSymbol`, `scatterSymbol` | `null` | Line-pay: passed positionally to `winEvaluator`. Cascade: `scatterSymbol` names which symbol triggers free spins |
+| `winEvaluator` | `checkWins` (line-pay) | Line-pay: `(grid, paytable, paylines, activeLinesCount, wildSymbol, scatterSymbol) => results`. Cascade: a single-argument closure the game supplies, `(grid) => { clusterWins, totalPayoutMultiplier, scatterWin }` |
+| `betPerLine`, `linesCount` | `1`, `10` | Line-pay starting bet |
+| `betAmount` | `null` | Cascade's single flat bet (no bet-per-line/lines concept) — `totalBet` uses this instead when set |
+| `playfield` | Candy Frenzy's palette | Cascade only — how the playfield itself is drawn, see "Playfield theming" below |
 | `symbolsConfig`, `spritesheetUrl` | — | Sprite atlas: `{ [symbolName]: {x,y,w,h} }` + image URL |
 | `onStateChange(state)` | no-op | Fired on every state transition (see State machine below) |
 | `onScatterTrigger(scatterCount, isInFreeSpins)` | no-op | Fired instead of auto-advancing when `scatterWin.triggerFreeSpins` — the game decides what a trigger/retrigger means |
-| `onWin({amount, isExpanding})` | no-op | Fired whenever a spin pays out |
-
-**State machine** (`engine.state`, reported via `onStateChange`): `idle` → `spinning` →
-`stopping` → `evaluating` → (`free_spins_intro` | `expanding` | `showing_wins` | `idle`) →
-... → `game_over` (free spins summary). Every transition is an explicit assignment inside
-`SlotEngine`, not inferred from animation progress — e.g. a reel's landing tween is scheduled
-to finish at a precomputed timestamp (`landStartTime`), so "did it land" is never a question
-answered by polling physics.
-
-```mermaid
-stateDiagram-v2
-    [*] --> idle
-    idle --> spinning: requestSpin() / spin()
-    spinning --> stopping
-    stopping --> evaluating
-    evaluating --> free_spins_intro: scatter triggers free spins (first time)
-    evaluating --> expanding: inFreeSpins && expandingSymbol
-    evaluating --> showing_wins: payout > 0
-    evaluating --> idle: no win
-    expanding --> showing_wins
-    free_spins_intro --> spinning: enterFreeSpins()
-    showing_wins --> spinning: next spin
-    idle --> game_over: free spins exhausted
-    game_over --> idle: exitFreeSpins() / returnToIdle()
-```
-
-**Public methods a game calls:**
-- `requestSpin()` — the one entry point for a UI's spin/stop button; safe to call in any
-  state (queues itself if the engine is mid-animation, e.g. during an expansion).
-- `spin(seed?)` / `stopSpin()` — start a spin (optionally replaying a specific seed) / cut the
-  current spin short.
-- `forceWinResult('scatter' | 'expanding' | 'bigwin')` — debug/cheat helper; forces the next
-  spin's grid to contain a given outcome (see each game's README for its cheat buttons).
-- `enterFreeSpinsIntro()` / `enterFreeSpins(spinsCount, expandingSymbol)` /
-  `retriggerFreeSpins(spinsCount)` / `returnToIdle()` / `exitFreeSpins()` — free-spins
-  lifecycle, entirely game-driven (see "Adding free spins" below) — `SlotEngine` never enters
-  or exits free spins on its own.
-- `updateBet()` — recompute `totalBet` after changing `betPerLine`/`linesCount`.
-- `loadAssets(spritesheetUrl?, symbolsConfig?)` — (re)load the sprite atlas, e.g. for a theme
-  switcher.
-- `runSimulation(numBaseSpins?, betPerLine?, linesCount?, options?)` — thin wrapper around
-  `SpinSimulator.simulateSpins` using this engine's own live `config`, so a simulation always
-  measures exactly what the running game would actually pay. `options.seed` seeds the run for
-  reproducibility; `options.logSpins` (default `false`) populates the returned `spinLog` (see
-  "Spin logging" below) — both off by default, matching `simulateSpins`' own legacy behavior.
-
-Also exposes `engine.spinLog` (one entry per real spin made so far, see "Spin logging" below)
-and `engine.lastSpinSeed` (the seed behind the most recent spin — `engine.spin(engine.
-lastSpinSeed)` replays it exactly) as plain properties a game or debug tool can read directly;
-neither needs a method call.
-
-Rendering (`render()` and everything below it) is internal — a game never calls into it
-directly, only supplies the sprite atlas and reacts to `onStateChange`/`onWin` to update its
-own DOM (balance display, spin button label, etc.).
-
-## `core/CascadeEngine.js` — the cascade live game
-
-`SlotEngine.js`'s sibling for cascade games (Candy Frenzy's cluster-pays and Mayan Tumble's
-line-pays, with nothing in the class specific to either) - same "one class instance, owns
-balance/bet/animation, delegates win logic to config" shape, built around `resolveCascadeSequence`
-(`CascadeMath.js`) instead of `generateTargetGrid`. `config.winEvaluator` here is a
-single-argument closure the game supplies (e.g. `(grid) => checkClusterWins(grid, PAYTABLE, 5,
-'bonus', 3)`) - `CascadeEngine` itself knows nothing about clusters or paylines, only about
-grids, cascades, and free spins.
-
-**Construction config** (all optional except `reelStrips`, `paytable`, `winEvaluator`):
-
-| Field | Default | Purpose |
-|---|---|---|
-| `reelsCount`, `rowsCount` | `7`, `7` | Grid shape |
-| `paytable`, `reelStrips` | `{}`, `[]` | Passed straight through to `winEvaluator` / `resolveCascadeSequence` |
-| `winEvaluator` | no-op (no wins) | `(grid) => { clusterWins, totalPayoutMultiplier, scatterWin }` |
-| `scatterSymbol` | `null` | Which symbol name triggers free spins |
-| `paylines` | `null` | Line-pay cascade games only. Purely presentational here: the engine draws the path of whichever win is being paid, for any win carrying a `lineIndex` (see below) |
-| `playfield` | Candy Frenzy's palette | How the playfield itself is drawn - see below |
-| `freeSpinsMode` | `createFlatMultiplierMode()` | Pluggable free-spins payout mode - see `core/FreeSpinsModes.js` below |
-| `betAmount` | `1` | This game's single flat bet (no bet-per-line/lines concept) |
-| `symbolsConfig`, `spritesheetUrl` | — | Sprite atlas, same shape as `SlotEngine`'s |
-| `onStateChange(state)` | no-op | Fired on every state transition |
-| `onScatterTrigger(scatterCount, isInFreeSpins)` | no-op | Fired instead of auto-advancing when the resolved spin's `scatterWin.triggerFreeSpins` is set |
 | `onWin({amount})` | no-op | Fired whenever a spin pays out |
 
 **Payline indicators.** A cascade win is normally just a set of cells, which is the whole story
 for a cluster. It is not for a line-pay cascade: three matching symbols on a 5×3 grid sit on
 several paylines at once, the payout differs per line, and the highlighted cells cannot say which
-line paid. So a win may carry a **`lineIndex`**, and `_renderWinLine` draws that payline's path
-across the grid with its 1-based number at both ends, for the win currently being cleared - one at
-a time, matching how the engine already sequences glow, particles, popup and ding. A cluster win
-carries no `lineIndex` and a cluster game passes no `paylines`, so the whole feature is a no-op
-for Candy Frenzy. The stroke runs from one numbered tag's centre to the other: the tags are where
-a line begins and ends, not decorations beside it.
+line paid. So a win may carry a **`lineIndex`**, and `SlotRenderer`'s `drawWinLine` draws that
+payline's path across the grid with its 1-based number at both ends, for the win currently being
+cleared. A cluster win carries no `lineIndex` and a cluster game passes no `paylines`, so the
+whole feature is a no-op for Candy Frenzy. The stroke runs from one numbered tag's centre to the
+other: the tags are where a line begins and ends, not decorations beside it.
 
-**Playfield theming.** Everything behind and around the symbols - backdrop gradient, outline and
-its glow radius, inner frame, grid lines, loading screen - comes from `config.playfield`, merged
-over defaults that *are* the Candy Frenzy look, so a game passing nothing is unchanged. Two fields
-are choices rather than colours:
+**Playfield theming** (cascade games). Everything behind and around the symbols - backdrop
+gradient, outline and its glow radius, inner frame, grid lines, loading screen - comes from
+`config.playfield`, merged over `SlotRenderer`'s `DEFAULT_THEME`. Two fields are choices rather
+than colours:
 
 - **`gridLines`** (a colour, or `null` to omit them). A cluster game wants its cells ruled,
   because a cluster *is* a set of cells and the ruling is what makes its shape legible. A payline
@@ -291,106 +264,144 @@ are choices rather than colours:
 - **`noise`** (`{ color, strength, scale, seed }`, or `null`) — a fixed grain across the playfield,
   texture where the ruling used to be. Generated once into an offscreen canvas and blitted, never
   regenerated per frame: a crawling backdrop reads as a rendering fault rather than as texture.
-  Seeded, so it is identical on every load. Rebuilt only when the grid is resized.
+  Seeded, so it is identical on every load.
 
-**State machine** (`engine.state`): `idle` → `dropping_in` → (`clearing` → `falling`)* →
-`showing_wins` → `idle`, plus `free_spins_intro`/`game_over` (free-spins lifecycle, same
-naming convention as `SlotEngine.state`).
+**State machine** (`engine.state`, reported via `onStateChange`): `idle` → `spinning` →
+`evaluating` → (`free_spins_intro` | `expanding` | `showing_wins` | `idle`) → ... →
+`game_over` (free spins summary), for both line-pay and cascade games alike — one unified state
+field either family plugs into, unlike the two similarly-shaped-but-separate machines
+`SlotEngine.js`/`CascadeEngine.js` used to each own. Every transition is an explicit assignment
+inside `CoreSlotEngine`, not inferred from animation progress.
 
 ```mermaid
 stateDiagram-v2
     [*] --> idle
-    idle --> dropping_in: spin()
-    dropping_in --> clearing: this step's grid has a cluster win
-    dropping_in --> showing_wins: no win this step, payout > 0
-    dropping_in --> idle: no win this step, no payout
-    clearing --> clearing: more clusters remain in this step
-    clearing --> falling: this step's last cluster finished clearing
-    falling --> clearing: next cascade step's grid has a win
-    falling --> showing_wins: settled (no more wins), payout > 0
-    falling --> idle: settled (no more wins), no payout
-    showing_wins --> dropping_in: spin()
-    idle --> dropping_in: spin()
-    idle --> free_spins_intro: scatter triggers free spins (base game, first time)
-    free_spins_intro --> dropping_in: enterFreeSpins()
-    idle --> game_over: exitFreeSpins() once free spins are exhausted
+    idle --> spinning: requestSpin() / spin()
+    spinning --> evaluating: animator finishes playing every step
+    evaluating --> free_spins_intro: game calls enterFreeSpinsIntro() from onScatterTrigger
+    evaluating --> expanding: inFreeSpins && expandingSymbol && the expansion actually pays
+    evaluating --> showing_wins: payout > 0
+    evaluating --> idle: no win
+    expanding --> showing_wins
+    free_spins_intro --> spinning: enterFreeSpins() -> spinFreeSpins()
+    showing_wins --> spinning: next spin
+    idle --> spinning: next spin
+    showing_wins --> game_over: free spins exhausted (spinFreeSpins() -> exitFreeSpins())
+    idle --> game_over: free spins exhausted, last spin had no win
     game_over --> idle: returnToIdle()
 ```
 
-Each reel/column animates independently rather than behind one global barrier: a column's own
-leftover grid exits, then that same column's new symbols enter immediately
-(`columnOutgoingDone`/`columnEnterStartTime`), staggered left-to-right on an ease-out curve
-(`_columnStartDelay`) so it reads as a wave rather than a
-uniform drop. Within one spin, multiple cascade steps' clusters animate one at a time
-(`currentClusterWins`/`currentClusterIndex`/`_beginClusterClear`), each with its own glow,
-per-symbol vanish variant, particles, floating win popup, and ding - not all bursting at once.
+`CoreSlotEngine.state` deliberately has no equivalent to `CascadeEngine.js`'s old fine-grained
+`dropping_in`/`clearing`/`falling` states — a cascade spin's whole multi-step sequence plays out
+inside one `spinning` → `evaluating` cycle. That finer progress (which cluster is clearing right
+now, which column is still falling) lives instead in the active `SpinAnimator`'s own state
+(`CascadeDropAnimator.currentClusterWins`, `.columnOutgoingDone`, ...) — a component that reads
+"is a cluster currently clearing" reads `engine.animator.currentClusterWins != null`, not
+`engine.state`. `SlotRenderer`'s `drawWinLine` is the concrete example: ported from
+`CascadeEngine.js`'s `state !== 'clearing'` gate, it now reads the animator's own
+`currentClusterWins` instead, since `CoreSlotEngine` never enters a `'clearing'` state at all.
 
 **Public methods a game calls:**
-- `requestSpin()` / `spin(seed?)` — same shape as `SlotEngine`'s; `spin()` also handles the
-  every-spin "leftover grid falls out, new grid falls in" animation and (on the very first
-  call) the decorative non-winning initial fill (`_fillInitialGrid`, called once from `init()`
-  so the grid is never blank on load).
-- `forceScatterResult()` — debug/cheat helper; forces the next spin's final grid to contain 3
-  of `config.scatterSymbol`, for testing the free-spins trigger without waiting for a natural
-  hit.
-- `enterFreeSpinsIntro()` / `enterFreeSpins(spinsCount)` / `retriggerFreeSpins(spinsCount)` /
-  `returnToIdle()` / `exitFreeSpins()` — free-spins lifecycle, entirely game-driven, same
-  division of responsibility as `SlotEngine`'s (see "Optional: free spins" below - the cascade
-  version follows the same pattern). `enterFreeSpins`/`exitFreeSpins` also rebuild the active
-  `freeSpinsMode`'s state fresh (see `core/FreeSpinsModes.js`), so a mode's own per-tile
-  tracking never leaks between bonus rounds or into the base game.
-- `handleAutoPlay()` — schedules the next spin (base-game autoplay or the free-spins loop)
-  after the current one settles.
+- `requestSpin()` — the one entry point for a UI's spin/stop button; safe to call in any
+  state (queues itself if the engine is mid-animation, e.g. during an expansion).
+- `spin(seed?)` / `stopSpin()` — start a spin (optionally replaying a specific seed) / cut the
+  current spin short. `spin()` is `async` and guarded against re-entrancy (`_spinInProgress`) —
+  unlike the old engines' synchronous setup-then-return, it genuinely suspends across multiple
+  `requestAnimationFrame`-driven animation steps, so two overlapping calls (a free-spins
+  auto-progression timer racing a debug cheat click, say) could otherwise interleave and corrupt
+  `engine.grid`/`engine.spinSequence` mid-flight.
+- `forceWinResult('scatter' | 'expanding' | 'bigwin')` — line-pay debug/cheat helper; forces the
+  next spin's grid to contain a given outcome via the mechanic's `forcedGrid` parameter.
+- `forceScatterResult()` — cascade debug/cheat helper; forces the next spin's *last* step to
+  contain 3 of `config.scatterSymbol` (a cascade spin resolves progressively, so it can't be
+  forced via a single starting grid the way a line-pay spin can).
+- `enterFreeSpinsIntro()` / `enterFreeSpins(spinsCount, expandingSymbol?)` /
+  `retriggerFreeSpins(spinsCount)` / `returnToIdle()` / `exitFreeSpins()` — free-spins
+  lifecycle, entirely game-driven (see "Optional: free spins / expanding symbol" below) —
+  `CoreSlotEngine` never enters or exits free spins on its own. `exitFreeSpins()` deliberately
+  does **not** reset `freeSpinsRemaining`/`freeSpinsTotal`/`freeSpinsAccumulatedWin` — a game's
+  `game_over` handler reads `freeSpinsAccumulatedWin` for its summary modal, and resetting it
+  here would zero it before that handler ever runs. `enterFreeSpins()` is what resets these
+  fields, at the start of the *next* round.
+- `handleAutoPlay()` — schedules the next spin (base-game autoplay or the free-spins loop) after
+  the current one settles. Called unconditionally at the end of every resolved spin, which is
+  what makes free spins actually chain forward automatically.
+- `updateBet()` — recompute `totalBet` after changing `betPerLine`/`linesCount`/`betAmount`.
+- `loadAssets(spritesheetUrl?, symbolsConfig?)` — (re)load the sprite atlas, e.g. for a theme
+  switcher.
+- `runSimulation(numBaseSpins?, betPerLine?, linesCount?, options?)` — thin wrapper around
+  `SpinSimulator.simulateSpins` using this engine's own live `config` (which already carries
+  `mechanic`/`freeSpinsMode`), so a simulation always measures exactly what the running game
+  would actually pay, whichever mechanic it plugs in. `options.seed` seeds the run for
+  reproducibility; `options.logSpins` (default `false`) populates the returned `spinLog`.
 
-Also exposes `engine.spinLog`/`engine.lastSpinSeed` as plain properties, same as `SlotEngine`.
-- `runSimulation(numBaseSpins, betAmount?, linesCount?, options?)` — same shape as
-  `SlotEngine.runSimulation` (so `SimulationPanel.js` can call either engine identically);
-  `linesCount` exists only for that parity and is always forced to 1 internally. Delegates to
-  `SpinSimulator.js`'s `simulateSpins` with `config.mechanic` (`CascadeSpinMechanic`) and this
-  instance's own `freeSpinsMode`, so a simulated free-spins round measures the real carried-over
-  economics (e.g. Candy Frenzy's persistent multiplier tiles), not a flat approximation. Candy
-  Frenzy's own RUN SIMULATION/TUNE FREQUENCIES buttons use this (see its README).
+Also exposes `engine.spinLog` (a read-only view onto the plugged-in `SpinLogRecorder`'s own
+buffer — one entry per real spin made so far, see "Spin logging" below) and `engine.lastSpinSeed`
+(the seed behind the most recent spin — `engine.spin(engine.lastSpinSeed)` replays it exactly)
+as plain properties a game or debug tool can read directly; neither needs a method call.
 
-One spin, end to end - resolving the whole outcome synchronously, then animating playback of
-it (`freeSpinsMode` only enters the picture while `inFreeSpins`):
+Rendering is entirely delegated — `CoreSlotEngine.animate()` just calls `this.particleSystem?.
+update()` then `this.renderer?.draw(this, this.ctx)` every frame, regardless of spin state. A
+game never calls into drawing directly, only supplies the sprite atlas and reacts to
+`onStateChange`/`onWin` to update its own DOM (balance display, spin button label, etc.).
 
-```mermaid
-sequenceDiagram
-    participant Game as game.js
-    participant CE as CascadeEngine
-    participant FSM as FreeSpinsMode
-    participant CM as CascadeMath
-    participant WE as winEvaluator (ClusterMath)
+### Pluggable components
 
-    Game->>CE: requestSpin()
-    CE->>CE: spin(seed)
-    CE->>FSM: wrapWinEvaluator(baseEvaluator, state, engine)
-    FSM-->>CE: wrapped evaluator
-    CE->>CM: resolveCascadeSequence(strips, rows, seed, evaluator)
-    loop each cascade step
-        CM->>WE: winEvaluator(currentGrid)
-        WE-->>CM: clusterWins, totalPayoutMultiplier, scatterWin
-        CM->>CM: applyCascade(...) if this step has a win
-    end
-    CM-->>CE: cascadeSteps, totalPayoutMultiplier, finalGrid, scatterWin
-    CE->>CE: animate() loop drives update()/render() every frame
-    loop per cascade step, per cluster
-        CE->>CE: _beginClusterClear()
-        CE->>FSM: onClusterCleared(cluster, state, engine)
-        CE->>CE: render(): FSM.renderOverlay(state, engine)
-    end
-    CE->>CE: _finishSpin()
-    CE-->>Game: onStateChange(state) / onWin({amount})
-```
+**`SpinAnimator`** (`config.animator`) — how a spin's already-resolved step sequence plays out
+visually. `CoreSlotEngine._playStep` calls exactly two methods, awaiting each via a
+`resolve`/`onDone` callback before moving on:
+- `playEntrance(engine, step, onDone)` — plays the first step of a spin.
+- `playTransition(engine, prevStep, nextStep, onDone)` — plays the transition between two
+  consecutive steps of a multi-step (cascade) sequence. A line-pay animator's implementation is
+  a no-op — `LineMechanic` never produces more than one step.
+- optional `playExpandingReveal(engine, expandingSymbol, expandingReels, onDone)` — called only
+  when `inFreeSpins && config.expandingSymbol` and the expansion actually pays.
 
-## `core/FreeSpinsModes.js` — pluggable free-spins payout modes
+  Owns its own persistent visual/physics state (`reels`, or `grid`/`cellOffsets`/`outgoingGrid`)
+  *separately* from `engine.grid` (the logical, already-resolved grid for whichever step is
+  currently in flight) — a Renderer reads the animator's own state (`engine.animator.reels`,
+  `engine.animator.cellOffsets`, ...) to draw in-progress interpolation, not just the final
+  resolved position. Two implementations ship today: `ReelScrollAnimator`
+  (`core/engine/animators/ReelScrollAnimator.js` — line-pay spin-up/land physics, ported
+  faithfully from `SlotEngine.js`'s own timing formulas, plus the Book-of-Dead expanding
+  reveal) and `CascadeDropAnimator` (`core/engine/animators/CascadeDropAnimator.js` —
+  drop-in/clear/fall, ported from `CascadeEngine.js`'s own `update()`/`_beginClusterClear()`).
 
-How `CascadeEngine` varies what a free-spins win pays, without hardcoding any one rule into
-the engine itself: `config.freeSpinsMode` is a plain object of lifecycle hooks the engine
-calls without knowing which concrete mode is active, only ever consulted while
+**`Renderer`** (`config.renderer`) — `draw(engine, ctx)`, called every animation frame regardless
+of spin state. `SlotRenderer` (`core/rendering/SlotRenderer.js`) is the one shipped
+implementation, branching internally on `engine.mechanic?.name === 'cascade'` into a line-pay
+draw path or a cascade draw path, and providing every drawing primitive (symbols, borders, win
+effects, paylines, playfield theming, cascade clear/fall visuals, cluster win popups) both
+animators call back into.
+
+**`ParticleSystem`** (`config.particleSystem`, cascade games only today) — `update()` (called
+every frame from `animate()`, before the renderer draws) and `spawn(points)` (called by
+`CascadeDropAnimator` when a cluster clears).
+
+**`AudioController`** (`config.audioController`) — lifecycle hooks `CoreSlotEngine` calls at
+fixed points, regardless of which concrete controller is plugged in: `onSpinStart()`,
+`onReelStop(reelIndex)` (called by an animator on each column's landing, not by the engine
+itself), `onWin(amount)`, `onScatterTrigger()`, `onExpand()`, `onClusterWin(payoutMultiplier)`.
+The shipped `AudioController` (`core/engine/AudioController.js`) just forwards each hook to the
+`SlotAudio` singleton. `engine.audio` (the singleton itself) still exists separately for a
+game's own UI-only sound wiring (a mute button calling `engine.audio.toggleMute()` directly) —
+that isn't a spin-lifecycle event this component's hooks cover.
+
+**`SpinLogRecorder`** (`config.spinLogRecorder`) — `record({ sequence, scatterWin, seed,
+timestamp, phase, chargedBet })`, called once per spin from `_finishSpin()`. Detects a line-pay
+vs. cascade sequence shape (`'clusterWins' in sequence[0]`) and builds the entry through the
+matching `core/SpinLog.js` builder, replacing the duplicated `_pushSpinLogEntry` methods
+`SlotEngine.js`/`CascadeEngine.js` used to each maintain separately. Bounded to `maxEntries`
+(default 20000) so a long autoplay session doesn't grow `engine.spinLog` unbounded.
+
+## `core/engine/FreeSpinsModes.js` — pluggable free-spins payout modes
+
+How `CoreSlotEngine` varies what a free-spins win pays on a cascade game, without hardcoding any
+one rule into the engine itself: `config.freeSpinsMode` is a plain object of lifecycle hooks the
+engine calls without knowing which concrete mode is active, only ever consulted while
 `engine.inFreeSpins` (the base game always uses `winEvaluator` completely unwrapped). A future
 mode - for Candy Frenzy or a future cascade game - just needs to implement this same shape, no
-`CascadeEngine` changes required.
+`CoreSlotEngine` changes required.
 
 - **`createState(engine) -> any`** — builds the mode's own working state. Called once when
   free spins begin (`enterFreeSpins`) and again the instant they end (`exitFreeSpins`), so
@@ -399,24 +410,24 @@ mode - for Candy Frenzy or a future cascade game - just needs to implement this 
 - **`wrapWinEvaluator(baseEvaluator, state, engine) -> (grid) => results`** — wraps the game's
   win evaluator so every cluster's payout (and the step's `totalPayoutMultiplier`) already
   reflects this mode's bonus by the time `resolveCascadeSequence` finishes resolving the whole
-  spin, synchronously, one call per cascade step, in chronological order. `CascadeEngine`'s own
-  money code (`_finishSpin`/`_spawnClusterWinPopups`/spin log) trusts these numbers as-is and
-  never applies anything else on top.
+  spin, synchronously, one call per cascade step, in chronological order. `CoreSlotEngine`'s own
+  money code (`_finishSpin`/spin log) trusts these numbers as-is and never applies anything else
+  on top.
 - **`onClusterCleared(cluster, state, engine)`** — called once per cluster, only while
-  `inFreeSpins`, at the exact moment `_beginClusterClear` starts playing that cluster's own
-  clear animation - a mode with visible per-tile state updates it here, in step with the
-  animation, not all at once back when the whole spin was precomputed.
-- **`renderOverlay(state, engine)`** — called once per frame from `render()`, every frame
-  regardless of `inFreeSpins` (a mode's state is reset to "nothing to show" the instant free
-  spins end, so this is naturally a no-op outside a bonus round). Whether it draws before or
-  after the grid's own symbols that frame is controlled by the mode object's own
+  `inFreeSpins`, at the exact moment the active `CascadeDropAnimator` starts playing that
+  cluster's own clear animation - a mode with visible per-tile state updates it here, in step
+  with the animation, not all at once back when the whole spin was precomputed.
+- **`renderOverlay(state, engine)`** — called once per frame from `SlotRenderer`'s cascade draw
+  path, every frame regardless of `inFreeSpins` (a mode's state is reset to "nothing to show"
+  the instant free spins end, so this is naturally a no-op outside a bonus round). Whether it
+  draws before or after the grid's own symbols that frame is controlled by the mode object's own
   **`renderOverlayOrder`** property (`'behind'` or `'front'`, default `'front'` if omitted) -
   candy sprite art is essentially opaque, so a `'behind'` overlay is only ever visible on a
   cell with no symbol drawn over it yet; `'front'` stays legible on a landed tile too. Each
   mode picks whichever fits its own visual.
 
 Two modes ship today:
-- **`createFlatMultiplierMode(multiplier = 2)`** — `CascadeEngine`'s own default: every
+- **`createFlatMultiplierMode(multiplier = 2)`** — the cascade mechanic's own default: every
   free-spins win simply pays `multiplier`x. No per-tile state, no visual overlay.
 - **`createMultiplierTilesMode({ badgeStyle = 'background', renderOrder = 'front' })`** —
   Candy Frenzy's main free-spins mode: every tile a winning cluster occupies gets (or doubles)
@@ -427,21 +438,36 @@ Two modes ship today:
   marked tile's multiplier is drawn; see Candy Frenzy's own README for which it currently uses
   and why.
 
-## `core/LineMechanic.js` / `core/CascadeSpinMechanic.js` — pluggable gameplay mechanics
+## `core/engine/mechanics/LineMechanic.js` / `core/engine/mechanics/CascadeSpinMechanic.js` — pluggable gameplay mechanics
 
-A **mechanic** is a plain object exposing the two components every spin actually needs: "get
-the symbols for the playfield" and "calculate wins." `SlotEngine.js`/`CascadeEngine.js` call
-these directly for live, animated play; `core/SpinSimulator.js` calls the same objects'
-`resolveSpin` (composed from those same components) for a synchronous batch run — one shared
-architecture, not a simulator-only copy of the live engine's logic.
+A **mechanic** is a plain object exposing the components every spin actually needs: "get the
+symbols for the playfield," "calculate wins," and two composed entry points built from those
+same components — `resolveLiveSpin` (`core/engine/CoreSlotEngine.js` calls this directly, for
+live, animated play) and `resolveSpin` (`core/SpinSimulator.js` calls this for a synchronous
+batch run). One shared architecture, not a simulator-only copy of the live engine's logic.
 
-**`LineMechanic`** (the default for `SlotEngine`/`simulateSpins` alike — no existing game passes
-it explicitly):
+`resolveLiveSpin({ reelStrips, rowsCount, seed, config, linesCount, winEvaluator,
+maxCascadeSteps, forcedGrid }) -> { steps: [{ grid, payout, ... }], scatterWin }` is the
+normalized step-sequence contract both mechanics implement: `steps` is always at least length
+1 (a line-pay spin's mechanic returns exactly one step; a cascade mechanic returns one step per
+cascade round), and every step's `payout` is an **already-monetized dollar amount**, not a bare
+multiplier — only the mechanic itself knows its own bet model (line-pay has two different bet
+bases: line wins scale by `betPerLine`, scatter wins by the full `totalBet`; cascade has one
+flat `betAmount`), so `CoreSlotEngine._finishSpin` just sums `step.payout` across every step,
+mechanic-agnostic.
+
+**`LineMechanic`** (`SpinSimulator.js`'s own default when `config.mechanic` is omitted; every
+line-pay game passes it to `CoreSlotEngine` explicitly, same as a cascade game does
+`CascadeSpinMechanic`):
 - **`getTargetGrid(reelStrips, rowsCount, rng)`** — wraps `SlotMath.js`'s `generateTargetGrid`.
 - **`evaluateWin(grid, config, linesCount)`** — wraps `config.winEvaluator` (defaulting to
   `checkWins`), reading `paytable`/`paylines`/`wildSymbol`/`scatterSymbol` off `config`.
 - **`evaluateExpandingWin(grid, expandingSymbol, config, linesCount)`** — wraps
-  `checkExpandingWins`, for the Book-of-Dead-style bonus (bookbookbook only).
+  `checkExpandingWins`, for the Book-of-Dead-style bonus (bookbookbook only); `CoreSlotEngine`
+  only calls this when the mechanic exposes it at all.
+- **`resolveLiveSpin(...)`** — see the shared contract above. `forcedGrid` (non-empty array)
+  skips `getTargetGrid` entirely and evaluates that grid instead —
+  `CoreSlotEngine.forceWinResult()`'s debug/cheat path.
 - **`createFreeSpinsState(simConfig, rng)`** — picks this free-spins round's expanding symbol
   once, at the round's start (only if `hasExpandingWild`).
 - **`resolveSpin(...)`** / **`defaultPayoutOf(paytable, symbol)`** / **`statsLabels`** — the
@@ -449,17 +475,21 @@ it explicitly):
   `tuneFrequencies`' Phase 2 uses to compare "value" symbols (highest N-of-a-kind payout), and
   the RUN SIMULATION panel's win-breakdown header/column wording ("Normal Wins"/"Hits").
 
-**`CascadeSpinMechanic`** (the default for `CascadeEngine`/cascade `simulateSpins` calls) is
+**`CascadeSpinMechanic`** (the default for `CoreSlotEngine`/cascade `simulateSpins` calls) is
 the cluster-pays sibling. It can't cleanly separate "get symbols" from "calculate wins" the way
 `LineMechanic` can — a cascade's refill depends on which cells the *previous* step's win check
 cleared — so **`resolveSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps)`**
-(wrapping `CascadeMath.js`'s `resolveCascadeSequence`) is both components at once, by nature.
-It also exposes **`wrapWinEvaluatorForFreeSpins`**/**`createFreeSpinsState`** (builds the active
+(wrapping `CascadeMath.js`'s `resolveCascadeSequence`) is both components at once, by nature;
+**`resolveLiveSpin(...)`** just converts each of its returned steps' payout multiplier into
+money (`config.betAmount`) before returning, per the shared contract above — only the
+step-level `payout` is rewritten, `clusterWins[].payout` stays the raw multiplier
+`SpinLogRecorder` expects and monetizes itself. It also exposes
+**`wrapWinEvaluatorForFreeSpins`**/**`createFreeSpinsState`** (builds the active
 `FreeSpinsModes.js` mode's state once per round) so a simulated free-spins round measures the
 real carried-over economics (e.g. Candy Frenzy's persistent multiplier tiles), not a flat
 approximation — `resolveSpin` replays every cascade step's cluster wins through
-`onClusterCleared`, in order, exactly like `CascadeEngine`'s animated playback does per cluster,
-just without the animation frames. Its own `defaultPayoutOf` ranks by the highest
+`onClusterCleared`, in order, exactly like `CascadeDropAnimator`'s animated playback does per
+cluster, just without the animation frames. Its own `defaultPayoutOf` ranks by the highest
 `clusterPayout` tier instead of a line-pay array. Never imports `ClusterMath.js` directly —
 `config.winEvaluator` is a closure the game supplies, so a future line-win-based cascade game
 reuses this mechanic unmodified, just with its own evaluator/`payoutOf`.
@@ -475,8 +505,8 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   `numBaseSpins` spins (plus any triggered free-spin rounds) via `config.mechanic.resolveSpin`
   (defaulting to `LineMechanic`) and returns aggregate stats: `rtp`, `maxWin`, win/hit
   distributions, `freeSpinsTriggered`, etc. `config` is shaped like the live engine's own config
-  — in fact `SlotEngine.runSimulation()`/`CascadeEngine.runSimulation()` pass their own
-  `this.config` straight through. A cascade game passes `linesCount: 1` and its flat bet as
+  — in fact `CoreSlotEngine.runSimulation()` passes its own `this.config` straight through,
+  whichever mechanic it plugs in. A cascade game passes `linesCount: 1` and its flat bet as
   `betPerLine` (no per-line betting concept - see `CascadeSpinMechanic`'s own doc). Several
   config fields are opt-in, off by default so existing callers see no behavior change:
   `hasExpandingWild` (`LineMechanic`-only), `freeSpinsMode` (`CascadeSpinMechanic`-only), and
@@ -703,9 +733,10 @@ UI — it calls these instead:
 
 ## `core/SpinLog.js` / `core/SpinLogPanel.js` / `core/FileIO.js` — spin logging
 
-Both `SlotEngine.js` (live spins) and `SpinSimulator.js` (a batch run, opt-in via
-`config.logSpins`) build their per-spin log entries through the same pure functions in
-`core/SpinLog.js`, so the two can't drift apart on field names or payout math:
+Both `core/engine/SpinLogRecorder.js` (live spins, plugged into `CoreSlotEngine`) and
+`SpinSimulator.js` (a batch run, opt-in via `config.logSpins`) build their per-spin log entries
+through the same pure functions in `core/SpinLog.js`, so the two can't drift apart on field
+names or payout math:
 
 - **`createSpinLogEntry({ spinIndex, phase, betPerLine, linesCount, chargedBet,
   scatterBetBase, winData, scatterSymbol, seed, timestamp })`** — builds one entry from a win
@@ -716,7 +747,8 @@ Both `SlotEngine.js` (live spins) and `SpinSimulator.js` (a batch run, opt-in vi
 - **`applyExpandingWinToSpinLogEntry(entry, { expandingSymbol, expandingReels, expandingWin })`**
   — mutates an entry once its expanding win is known, whether that's immediately (a batch run
   already has it) or later (live play, only after the expansion animation finishes — see
-  `SlotEngine._pushSpinLogEntry`/the `'expanding'` state handling in `update()`).
+  `SpinLogRecorder.record`'s own `expandingWinData` parameter, populated from
+  `CoreSlotEngine.expandingWinData` once the `'expanding'` state's reveal has resolved).
 - **`summarizeSpinWins(entry)`** / **`exportSpinLogCsv(spinLog, { seed, startedAt,
   filenamePrefix })`** — the compact `TYPE:symbol:count:amount[:flags]` win-summary format (see
   its own doc for the exact grammar and a ready-made parsing regex) and the CSV builder +
@@ -728,14 +760,18 @@ Both `SlotEngine.js` (live spins) and `SpinSimulator.js` (a batch run, opt-in vi
 - **`core/FileIO.js`'s `downloadTextFile(filename, text, mimeType)`** — generic
   browser-download utility `exportSpinLogCsv` is built on; not spin-log-specific.
 
-## `core/SlotAudio.js` — synthesized sound effects
+## `core/audio/SlotAudio.js` — synthesized sound effects
 
-A singleton (`export const audio = new SlotAudio()`), imported and used directly by
-`SlotEngine.js` — a game doesn't call it for gameplay sounds, only for `toggleMute()`/UI wiring
-(mute button) and, in bookbookbook's case, `playScatterTrigger()` at custom points in its own
-free-spins-intro flow. Every sound is a small Web Audio oscillator patch built at call time
-(no audio asset files) — `playSpin`, `playReelStop(reelIndex)`, `playWin(payoutMultiplier)`,
-`playScatterTrigger`, `playExpand`, `startBGM`/`stopBGM` (free-spins background loop),
+A singleton (`export const audio = new SlotAudio()`). `CoreSlotEngine` imports it once and
+exposes it as `engine.audio` (see `core/engine/CoreSlotEngine.js` above) — a game reads that
+property for UI-only wiring (a mute button calling `engine.audio.toggleMute()`) and, in
+bookbookbook's case, `engine.audio.playScatterTrigger()` at custom points in its own
+free-spins-intro flow. Every actual gameplay sound is instead triggered through the pluggable
+`AudioController` component (`core/engine/AudioController.js`), whose hooks just forward to
+this same singleton — see "Pluggable components" above. Every sound is a small Web Audio
+oscillator patch built at call time (no audio asset files) — `playSpin`,
+`playReelStop(reelIndex)`, `playWin(payoutMultiplier)`, `playScatterTrigger`, `playExpand`,
+`playClusterWin(payoutMultiplier)`, `startBGM`/`stopBGM` (free-spins background loop),
 `toggleMute`/`setMute`.
 
 ## Hooking up a new game
@@ -743,20 +779,21 @@ free-spins-intro flow. Every sound is a small Web Audio oscillator patch built a
 A game is a folder `games/<name>/` with three files, wired together by convention rather than
 a plugin registry — there's no central list of games to update.
 
-This section covers a line-pays game (`SlotEngine`) specifically. A cascade game follows the same
-three-file convention but plugs into `CascadeEngine`/`CascadeMath.js`/`FreeSpinsModes.js` instead
-(see their sections above), and wires RUN SIMULATION/TUNE FREQUENCIES the same way step 6 below
-describes just with `mechanic: CascadeSpinMechanic`/`linesCount: 1` in its own config. Two worked
-examples, deliberately different in their win rule and nothing else: Candy Frenzy (cluster-pays,
-using `ClusterMath.js`) and Mayan Tumble (line-pays, using its own evaluator over
-`SlotMath.js`'s `checkWins`) — see their own READMEs rather than a copy here.
+This section covers a line-pays game (`LineMechanic`/`ReelScrollAnimator`) specifically. A
+cascade game follows the same three-file convention but plugs `CascadeSpinMechanic`/
+`CascadeDropAnimator`/a `ParticleSystem` into `CoreSlotEngine` instead (see their sections
+above), and wires RUN SIMULATION/TUNE FREQUENCIES the same way step 6 below describes just with
+`mechanic: CascadeSpinMechanic`/`linesCount: 1` in its own config. Two worked examples,
+deliberately different in their win rule and nothing else: Candy Frenzy (cluster-pays, using
+`ClusterMath.js`) and Mayan Tumble (line-pays, using its own evaluator over `SlotMath.js`'s
+`checkWins`) — see their own READMEs rather than a copy here.
 
 Whichever it is, `tuneConfig` must carry **every primitive the game's `winEvaluator` closes
 over**, because tuning trials rebuild that evaluator inside a Worker from its name (see "Parallel
 tuning" above). For a cluster game that is `minClusterSize`/`scatterTriggerCount`; for a line-pay
 cascade it is also `paylines`/`wildSymbol`.
 
-### 1. `game.js` — data + engine instantiation
+### 1. `game.js` — data + engine/component instantiation
 
 1. Define the shared constants every other piece needs (`REELS_COUNT`, `ROWS_COUNT`,
    `REEL_LENGTH`, `REEL_SEEDS`, `BET_PER_LINE`, `LINES_COUNT`) — export them so `PAYLINES`
@@ -774,9 +811,26 @@ cascade it is also `paylines`/`wildSymbol`.
    from `paytable`) from `SlotMath.js`, or a game-specific one with the same
    `(grid, paytable, paylines, activeLinesCount, ...)` shape.
 5. On `window load`, build `symbolsConfig`/`spritesheetUrl` (see Asset loading below), then
-   `new SlotEngine(canvas, { reelsCount, rowsCount, paytable, reelStrips, paylines,
-   winEvaluator, wildSymbol, scatterSymbol, betPerLine, linesCount, symbolsConfig,
-   spritesheetUrl, onStateChange, onScatterTrigger, onWin })`.
+   construct the components and the engine:
+   ```js
+   const renderer = new SlotRenderer();
+   engine = new CoreSlotEngine(canvas, {
+     mechanic: LineMechanic,
+     animator: new ReelScrollAnimator(renderer),
+     renderer,
+     spinLogRecorder: new SpinLogRecorder({ betPerLine, linesCount, scatterSymbol }),
+     audioController: new AudioController(),
+
+     reelsCount, rowsCount, paytable, reelStrips, paylines, winEvaluator,
+     wildSymbol, scatterSymbol, betPerLine, linesCount,
+     symbolsConfig, spritesheetUrl,
+     onStateChange, onScatterTrigger, onWin,
+   });
+   engine.init();
+   ```
+   `engine.init()` is required — construction alone has no browser side effects (see
+   `core/engine/CoreSlotEngine.js` above), so a game that forgets this call gets a canvas that
+   never resizes, loads assets, or renders anything.
 6. Wire the rest of the page's DOM controls (spin/auto/turbo/mute/bet/lines buttons) to the
    engine's public methods, the RUN SIMULATION / TUNE FREQUENCIES buttons to
    `runSimulationAndRender`/`openTuneFrequenciesPanel` from `SimulationPanel.js` (passing the
@@ -805,7 +859,7 @@ paytable's own symbol keys.
 
 ### Optional: free spins / expanding symbol
 
-`SlotEngine` provides the mechanism but not the policy — it never decides on its own what a
+`CoreSlotEngine` provides the mechanism but not the policy — it never decides on its own what a
 scatter trigger means. To add a free-spins bonus (as bookbookbook does):
 
 1. Set `scatterSymbol` in the engine config and mark the trigger symbol
@@ -815,11 +869,14 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
    trigger vs. a retrigger (bookbookbook: 3+ to start, 2+ during free spins to add spins), and
    call `engine.enterFreeSpinsIntro()` for the intro animation state.
 3. Once the player/animation is ready, call `engine.enterFreeSpins(spinsCount,
-   expandingSymbol)` — this sets `engine.inFreeSpins`/`expandingSymbol` and starts the bonus
-   spins loop. A retrigger just calls `engine.retriggerFreeSpins(spinsCount)`.
-4. While `engine.inFreeSpins && engine.expandingSymbol` is set, every spin's normal win
-   evaluation is automatically followed by `checkExpandingWins` inside `evaluateSpinResult()`
-   — nothing extra to call for that part.
+   expandingSymbol)` — this sets `engine.inFreeSpins`/`config.expandingSymbol` and starts the
+   bonus spins loop via `spinFreeSpins()`/`handleAutoPlay()`. A retrigger just calls
+   `engine.retriggerFreeSpins(spinsCount)`.
+4. While `engine.inFreeSpins && config.expandingSymbol` is set and `mechanic.
+   evaluateExpandingWin` exists, every spin's normal win evaluation is automatically followed
+   by `checkExpandingWins` inside `CoreSlotEngine._spin` (only actually playing the reveal, via
+   `animator.playExpandingReveal`, when it pays something) — nothing extra to call for that
+   part.
 5. On the bonus's last spin, the engine transitions to `game_over`; handle that in
    `onStateChange` to show a summary and eventually call `engine.exitFreeSpins()` /
    `engine.returnToIdle()` to resume normal play.
@@ -827,12 +884,12 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
 ## Design principles
 
 - **Pure math, stateful engine, no DOM in between.** `SlotMath.js` has zero dependencies —
-  not even on `SlotEngine.js`. This is why `SpinSimulator.js` can run a million spins in
+  not even on `CoreSlotEngine.js`. This is why `SpinSimulator.js` can run a million spins in
   Node with no browser, and why `tests/*.mjs` can test win logic and reel building directly
-  without ever constructing a `SlotEngine` or touching a canvas.
+  without ever constructing a `CoreSlotEngine` or touching a canvas.
 - **One source of truth per game, shared by three consumers.** A game's `PAYTABLE`,
   `PAYLINES`, and `FREQUENCY_REELn` tables are defined once in `game.js` and passed
-  unchanged into the live `SlotEngine`, into `RUN SIMULATION` (`simulateSpins`), and into
+  unchanged into the live `CoreSlotEngine`, into `RUN SIMULATION` (`simulateSpins`), and into
   `TUNE FREQUENCIES` (`tuneFrequencies`). There is no separate "simulation config" to keep in
   sync — the debug tools can't silently drift from what the live game actually pays out
   because they're never given the chance to hold their own copy.
@@ -848,11 +905,18 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   (common random numbers, so consecutive candidate evaluations are comparable instead of
   independently noisy). Only cosmetic randomness (which decorative symbol flickers past while
   spinning, particle effect angles) uses plain `Math.random()`.
-- **A state machine, not ad hoc flags.** `SlotEngine.state` is a single explicit field with a
-  fixed set of values and every transition assigned at a specific point in the code (see the
-  State machine table above) — not inferred from polling animation progress. Animation tweens
-  are scheduled against precomputed timestamps instead, so "is it done" is answered by
+- **A state machine, not ad hoc flags.** `CoreSlotEngine.state` is a single explicit field with
+  a fixed set of values and every transition assigned at a specific point in the code (see the
+  State machine section above) — not inferred from polling animation progress. Animation
+  tweens are scheduled against precomputed timestamps instead, so "is it done" is answered by
   arithmetic, never by a race between rendering and game logic.
+- **A skeleton, not a monolith.** `CoreSlotEngine` owns the state machine and animation dispatch
+  loop only — grid resolution, animation style, drawing, particles, audio, free-spins payout
+  rules, and spin logging are each a separate, independently testable component class the
+  engine calls through a small fixed interface, never importing a concrete implementation
+  itself (see "Pluggable components" above). A new visual style or sound backend is a new file
+  implementing that interface, not a change to the engine — and a component can be constructed
+  and exercised in `node --test` with no canvas or DOM, exactly like the pure math modules.
 - **Best-effort, never-throw constraint solving.** `generateReel`'s `minGap`/`maxStack`
   repair passes and `tuneFrequencies`' soft ordering/min/max penalties all degrade gracefully
   when a constraint can't be fully satisfied (a too-dense reel, a genuinely conflicting
@@ -867,4 +931,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-27, commit `66218c8`._
+_Docs last synced with the codebase: 2026-07-28, commit `3540cf2`._
