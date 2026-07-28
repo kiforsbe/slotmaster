@@ -17,6 +17,13 @@ import { resolveAnimatedValue } from '../animation/AnimatedValue.js';
 // LINE_TAG_OFFSET constant, so the line runs tag to tag either way.
 const LINE_TAG_OFFSET = 15;
 
+// A cluster win popup stays fully opaque for this fraction of its post-breakdown segment (the
+// portion after any "$base x{multiplier}" hold - see CascadeDropAnimator's breakdownHoldMs),
+// then fades linearly over the remaining (1 - this) fraction. A plain popup with no breakdown
+// at all has its whole duration as that "post-breakdown segment", so this is the only fade rule
+// there is - not a breakdown-specific quirk.
+const POPUP_FADE_START_FRACTION = 0.6;
+
 // One per payline, cycled if a game declares more - CascadeEngine.js's own LINE_COLORS, used by
 // drawWinLine (a cascade game's payline win, e.g. Mayan Tumble). SlotEngine.js's own line-pay
 // coloring (getNeonColorForLine) is a different, longer palette - kept separate below rather
@@ -570,6 +577,20 @@ export class SlotRenderer {
     this.drawTag(ctx, num, x, y, color);
   }
 
+  // The amount line's text at a given moment - a plain "+$total" for an ordinary cluster win
+  // (p.breakdownHoldMs is 0 - no tileMultiplier at all, e.g. base game, or the config turned
+  // the breakdown off), or - when a free-spins mode enriched this win with
+  // baseAmount/tileMultiplier (see CascadeDropAnimator._spawnClusterWinPopups) - a 2-stage
+  // reveal making the base_symbol_value x total_multiplier math legible instead of jumping
+  // straight to the final number: "$base x{multiplier}" held for the full breakdownHoldMs,
+  // then poofs to "+$total".
+  _clusterAmountText(p, elapsedMs) {
+    if (elapsedMs < p.breakdownHoldMs) {
+      return `$${p.baseAmount.toFixed(2)} X${p.tileMultiplier}`;
+    }
+    return `$${p.amount.toFixed(2)}`;
+  }
+
   // Floating "+$X.XX" / "Nx symbol" text centered over each cluster's centroid. Every animatable
   // property (font sizes, rise) comes from p.popupConfig - a { default, animation } descriptor
   // per property, resolved fresh each frame via resolveAnimatedValue (see
@@ -578,8 +599,16 @@ export class SlotRenderer {
     popups.forEach(p => {
       const cfg = p.popupConfig;
       const elapsedMs = now - p.startTime;
-      const progress = Math.min(elapsedMs / p.duration, 1);
-      const alpha = progress < 0.6 ? 1 : Math.max(0, 1 - (progress - 0.6) / 0.4);
+      // Fade only applies to the post-breakdown segment (see POPUP_FADE_START_FRACTION's doc) -
+      // a popup with no breakdown at all (breakdownHoldMs 0) just fades over its whole duration,
+      // same as always.
+      const breakdownHoldMs = p.breakdownHoldMs ?? 0;
+      const postBreakdownElapsed = Math.max(0, elapsedMs - breakdownHoldMs);
+      const postBreakdownDuration = p.duration - breakdownHoldMs;
+      const postBreakdownProgress = Math.min(postBreakdownElapsed / postBreakdownDuration, 1);
+      const alpha = postBreakdownProgress < POPUP_FADE_START_FRACTION
+        ? 1
+        : Math.max(0, 1 - (postBreakdownProgress - POPUP_FADE_START_FRACTION) / (1 - POPUP_FADE_START_FRACTION));
 
       // position's `to` is a multiplier of symbolHeight, not an absolute px rise, so it scales
       // sanely across games with different cell sizes; its duration falls back to this popup's
@@ -596,8 +625,8 @@ export class SlotRenderer {
       ctx.scale(scale, scale);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
+      ctx.lineWidth = 5;
+      ctx.strokeStyle = '#000000';
 
       // Split above/below (-8/+12) when both lines show; a lone line centers on 0 instead of
       // sitting offset toward the other (now-empty) line's spot.
@@ -607,9 +636,9 @@ export class SlotRenderer {
       if (cfg.amount.show) {
         const amountFontSize = resolveAnimatedValue(cfg.amount.fontSize, elapsedMs, p.duration);
         ctx.font = `bold ${amountFontSize}px Outfit, sans-serif`;
-        const amountText = `+$${p.amount.toFixed(2)}`;
+        const amountText = this._clusterAmountText(p, elapsedMs);
         ctx.strokeText(amountText, 0, amountY);
-        ctx.fillStyle = '#ffe94a';
+        ctx.fillStyle = '#ffffff';
         ctx.fillText(amountText, 0, amountY);
       }
 

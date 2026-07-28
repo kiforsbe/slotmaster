@@ -25,7 +25,16 @@ const CLEAR_VARIANTS = ['scaleFade', 'stretch', 'jump', 'spin'];
 // stays animated unless the override explicitly sets `animation: false` (or `null`); merely
 // omitting `animation` from the override does NOT clear the inherited default's animation.
 const DEFAULT_POPUP_CONFIG = {
-  amount: { show: true, fontSize: { default: 26 } },
+  // showMultiplierBreakdown: when a cluster carries a tile multiplier (baseAmount/tileMultiplier
+  // set - see CascadeDropAnimator._spawnClusterWinPopups), the amount line holds on
+  // "$base x{multiplier}" for breakdownHoldMs, then poofs to the final "+$total" - legible
+  // proof that the win is base_symbol_value x total_multiplier, not just a bigger number out
+  // of nowhere. Set false to always show just the final total immediately (the only behavior
+  // a base-game cluster - no tileMultiplier at all - ever gets, regardless of this flag).
+  // breakdownHoldMs is a hard floor, not a fraction of the popup's normal on-screen duration -
+  // extends the popup's own lifetime (see CascadeDropAnimator._spawnClusterWinPopups) so the
+  // breakdown is never cut short by the popup's own fade-out.
+  amount: { show: true, fontSize: { default: 26 }, showMultiplierBreakdown: true, breakdownHoldMs: 2000 },
   detail: { show: true, fontSize: { default: 16 } },
   // Rise, as a multiplier of symbolHeight (0 = no rise, 0.9 = the popup's original rise
   // distance). No `duration` here on purpose - it falls back to the popup's own on-screen
@@ -278,15 +287,31 @@ export class CascadeDropAnimator {
 
   _spawnClusterWinPopups(engine, clusterWins) {
     const now = Date.now();
-    const duration = engine.turboMode ? 750 : 1500;
+    const plainDuration = engine.turboMode ? 1000 : 2000;
     const betAmount = engine.betAmount ?? 1;
     clusterWins.forEach(w => {
       const centroidCol = w.winningPositions.reduce((sum, [c]) => sum + c, 0) / w.winningPositions.length;
       const centroidRow = w.winningPositions.reduce((sum, [, r]) => sum + r, 0) / w.winningPositions.length;
+
+      const hasMultiplier = (w.tileMultiplier ?? 1) > 1;
+      const showBreakdown = hasMultiplier && this.popupConfig.amount.showMultiplierBreakdown;
+      // breakdownHoldMs is a floor UNDER the popup's total lifetime, not a fraction carved out
+      // of it - plainDuration (the normal turbo/non-turbo lifetime) still runs in full AFTER
+      // the poof, so "+$total" gets the same visible-then-fade treatment a plain popup would,
+      // instead of the breakdown eating into (and shortening) that time.
+      const breakdownHoldMs = showBreakdown ? this.popupConfig.amount.breakdownHoldMs : 0;
+      const duration = breakdownHoldMs + plainDuration;
+
       this.activePopups.push({
         symbol: w.symbol,
         count: w.count,
         amount: w.payout * betAmount,
+        // Only present when a free-spins mode (e.g. multiplier tiles) enriched this cluster
+        // win - undefined for a plain base-game cluster, so the popup falls back to just
+        // showing `amount` (see SlotRenderer.drawClusterWinPopups).
+        baseAmount: w.basePayout != null ? w.basePayout * betAmount : undefined,
+        tileMultiplier: w.tileMultiplier,
+        breakdownHoldMs,
         x: engine.reelsX + (centroidCol + 0.5) * engine.symbolWidth,
         y: engine.reelsY + (centroidRow + 0.5) * engine.symbolHeight,
         startTime: now,

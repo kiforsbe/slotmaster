@@ -115,11 +115,30 @@ function drawCornerBadge(engine, cx, cy, value) {
   ctx.restore();
 }
 
+// Reduces the tile values a winning cluster overlaps to a single multiplier, per `strategy`:
+//   'sum'     (default) - every touched tile >1x is added together (7 gummy bears over tiles
+//             worth 2x+2x+4x pays its normal amount x8, not x4) - rewards spreading a cluster
+//             across more marked tiles, not just landing on the single best one.
+//   'highest' - only the single largest touched tile counts (the original rule this mode
+//             shipped with) - a cluster touching 2x+2x+4x pays x4, same as touching 4x alone.
+// An untouched tile (1x, the "no marker" baseline) never contributes either way, so a cluster
+// entirely over plain tiles always pays its normal amount under both strategies.
+function computeTileMultiplier(winningPositions, tileGrid, strategy) {
+  const touchedValues = [];
+  winningPositions.forEach(([c, r]) => {
+    if (tileGrid[c][r] > 1) touchedValues.push(tileGrid[c][r]);
+  });
+  if (touchedValues.length === 0) return 1;
+  if (strategy === 'highest') return Math.max(...touchedValues);
+  return touchedValues.reduce((sum, v) => sum + v, 0);
+}
+
 /**
  * Candy Frenzy's main free-spins mode: every tile a winning cluster occupies gets (or
  * doubles) a persistent multiplier - untouched tiles are 1x (never drawn), a tile's first win
  * sets it to 2x, and each subsequent win there doubles it again. A later cluster overlapping
- * one or more of these tiles has their values summed and applied to its own payout.
+ * one or more of these tiles has their values combined (see computeTileMultiplier's
+ * `tileMultiplierStrategy` doc) and applied to its own payout.
  * @param {Object} [options]
  * @param {'background'|'corner'} [options.badgeStyle='background'] - how a marked tile's
  *   multiplier is drawn (see drawBackgroundBadge/drawCornerBadge above).
@@ -128,8 +147,10 @@ function drawCornerBadge(engine, cx, cy, value) {
  *   is the only choice that stays visible once a symbol has landed on the tile; 'behind' is
  *   still offered for a game/theme whose sprite art isn't fully opaque, or that just wants
  *   the badge to only show through on an as-yet-empty cell.
+ * @param {'sum'|'highest'} [options.tileMultiplierStrategy='sum'] - how a cluster touching
+ *   multiple marked tiles combines them (see computeTileMultiplier above).
  */
-export function createMultiplierTilesMode({ badgeStyle = 'background', renderOrder = 'front' } = {}) {
+export function createMultiplierTilesMode({ badgeStyle = 'background', renderOrder = 'front', tileMultiplierStrategy = 'sum' } = {}) {
   const drawBadge = badgeStyle === 'corner' ? drawCornerBadge : drawBackgroundBadge;
 
   return {
@@ -153,23 +174,19 @@ export function createMultiplierTilesMode({ badgeStyle = 'background', renderOrd
 
         let totalPayoutMultiplier = 0;
         const clusterWins = results.clusterWins.map(w => {
-          // Sum only the tiles this cluster actually overlaps that already carry a
-          // multiplier (>1x) - an untouched tile (1x, the "no marker" baseline) contributes
-          // nothing, so a cluster entirely over plain tiles pays its normal amount.
-          let tileMultiplier = 0;
-          w.winningPositions.forEach(([c, r]) => {
-            if (scratch[c][r] > 1) tileMultiplier += scratch[c][r];
-          });
-          if (tileMultiplier === 0) tileMultiplier = 1;
-
-          const payout = w.payout * tileMultiplier;
+          const tileMultiplier = computeTileMultiplier(w.winningPositions, scratch, tileMultiplierStrategy);
+          const basePayout = w.payout;
+          const payout = basePayout * tileMultiplier;
           totalPayoutMultiplier += payout;
 
           w.winningPositions.forEach(([c, r]) => {
             scratch[c][r] = scratch[c][r] <= 1 ? 2 : scratch[c][r] * 2;
           });
 
-          return { ...w, payout };
+          // basePayout/tileMultiplier ride along purely for display (CascadeDropAnimator's
+          // popup can show "base x multiplier = total" instead of just the final number) -
+          // payout stays the one number every other consumer (spin log, totals) trusts.
+          return { ...w, payout, basePayout, tileMultiplier };
         });
 
         return { ...results, clusterWins, totalPayoutMultiplier };

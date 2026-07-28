@@ -128,9 +128,9 @@ const CHOCOLATE_PAYOUT = [
 export const PAYTABLE = {
   cottoncandy: { type: 'premium', clusterPayout: COTTONCANDY_PAYOUT, friendlyName: 'Cotton Candy' },
   gum:         { type: 'premium', clusterPayout: GUM_PAYOUT,         friendlyName: 'Bubble Gum' },
-  cake:        { type: 'premium', clusterPayout: CAKE_PAYOUT,        friendlyName: 'Cake Slice' },
+  cake:        { type: 'premium', clusterPayout: CAKE_PAYOUT,        friendlyName: 'Cake' },
   mint:        { type: 'regular', clusterPayout: MINT_PAYOUT,        friendlyName: 'Mint' },
-  gummy:       { type: 'regular', clusterPayout: GUMMY_PAYOUT,       friendlyName: 'Gummy Bear' },
+  gummy:       { type: 'regular', clusterPayout: GUMMY_PAYOUT,       friendlyName: 'Gummy' },
   bean:        { type: 'regular', clusterPayout: BEAN_PAYOUT,        friendlyName: 'Jelly Bean' },
   chocolate:   { type: 'regular', clusterPayout: CHOCOLATE_PAYOUT,   friendlyName: 'Chocolate' },
   bonus:       { type: 'scatter', paymode: 'any', triggerFreeSpins: true, friendlyName: 'Bonus' },
@@ -462,6 +462,7 @@ async function initGame() {
     mechanic: CascadeSpinMechanic,
     animator: new CascadeDropAnimator(renderer, particleSystem, {
       popup: {
+        detail: { show: false },
         position: { animation: false }, // explicitly falsy - disables the inherited default rise animation (merge is shallow, so just omitting `animation` would NOT disable it)
         scale: { 
           default: 1,
