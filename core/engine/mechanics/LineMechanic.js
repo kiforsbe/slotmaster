@@ -4,8 +4,8 @@
 // tuning) alike, via config.mechanic. This is the default mechanic, so every existing
 // line-pay game keeps working unchanged without ever passing it explicitly. See
 // core/CascadeSpinMechanic.js for the cluster-pays sibling.
-import { generateTargetGrid, checkExpandingWins, checkWins } from './math/SlotMath.js';
-import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
+import { generateTargetGrid, checkExpandingWins, checkWins } from '../../math/SlotMath.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../../SpinLog.js';
 
 export const LineMechanic = {
   name: 'line',

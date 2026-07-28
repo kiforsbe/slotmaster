@@ -3,7 +3,7 @@
  * It models spins without any visual or audio side effects.
  */
 import { generateReel, createSeededRng, resolveFrequencyBounds } from './math/SlotMath.js';
-import { LineMechanic } from './LineMechanic.js';
+import { LineMechanic } from './engine/mechanics/LineMechanic.js';
 import { cmaes } from './CMAES.js';
 import { validateTuningConfig } from './TuningValidation.js';
 import { buildLadders, summarize } from './StructuralSensitivity.js';

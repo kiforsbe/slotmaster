@@ -3,8 +3,8 @@ import { CascadeEngine } from '../../core/CascadeEngine.js';
 import { generateReel } from '../../core/math/SlotMath.js';
 import { checkClusterWins } from '../../core/math/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
-import { createMultiplierTilesMode } from '../../core/FreeSpinsModes.js';
-import { CascadeSpinMechanic } from '../../core/CascadeSpinMechanic.js';
+import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
+import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 
 export const REELS_COUNT = 7;

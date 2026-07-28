@@ -11,8 +11,8 @@ import { applyCascade } from './math/CascadeMath.js';
 import { createCascadeSpinLogEntry } from './SpinLog.js';
 import { createSeededRng } from './math/SlotMath.js';
 import { audio } from './audio/SlotAudio.js';
-import { createFlatMultiplierMode } from './FreeSpinsModes.js';
-import { CascadeSpinMechanic } from './CascadeSpinMechanic.js';
+import { createFlatMultiplierMode } from './engine/FreeSpinsModes.js';
+import { CascadeSpinMechanic } from './engine/mechanics/CascadeSpinMechanic.js';
 import { simulateSpins } from './SpinSimulator.js';
 
 const SPIN_LOG_MAX_ENTRIES = 20000;

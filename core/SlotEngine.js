@@ -2,7 +2,7 @@
 import { checkWins, createSeededRng } from './math/SlotMath.js';
 import { audio } from './audio/SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
-import { LineMechanic } from './LineMechanic.js';
+import { LineMechanic } from './engine/mechanics/LineMechanic.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
 import { computeGridLayout } from './rendering/GridLayout.js';
 import { drawSpriteSymbol } from './rendering/SpriteDrawer.js';
