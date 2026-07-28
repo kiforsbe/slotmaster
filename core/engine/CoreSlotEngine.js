@@ -67,6 +67,7 @@ export class CoreSlotEngine {
     this.pendingSpinRequest = false;
     this.autoPlayTimer = null;
     this._forcedGrid = null;
+    this._forceScatterNextSpin = false;
     this._spinInProgress = false;
 
     // Win-presentation state a Renderer reads (see core/rendering/SlotRenderer.js's
@@ -231,6 +232,23 @@ export class CoreSlotEngine {
     });
     this._forcedGrid = null;
 
+    // Cascade-only cheat path (mirrors CascadeEngine.js's forceScatterResult): a cascade spin
+    // can't be forced via a seeded starting grid the way a line-pay spin can (its outcome
+    // resolves progressively, step by step), so this rewrites the LAST step's grid and injects
+    // a scatterWin directly, after the mechanic has already resolved the whole sequence.
+    if (this._forceScatterNextSpin && result.steps.length && 'clusterWins' in result.steps[0]) {
+      this._forceScatterNextSpin = false;
+      const scatterSym = this.config.scatterSymbol;
+      const lastStep = result.steps[result.steps.length - 1];
+      const positions = [
+        [0, 0],
+        [Math.floor(this.config.reelsCount / 2), Math.floor(this.config.rowsCount / 2)],
+        [this.config.reelsCount - 1, this.config.rowsCount - 1],
+      ];
+      positions.forEach(([c, r]) => { lastStep.grid[c][r] = scatterSym; });
+      result.scatterWin = { symbol: scatterSym, count: 3, positions, triggerFreeSpins: true, payout: 0 };
+    }
+
     this.spinSequence = result.steps;
     this.stepIndex = 0;
     this._lastScatterWin = result.scatterWin;
@@ -351,6 +369,15 @@ export class CoreSlotEngine {
   forceWinResult(winType) {
     if (this.state !== 'idle' && this.state !== 'showing_wins') return;
     this._forcedGrid = this._buildForcedGrid(winType);
+    this.spin();
+  }
+
+  // Debug/cheat helper for cascade games (mirrors CascadeEngine.js's forceScatterResult) -
+  // forces this game's next spin to land 3 bonus symbols on the final grid, for testing the
+  // free-spins trigger. See spin()'s _forceScatterNextSpin handling for how it's applied.
+  forceScatterResult() {
+    if (this.state !== 'idle' && this.state !== 'showing_wins') return;
+    this._forceScatterNextSpin = true;
     this.spin();
   }
 

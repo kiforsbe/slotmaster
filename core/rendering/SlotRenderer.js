@@ -494,9 +494,13 @@ export class SlotRenderer {
 
   // A cascade win's payline path (line-pay-over-cascade games, e.g. Mayan Tumble) - a no-op for
   // any win with no lineIndex (a cluster win), so a cluster game (Candy Frenzy) never draws this.
+  // Gated on the animator actively clearing a cluster (currentClusterWins non-null), not on a
+  // 'clearing' engine state - CoreSlotEngine's state machine doesn't have CascadeEngine.js's
+  // fine-grained per-frame states (dropping_in/clearing/falling), only the coarser
+  // idle/spinning/evaluating/showing_wins shared with the line-pay engine.
   drawWinLine(ctx, engineState, layout, paylines, reelsCount) {
-    const { state, currentClusterWins, currentClusterIndex } = engineState;
-    if (state !== 'clearing' || !paylines) return;
+    const { currentClusterWins, currentClusterIndex } = engineState;
+    if (!currentClusterWins || !paylines) return;
     const win = currentClusterWins?.[currentClusterIndex];
     if (!win || win.lineIndex == null) return;
     const path = paylines[win.lineIndex];
@@ -581,6 +585,14 @@ export class SlotRenderer {
   // (Task 17) - until then this method only knows how to draw a line-pay engine, which is all
   // that's wired up through Task 14.
   draw(engine, ctx) {
+    if (engine.mechanic?.name === 'cascade') {
+      this._drawCascade(engine, ctx);
+    } else {
+      this._drawLine(engine, ctx);
+    }
+  }
+
+  _drawLine(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
 
     const theme = engine.config.playfield || {};
@@ -618,5 +630,70 @@ export class SlotRenderer {
       layout, engine.config.paylines, engine.config.reelsCount,
     );
     engine.particleSystem?.render(ctx);
+  }
+
+  _drawCascade(engine, ctx) {
+    ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
+
+    const theme = engine.config.playfield || {};
+
+    if (!engine.assetsLoaded) {
+      this.drawLoading(ctx, engine.canvas.width, engine.canvas.height, theme);
+      return;
+    }
+
+    const layout = engine.layout;
+    this.drawCabinet(ctx, layout, theme);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
+    ctx.clip();
+
+    if (theme.noise) {
+      if (!this._noiseCanvas || this._noiseCanvasW !== layout.reelsWidth || this._noiseCanvasH !== layout.reelsHeight) {
+        this._noiseCanvas = this.buildPlayfieldNoise(layout.reelsWidth, layout.reelsHeight, theme.noise);
+        this._noiseCanvasW = layout.reelsWidth;
+        this._noiseCanvasH = layout.reelsHeight;
+      }
+      this.drawPlayfieldNoise(ctx, this._noiseCanvas, layout);
+    }
+
+    const animator = engine.animator;
+    const mode = engine.freeSpinsMode;
+    const overlayBehind = mode && mode.renderOverlayOrder === 'behind';
+    if (overlayBehind && engine.inFreeSpins) mode.renderOverlay(engine.freeSpinsModeState, engine);
+
+    if (animator?.outgoingGrid) {
+      this.drawOutgoingGridSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.config.rowsCount, animator.outgoingGrid, animator.outgoingOffsets);
+    }
+    if (animator?.grid) {
+      const isClearing = animator.currentClearPositions && animator.currentClearPositions.length > 0;
+      const clearDuration = engine.turboMode ? animator.turboClearDurationMs : animator.normalClearDurationMs;
+      const clearProgress = isClearing
+        ? Math.min((Date.now() - animator._clearStartTime) / clearDuration, 1)
+        : null;
+      this.drawGridSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.config.rowsCount, {
+        grid: animator.grid,
+        cellOffsets: animator.cellOffsets,
+        currentClearVariants: animator.currentClearVariants,
+        cellBounceStartTime: animator.cellBounceStartTime || Array.from({ length: engine.config.reelsCount }, () => new Array(engine.config.rowsCount).fill(-Infinity)),
+        clearProgress,
+        bounceDuration: engine.turboMode ? 140 : 260,
+        now: Date.now(),
+      });
+    }
+    if (!overlayBehind && mode && engine.inFreeSpins) mode.renderOverlay(engine.freeSpinsModeState, engine);
+
+    ctx.restore();
+
+    this.drawGridBorders(ctx, layout, engine.config.rowsCount, engine.config.reelsCount, theme);
+    this.drawWinLine(ctx, { state: engine.state, currentClusterWins: animator?.currentClusterWins, currentClusterIndex: animator?.currentClusterIndex }, layout, engine.config.paylines, engine.config.reelsCount);
+    engine.particleSystem?.render(ctx);
+    if (animator?.activePopups) {
+      const now = Date.now();
+      animator.activePopups = animator.activePopups.filter(p => now - p.startTime < p.duration);
+      this.drawClusterWinPopups(ctx, animator.activePopups, layout.symbolHeight, now);
+    }
   }
 }

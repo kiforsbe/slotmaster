@@ -9,4 +9,5 @@ export class AudioController {
   onWin(amount) { audio.playWin(amount); }
   onScatterTrigger() { audio.playScatterTrigger(); }
   onExpand() { audio.playExpand(); }
+  onClusterWin(payoutMultiplier) { audio.playClusterWin(payoutMultiplier); }
 }
