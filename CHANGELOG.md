@@ -3,6 +3,59 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.8.0 — 2026-07-29
+
+### Added
+
+- **Per-game background music**, with duck-on-effect and a master compressor
+  (`config.music`, `SlotAudio.setDuckingConfig`/`setCompressionConfig`) — a game can also
+  disable or tune either independently.
+- **Full-canvas viewport backgrounds** (`config.viewportBackground`) — a color/noise/image
+  backdrop covering the whole canvas, drawn behind everything else, independent of the
+  existing per-reels-rect `config.playfield.background`.
+- **`config.playfield.background` gained a `color` type**, alongside the existing `noise`/
+  `image` — previously setting `color` was a silent no-op.
+- **Cluster win popups (cascade games) are now configurable**: amount/detail text can each be
+  shown or hidden, and position/scale/font-size are each independently animatable, backed by a
+  new reusable `core/animation/AnimatedValue.js` — a CSS-transition-style resolver
+  (`{ default, animation: { to, duration, easing } }`) usable on any numeric property, not just
+  popups.
+- **Cluster win popups can show a `base × multiplier` breakdown** before the final total, for
+  wins boosted by a free-spins tile multiplier, with a configurable minimum hold time so it's
+  actually readable instead of flashing past.
+- **The reels' outline glow is themeable**: `outlineWidth`, `outlineGlowIntensity` (how
+  saturated/opaque it reads, independent of spread or thickness), and `outlineBehindSymbols`
+  (draw in front of, or behind, the grid).
+
+### Changed
+
+- **The canvas now fills its `.game-viewport` container exactly**, instead of being
+  letterboxed to the reel grid's own aspect ratio — no dead space around it, so a background
+  (CSS or `viewportBackground`) lines up pixel-for-pixel with the visible playfield. Any extra
+  room around the reels' own aspect-fit grid now stays inside the canvas itself.
+- **The reels' outline/glow is built from layered `ctx.filter` blur passes** instead of
+  `ctx.shadowBlur`, which stayed too faint on a thin stroke to read as an actual glow.
+
+### Fixed
+
+- **Both line-pay and cascade games showed a blank grid before the player's first spin** —
+  added an optional `showIdle()` animator hook, called once from `CoreSlotEngine.init()`.
+- **A cleared cascade cluster could briefly reappear at full opacity** mid-multi-cluster
+  cascade, before the next clear pass ran. Clearing now works on a private grid copy and nulls
+  out each cluster's own cells the moment its poof finishes, instead of only mutating the
+  clear-variants map.
+- **`playEntrance` could fire more than once per spin** in certain cascade step-transition
+  sequences.
+- **The reels' outline/glow was silently painted over every frame** by the grid's own `frame`
+  border stroke, drawn after it — reordered so the glow always renders last. It's also now
+  clipped to stay outside the reels' own interior, so it can never bleed onto the symbols
+  regardless of width/blur settings.
+- **Mayan Tumble's `viewportBackground` never rendered** — it was nested under `playfield`,
+  where only `background` is read; `viewportBackground` is a top-level key.
+- **Mayan Tumble's cabinet and bet-adjuster sizing/styling didn't match the other games** —
+  its cabinet was sized for a 7x7 grid despite being a 5x3 game, and its bet-adjuster used an
+  older circular-button style.
+
 ## 0.7.0 — 2026-07-28
 
 `core/SlotEngine.js` and `core/CascadeEngine.js` — the two ~1,200-line monolith classes every
@@ -191,4 +244,4 @@ and ends, not decorations parked beside it.
   that is not a plain multiplier. It now distinguishes the three, which have different fixes.
 
 ---
-_Docs last synced with the codebase: 2026-07-27, commit `66218c8`._
+_Docs last synced with the codebase: 2026-07-29, commit `4c572a7`._
