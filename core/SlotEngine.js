@@ -846,6 +846,9 @@ export class SlotEngine {
     this.ctx.rect(this.reelsX, this.reelsY, this.reelsWidth, this.reelsHeight);
     this.ctx.clip();
 
+    // Draw Playfield Background (if configured)
+    this.renderPlayfieldBackground();
+
     // Draw Reels Background
     this.renderReelsBackground();
 
@@ -865,6 +868,21 @@ export class SlotEngine {
 
     // Draw Particles
     this.renderParticles();
+  }
+
+  renderPlayfieldBackground() {
+    const background = this.config.background;
+
+    if (background) {
+      if (background.type === 'image') {
+        // load image defined by path in background.image, then draw it to the canvas at reelsX, reelsY
+        if (!this._backgroundImage) {
+          this._backgroundImage = new Image();
+          this._backgroundImage.src = background.image;
+        }
+        if (this._backgroundImage) this.ctx.drawImage(this._backgroundImage, this.reelsX, this.reelsY, this.reelsWidth, this.reelsHeight);
+      }
+    }
   }
 
   renderLoading() {
@@ -1192,7 +1210,7 @@ export class SlotEngine {
     this.particleSystem.render(this.ctx);
   }
 
-    /**
+  /**
    * Runs a batch of simulations and returns the results.
    * @param {number} numBaseSpins - The number of base spins to simulate.
    * @param {number} betPerLine - Defaults to this engine's own live betPerLine, so the

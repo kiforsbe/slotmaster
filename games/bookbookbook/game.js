@@ -347,6 +347,7 @@ window.addEventListener('load', async () => {
     // This game's free spins really do include an expanding wild (see EXPANDING_CANDIDATES) -
     // without this, RUN SIMULATION would assume no expanding-wild mechanic at all.
     hasExpandingWild: true,
+    background: { type: "image", image: "./assets/backgrounds/bookbookbook_background_2.png" },
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),

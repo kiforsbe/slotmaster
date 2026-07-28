@@ -52,7 +52,7 @@ const DEFAULT_PLAYFIELD_THEME = {
   outlineGlow: 10,
   frame: '#2d1030',
   gridLines: 'rgba(255, 110, 199, 0.25)',
-  noise: null,
+  background: null,
   loadingBackground: '#2a0e2e',
   loadingColor: '#ff6ec7',
   loadingText: 'LOADING CANDY...',
@@ -394,7 +394,7 @@ export class CascadeEngine {
 
   _spawnClusterWinPopups(clusterWins) {
     const now = Date.now();
-    const duration = this.turboMode ? 500 : 1100;
+    const duration = this.turboMode ? 750 : 1500;
     clusterWins.forEach(w => {
       const centroidCol = w.winningPositions.reduce((sum, [c]) => sum + c, 0) / w.winningPositions.length;
       const centroidRow = w.winningPositions.reduce((sum, [, r]) => sum + r, 0) / w.winningPositions.length;
@@ -712,7 +712,7 @@ export class CascadeEngine {
     const overlayBehind = mode.renderOverlayOrder === 'behind';
 
     // Behind everything inside the grid - it is the playfield's surface, not an effect over it.
-    this._renderPlayfieldNoise();
+    this._renderPlayfieldBackground();
 
     if (overlayBehind) mode.renderOverlay(this.freeSpinsModeState, this);
     this._renderOutgoingGridSymbols();
@@ -842,7 +842,7 @@ export class CascadeEngine {
    *
    * Rebuilt whenever the grid is resized, since it is sized to the grid.
    */
-  _playfieldNoise() {
+  _generatePlayfieldNoise() {
     const noise = this.config.playfield.noise;
     if (!noise) return null;
     const w = Math.max(1, Math.ceil(this.reelsWidth));
@@ -877,9 +877,22 @@ export class CascadeEngine {
     return canvas;
   }
 
-  _renderPlayfieldNoise() {
-    const noise = this._playfieldNoise();
-    if (noise) this.ctx.drawImage(noise, this.reelsX, this.reelsY);
+  _renderPlayfieldBackground() {
+    const background = this.config.playfield.background;
+
+    if (background) {
+      if (background.type === 'noise') {
+        const noise = this._generatePlayfieldNoise();
+        if (noise) this.ctx.drawImage(noise, this.reelsX, this.reelsY);
+      } else if (background.type === 'image') {
+        // load image defined by path in background.image, then draw it to the canvas at reelsX, reelsY
+        if (!this._backgroundImage) {
+          this._backgroundImage = new Image();
+          this._backgroundImage.src = background.image;
+        }
+        if (this._backgroundImage) this.ctx.drawImage(this._backgroundImage, this.reelsX, this.reelsY, this.reelsWidth, this.reelsHeight);
+      }
+    }
   }
 
   _renderGridSymbols() {
