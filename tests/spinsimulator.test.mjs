@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins, mergeRoundStats } from '../core/SpinSimulator.js';
-import { checkWildLineWins, generateReel, createSeededRng } from '../core/SlotMath.js';
+import { checkWildLineWins, generateReel, createSeededRng } from '../core/math/SlotMath.js';
 
 const PAYLINES3 = [[0, 0, 0], [1, 1, 1], [2, 2, 2], [0, 1, 2], [2, 1, 0]];
 const PAYTABLE = {

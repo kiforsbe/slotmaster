@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent, describePayoutScaleVerification, renormalizeWithinBounds } from '../core/SpinSimulator.js';
-import { checkWildLineWins } from '../core/SlotMath.js';
+import { checkWildLineWins } from '../core/math/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
   FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3,

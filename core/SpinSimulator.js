@@ -2,7 +2,7 @@
  * A pure functional simulator for the SlotMachine game logic.
  * It models spins without any visual or audio side effects.
  */
-import { generateReel, createSeededRng, resolveFrequencyBounds } from './SlotMath.js';
+import { generateReel, createSeededRng, resolveFrequencyBounds } from './math/SlotMath.js';
 import { LineMechanic } from './LineMechanic.js';
 import { cmaes } from './CMAES.js';
 import { validateTuningConfig } from './TuningValidation.js';

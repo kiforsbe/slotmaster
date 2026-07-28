@@ -1,7 +1,7 @@
 // Shared RUN SIMULATION / TUNE FREQUENCIES dev-tooling UI, built on top of
 // core/SpinSimulator.js's pure simulateSpins/tuneFrequencies functions.
 // Every game's game.js calls into this instead of maintaining its own copy.
-import { resolveFrequencyBounds } from './SlotMath.js';
+import { resolveFrequencyBounds } from './math/SlotMath.js';
 import { exportSpinLogCsv } from './SpinLog.js';
 import { tuneFrequencies } from './SpinSimulator.js';
 import { createSimulationWorkerPool } from './SimulationWorkerPool.js';

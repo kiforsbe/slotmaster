@@ -4,7 +4,7 @@ import { simulateSpins, tuneFrequencies, computeValueRanks } from '../core/SpinS
 import { LineMechanic } from '../core/LineMechanic.js';
 import { CascadeSpinMechanic } from '../core/CascadeSpinMechanic.js';
 import { createMultiplierTilesMode } from '../core/FreeSpinsModes.js';
-import { checkWildLineWins, generateReel, createSeededRng } from '../core/SlotMath.js';
+import { checkWildLineWins, generateReel, createSeededRng } from '../core/math/SlotMath.js';
 
 test('simulateSpins with mechanic: LineMechanic passed explicitly reproduces the default (omitted) behavior exactly', () => {
   const PAYLINES3 = [[0, 0, 0], [1, 1, 1], [2, 2, 2]];

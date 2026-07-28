@@ -1,6 +1,6 @@
 // Game coordinator for Mayan Tumble - a 5x3 payline-based cascading slot.
 import { CascadeEngine } from '../../core/CascadeEngine.js';
-import { generateReel, checkWins } from '../../core/SlotMath.js';
+import { generateReel, checkWins } from '../../core/math/SlotMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { createMultiplierTilesMode } from '../../core/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/CascadeSpinMechanic.js';

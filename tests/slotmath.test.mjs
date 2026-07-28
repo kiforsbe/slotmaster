@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkWins, checkExpandingWins, checkWildLineWins, generateReel, resolveFrequencyBounds } from '../core/SlotMath.js';
+import { checkWins, checkExpandingWins, checkWildLineWins, generateReel, resolveFrequencyBounds } from '../core/math/SlotMath.js';
 
 test('generateReel never places a symbol whose frequency is explicitly 0', () => {
   const paytable = {

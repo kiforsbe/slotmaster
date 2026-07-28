@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nextStripSymbol, applyCascade, checkScatterCount, resolveCascadeSequence } from '../core/CascadeMath.js';
+import { nextStripSymbol, applyCascade, checkScatterCount, resolveCascadeSequence } from '../core/math/CascadeMath.js';
 
 test('nextStripSymbol reads the current index then advances, wrapping circularly', () => {
   const strip = ['a', 'b', 'c'];

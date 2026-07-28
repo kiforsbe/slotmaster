@@ -7,7 +7,7 @@
 // CascadeMath.js's own doc), so a future line-win-based cascade game reuses this same mechanic
 // unmodified, just with its own evaluator/payoutOf. See core/LineMechanic.js for the line-pay
 // sibling (the default mechanic).
-import { resolveCascadeSequence } from './CascadeMath.js';
+import { resolveCascadeSequence } from './math/CascadeMath.js';
 import { createCascadeSpinLogEntry } from './SpinLog.js';
 import { createFlatMultiplierMode } from './FreeSpinsModes.js';
 

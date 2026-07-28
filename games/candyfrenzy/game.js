@@ -1,7 +1,7 @@
 // Game coordinator for Candy Frenzy - a 7x7 cluster-pays cascading slot.
 import { CascadeEngine } from '../../core/CascadeEngine.js';
-import { generateReel } from '../../core/SlotMath.js';
-import { checkClusterWins } from '../../core/ClusterMath.js';
+import { generateReel } from '../../core/math/SlotMath.js';
+import { checkClusterWins } from '../../core/math/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { createMultiplierTilesMode } from '../../core/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/CascadeSpinMechanic.js';

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins } from '../core/SpinSimulator.js';
-import { createSeededRng } from '../core/SlotMath.js';
+import { createSeededRng } from '../core/math/SlotMath.js';
 import { CascadeSpinMechanic } from '../core/CascadeSpinMechanic.js';
 import { resolveWinEvaluator } from '../core/mechanicRegistry.js';
 import {

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins } from '../core/SpinSimulator.js';
-import { checkWildLineWins } from '../core/SlotMath.js';
+import { checkWildLineWins } from '../core/math/SlotMath.js';
 import {
   REELS_COUNT, ROWS_COUNT, PAYTABLE, PAYLINES, REEL_STRIPS, BET_PER_LINE, LINES_COUNT,
 } from '../games/fruitmachine/game.js';

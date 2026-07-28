@@ -1,6 +1,6 @@
 // Game Coordinator for Bar Fruits Slot Machine
 import { SlotEngine } from '../../core/SlotEngine.js';
-import { generateReel } from '../../core/SlotMath.js';
+import { generateReel } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 
