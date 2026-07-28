@@ -460,7 +460,19 @@ async function initGame() {
   const particleSystem = new ParticleSystem();
   engine = new CoreSlotEngine(canvas, {
     mechanic: CascadeSpinMechanic,
-    animator: new CascadeDropAnimator(renderer, particleSystem, {popupAnimatePosition: false, popupAnimateSize: true, popupSizeDurationMs: 700, popupSizeEasing: 'easeInOut', popupSizeStartScale: 1, popupSizeEndScale: 1.5}),
+    animator: new CascadeDropAnimator(renderer, particleSystem, {
+      popup: {
+        position: { animation: false }, // explicitly falsy - disables the inherited default rise animation (merge is shallow, so just omitting `animation` would NOT disable it)
+        scale: { 
+          default: 1,
+          animation: { 
+            to: 1.5,
+            duration: 700,
+            easing: 'easeInOut'
+          }
+        },
+      },
+    }),
     renderer,
     particleSystem,
     spinLogRecorder: new SpinLogRecorder({ betAmount: BET_AMOUNT, scatterSymbol: 'bonus' }),
