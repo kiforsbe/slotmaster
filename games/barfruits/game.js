@@ -332,6 +332,7 @@ async function initGame() {
     paylines: PAYLINES,
     wildSymbol: null,
     scatterSymbol: 'star',
+    music: { main: "./assets/music/barfruits_theme.mp3" },
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betPerLine: BET_PER_LINE,

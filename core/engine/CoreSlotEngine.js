@@ -37,6 +37,25 @@ export class CoreSlotEngine {
     this.spritesheetUrl = config.spritesheetUrl || '';
     this.symbolsConfig = config.symbolsConfig || {};
 
+    // Per-game-state theme music (e.g. { main, freespins }), configured via config.music - a
+    // game that sets nothing never touches the audio engine's music subsystem at all. Wired here
+    // in the constructor rather than init() since init() does browser-only setup (window resize
+    // listeners) that isn't safe to call in tests; setMusicTracks/setMusicState are themselves
+    // no-ops until a real AudioContext exists, so calling them eagerly is safe.
+    this.musicConfig = config.music || null;
+    if (this.musicConfig) {
+      audio.setMusicTracks(this.musicConfig);
+      audio.setMusicState('main');
+    }
+
+    // Duck-on-effect and the master compressor are on by default (matching this file's original
+    // fixed behavior); a game can disable either (`false`) or tune its parameters (an object) -
+    // see SlotAudio.setDuckingConfig/setCompressionConfig for the accepted shapes. Applied
+    // unconditionally, independent of whether `music` is configured - compression affects every
+    // SFX regardless, and an unconfigured duck target is simply inert.
+    audio.setDuckingConfig(config.ducking);
+    audio.setCompressionConfig(config.compression);
+
     // Direct singleton access for auxiliary controls outside the spin lifecycle (mute toggle) -
     // matches SlotEngine.js's/CascadeEngine.js's own exposed `this.audio`. audioController
     // (above) is for lifecycle hooks CoreSlotEngine itself calls; this is for a game's own UI
@@ -470,7 +489,7 @@ export class CoreSlotEngine {
     if (this.freeSpinsMode) {
       this.freeSpinsModeState = this.freeSpinsMode.createState(this);
     }
-    this.audio.startBGM();
+    if (this.musicConfig) audio.setMusicState('freespins');
     this._setState('idle');
     this.spinFreeSpins();
   }
@@ -491,7 +510,7 @@ export class CoreSlotEngine {
     if (this.freeSpinsMode) {
       this.freeSpinsModeState = this.freeSpinsMode.createState(this);
     }
-    this.audio.stopBGM();
+    if (this.musicConfig) audio.setMusicState('main');
     this._setState('game_over');
   }
 

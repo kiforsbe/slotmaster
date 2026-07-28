@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { CoreSlotEngine } from '../core/engine/CoreSlotEngine.js';
+import { audio } from '../core/audio/SlotAudio.js';
 
 function stubCanvas() {
   return { width: 800, height: 600, getContext: () => ({}) };
@@ -165,4 +166,95 @@ test('a spin queued via requestSpin while busy runs once the current spin settle
   engine.requestSpin();
   assert.equal(engine.pendingSpinRequest, true);
   assert.equal(spinCount, 0);
+});
+
+test('a configured `music` map is wired into the audio engine at construction, and swapped on entering/exiting free spins', () => {
+  const calls = [];
+  const originalSetMusicTracks = audio.setMusicTracks;
+  const originalSetMusicState = audio.setMusicState;
+  audio.setMusicTracks = (tracks) => calls.push(['setMusicTracks', tracks]);
+  audio.setMusicState = (state) => calls.push(['setMusicState', state]);
+
+  try {
+    const engine = new CoreSlotEngine(stubCanvas(), {
+      mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+      animator: noAnimation(),
+      renderer: { draw: () => {} },
+      music: { main: 'theme.mp3', freespins: 'freespins.mp3' },
+    });
+
+    assert.deepEqual(calls, [
+      ['setMusicTracks', { main: 'theme.mp3', freespins: 'freespins.mp3' }],
+      ['setMusicState', 'main'],
+    ]);
+
+    engine.enterFreeSpins(3);
+    assert.deepEqual(calls.at(-1), ['setMusicState', 'freespins']);
+
+    engine.exitFreeSpins();
+    assert.deepEqual(calls.at(-1), ['setMusicState', 'main']);
+  } finally {
+    audio.setMusicTracks = originalSetMusicTracks;
+    audio.setMusicState = originalSetMusicState;
+  }
+});
+
+test('with no `music` config, CoreSlotEngine never calls into the audio engine\'s music subsystem', () => {
+  const calls = [];
+  const originalSetMusicTracks = audio.setMusicTracks;
+  const originalSetMusicState = audio.setMusicState;
+  audio.setMusicTracks = (tracks) => calls.push(['setMusicTracks', tracks]);
+  audio.setMusicState = (state) => calls.push(['setMusicState', state]);
+
+  try {
+    const engine = new CoreSlotEngine(stubCanvas(), {
+      mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+      animator: noAnimation(),
+      renderer: { draw: () => {} },
+    });
+
+    engine.enterFreeSpins(3);
+    engine.exitFreeSpins();
+
+    assert.deepEqual(calls, []);
+  } finally {
+    audio.setMusicTracks = originalSetMusicTracks;
+    audio.setMusicState = originalSetMusicState;
+  }
+});
+
+test('config.ducking and config.compression are always forwarded to the audio engine at construction, defaults included', () => {
+  const calls = [];
+  const originalSetDucking = audio.setDuckingConfig;
+  const originalSetCompression = audio.setCompressionConfig;
+  audio.setDuckingConfig = (v) => calls.push(['setDuckingConfig', v]);
+  audio.setCompressionConfig = (v) => calls.push(['setCompressionConfig', v]);
+
+  try {
+    new CoreSlotEngine(stubCanvas(), {
+      mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+      animator: noAnimation(),
+      renderer: { draw: () => {} },
+      ducking: { amount: 0.5 },
+      compression: false,
+    });
+    assert.deepEqual(calls, [
+      ['setDuckingConfig', { amount: 0.5 }],
+      ['setCompressionConfig', false],
+    ]);
+
+    calls.length = 0;
+    new CoreSlotEngine(stubCanvas(), {
+      mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+      animator: noAnimation(),
+      renderer: { draw: () => {} },
+    });
+    assert.deepEqual(calls, [
+      ['setDuckingConfig', undefined],
+      ['setCompressionConfig', undefined],
+    ]);
+  } finally {
+    audio.setDuckingConfig = originalSetDucking;
+    audio.setCompressionConfig = originalSetCompression;
+  }
 });

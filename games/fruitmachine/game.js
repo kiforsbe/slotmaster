@@ -257,6 +257,7 @@ async function initGame() {
     reelStrips: REEL_STRIPS,
     paylines: PAYLINES,
     winEvaluator: checkWildLineWins,
+    music: { main: "./assets/music/fruitmachine_theme.mp3" },
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betPerLine: BET_PER_LINE,

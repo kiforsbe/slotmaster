@@ -357,6 +357,7 @@ async function initGame() {
       gridLines: null,
       //background: { type: "noise", color: [156, 196, 140], strength: 0.16, scale: 5, seed: 20260727 },
       background: { type: "image", image: "./assets/backgrounds/mayan_tumble_background_alt.png" },
+      music: { main: "./assets/music/mayan_tumble_theme.mp3" },
       loadingBackground: '#0a1410',
       loadingColor: '#dfb239',
       loadingText: 'ENTERING THE TEMPLE...',

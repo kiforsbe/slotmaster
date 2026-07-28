@@ -360,6 +360,7 @@ window.addEventListener('load', async () => {
     // without this, RUN SIMULATION would assume no expanding-wild mechanic at all.
     hasExpandingWild: true,
     background: { type: "image", image: "./assets/backgrounds/bookbookbook_background_2.png" },
+    music: { main: "./assets/music/bookbookbook_theme.mp3" },
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),

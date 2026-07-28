@@ -474,6 +474,7 @@ async function initGame() {
     scatterSymbol: 'bonus',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
     playfield: PLAYFIELD,
+    music: { main: "./assets/music/candyfrenzy_theme.mp3" },
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betAmount: BET_AMOUNT,
