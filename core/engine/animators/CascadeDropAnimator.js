@@ -211,7 +211,7 @@ export class CascadeDropAnimator {
 
   _spawnClusterWinPopups(engine, clusterWins) {
     const now = Date.now();
-    const duration = engine.turboMode ? 500 : 1100;
+    const duration = engine.turboMode ? 750 : 1500;
     const betAmount = engine.betAmount ?? 1;
     clusterWins.forEach(w => {
       const centroidCol = w.winningPositions.reduce((sum, [c]) => sum + c, 0) / w.winningPositions.length;

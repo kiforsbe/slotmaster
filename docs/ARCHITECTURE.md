@@ -238,6 +238,7 @@ which are cascade-specific and default to `null`):
 | `betPerLine`, `linesCount` | `1`, `10` | Line-pay starting bet |
 | `betAmount` | `null` | Cascade's single flat bet (no bet-per-line/lines concept) — `totalBet` uses this instead when set |
 | `playfield` | Candy Frenzy's palette | Cascade only — how the playfield itself is drawn, see "Playfield theming" below |
+| `background` | `null` | Line-pay only — a static image behind the reels, `{ type: 'image', image: url }`. Cascade's equivalent is nested under `playfield.background` instead (see below) |
 | `symbolsConfig`, `spritesheetUrl` | — | Sprite atlas: `{ [symbolName]: {x,y,w,h} }` + image URL |
 | `onStateChange(state)` | no-op | Fired on every state transition (see State machine below) |
 | `onScatterTrigger(scatterCount, isInFreeSpins)` | no-op | Fired instead of auto-advancing when `scatterWin.triggerFreeSpins` — the game decides what a trigger/retrigger means |
@@ -261,10 +262,16 @@ than colours:
   because a cluster *is* a set of cells and the ruling is what makes its shape legible. A payline
   win is a path across the grid, and ruling it anyway makes the playfield look like a spreadsheet
   with art in it.
-- **`noise`** (`{ color, strength, scale, seed }`, or `null`) — a fixed grain across the playfield,
-  texture where the ruling used to be. Generated once into an offscreen canvas and blitted, never
-  regenerated per frame: a crawling backdrop reads as a rendering fault rather than as texture.
-  Seeded, so it is identical on every load.
+- **`background`** (`null`, `{ type: 'noise', color, strength, scale, seed }`, or
+  `{ type: 'image', image: url }`) — what's drawn immediately behind the grid, filling the
+  reels area. `'noise'` is a fixed grain texture, generated once into an offscreen canvas and
+  blitted, never regenerated per frame (a crawling backdrop reads as a rendering fault rather
+  than as texture) and seeded so it's identical on every load — Mayan Tumble's original look.
+  `'image'` stretches a static image to the reels area instead — Mayan Tumble's and
+  bookbookbook's current look (`SlotRenderer.drawPlayfieldBackground` handles both; a line-pay
+  game passes the same shape via the top-level `config.background` instead of
+  `config.playfield.background`, since the two engines this replaces never agreed on where a
+  game passes it).
 
 **State machine** (`engine.state`, reported via `onStateChange`): `idle` → `spinning` →
 `evaluating` → (`free_spins_intro` | `expanding` | `showing_wins` | `idle`) → ... →

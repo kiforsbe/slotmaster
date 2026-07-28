@@ -372,6 +372,33 @@ export class SlotRenderer {
     ctx.drawImage(noiseCanvas, layout.reelsX, layout.reelsY);
   }
 
+  // Playfield background: a generated noise texture ('noise' type - buildPlayfieldNoise/
+  // drawPlayfieldNoise above, cached per size) or a static image ('image' type, cached per src),
+  // stretched to fill the reels area. Ported from CascadeEngine.js's/SlotEngine.js's own
+  // _renderPlayfieldBackground()/renderPlayfieldBackground() - added to both engines after this
+  // refactor's worktree branched, so this is a forward-port, not an extraction. The two engines
+  // never agreed on where a game passes this (cascade: config.playfield.background, replacing
+  // its older config.playfield.noise; line-pay: config.background, top-level) - callers below
+  // pass whichever their own engine family uses, this method itself doesn't care.
+  drawPlayfieldBackground(ctx, layout, background) {
+    if (!background) return;
+    if (background.type === 'noise') {
+      if (!this._noiseCanvas || this._noiseCanvasW !== layout.reelsWidth || this._noiseCanvasH !== layout.reelsHeight) {
+        this._noiseCanvas = this.buildPlayfieldNoise(layout.reelsWidth, layout.reelsHeight, background);
+        this._noiseCanvasW = layout.reelsWidth;
+        this._noiseCanvasH = layout.reelsHeight;
+      }
+      this.drawPlayfieldNoise(ctx, this._noiseCanvas, layout);
+    } else if (background.type === 'image') {
+      if (!this._backgroundImage || this._backgroundImageSrc !== background.image) {
+        this._backgroundImage = new Image();
+        this._backgroundImage.src = background.image;
+        this._backgroundImageSrc = background.image;
+      }
+      if (this._backgroundImage) ctx.drawImage(this._backgroundImage, layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
+    }
+  }
+
   // Draws the live grid plus any cell mid-clear-vanish (clearInfo) or mid-landing-bounce
   // (isBouncing) - extracted from CascadeEngine.js's _renderGridSymbols/_applyLandingBounce/
   // _renderClearGlow/_applyClearTransform. `gridState` bundles the per-cell animation info the
@@ -610,6 +637,7 @@ export class SlotRenderer {
     ctx.rect(layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
     ctx.clip();
 
+    this.drawPlayfieldBackground(ctx, layout, engine.config.background);
     this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
     if (engine.animator?.reels) {
       this.drawReelsSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.animator.reels);
@@ -650,14 +678,7 @@ export class SlotRenderer {
     ctx.rect(layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
     ctx.clip();
 
-    if (theme.noise) {
-      if (!this._noiseCanvas || this._noiseCanvasW !== layout.reelsWidth || this._noiseCanvasH !== layout.reelsHeight) {
-        this._noiseCanvas = this.buildPlayfieldNoise(layout.reelsWidth, layout.reelsHeight, theme.noise);
-        this._noiseCanvasW = layout.reelsWidth;
-        this._noiseCanvasH = layout.reelsHeight;
-      }
-      this.drawPlayfieldNoise(ctx, this._noiseCanvas, layout);
-    }
+    this.drawPlayfieldBackground(ctx, layout, theme.background);
 
     const animator = engine.animator;
     const mode = engine.freeSpinsMode;
