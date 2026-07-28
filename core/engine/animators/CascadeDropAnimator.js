@@ -155,6 +155,12 @@ export class CascadeDropAnimator {
       return;
     }
 
+    // A fresh copy, not prevStep.grid itself - each cluster's cells get nulled out below as its
+    // poof finishes, and prevStep.grid must stay untouched (SpinLogRecorder/replay reads the
+    // original resolved grid for every step after the spin completes, not this animator's
+    // transient display state).
+    this.grid = prevStep.grid.map(col => col.slice());
+
     const clusterWins = prevStep.clusterWins;
     let clusterIndex = 0;
 
@@ -186,6 +192,13 @@ export class CascadeDropAnimator {
           requestAnimationFrame(waitForClear);
           return;
         }
+        // Poof finished: actually remove this cluster's symbols now, so they stay gone once
+        // clearNextCluster rebuilds currentClearVariants for the next cluster below (otherwise
+        // this cluster's cells fall out of that map and momentarily redraw at full opacity -
+        // the "cluster 1 reappears" bug).
+        cluster.winningPositions.forEach(([col, row]) => {
+          this.grid[col][row] = null;
+        });
         clusterIndex++;
         if (clusterIndex < clusterWins.length) {
           clearNextCluster();

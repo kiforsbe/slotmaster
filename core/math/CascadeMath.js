@@ -28,6 +28,14 @@ export function nextStripSymbol(strip, cursorState) {
  * Also used for the very first fill of a spin: call it with an all-null grid and every
  * position listed as cleared.
  *
+ * Always removes every given position in one combined pass - clusterWins' winningPositions
+ * are coordinates into the grid as it existed BEFORE any clearing, so removing them across
+ * multiple sequential passes (with gravity compacting survivors between passes) would shift
+ * row indices and corrupt later positions. When several clusters win on the same step, the
+ * caller collects every cluster's winningPositions first and calls this once with the union
+ * (see resolveCascadeSequence below) - any one-cluster-at-a-time *visual* poof sequencing
+ * belongs in the animator, which can hide cells progressively without touching this math.
+ *
  * @param {string[][]} grid - grid[col][row], row 0 = top.
  * @param {{index: number}[]} cursorStateByColumn - one cursor per column, mutated in place.
  * @param {string[][]} strips - one reel strip per column.
