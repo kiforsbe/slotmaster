@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins } from '../core/SpinSimulator.js';
-import { generateReel } from '../core/SlotMath.js';
+import { generateReel } from '../core/math/SlotMath.js';
 
 // Mirrors games/bookbookbook/game.js's real PAYTABLE/PAYLINES/reel config. A moderate spin
 // count keeps this fast to run on every commit; it's a regression guard against breaking the

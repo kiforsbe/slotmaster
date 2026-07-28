@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gradientDescent1D, bisect1D, nelderMead, tuneFrequencies, diagnoseConfig, simulateSpins, beatsIncumbent, describePayoutScaleVerification, renormalizeWithinBounds } from '../core/SpinSimulator.js';
-import { checkWildLineWins } from '../core/SlotMath.js';
+import { checkWildLineWins } from '../core/math/SlotMath.js';
 import {
   PAYTABLE, REELS_COUNT, ROWS_COUNT, PAYLINES, REEL_SEEDS, BET_PER_LINE, LINES_COUNT, REEL_LENGTH,
   FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3,
@@ -1484,7 +1484,7 @@ test('tuneFrequencies with options.runTrial produces identical results to its in
   // machinery (Promise.all batching, trial-index-ordered summation) doesn't change the answer,
   // only how it gets computed.
   const runTrial = async (config, numSpins, betPerLine, linesCount, rngSeed) => {
-    const { createSeededRng } = await import('../core/SlotMath.js');
+    const { createSeededRng } = await import('../core/math/SlotMath.js');
     const rng = rngSeed != null ? createSeededRng(rngSeed) : Math.random;
     const results = simulateSpins(config, numSpins, betPerLine, linesCount, rng);
     return { rtpRaw: results.rtpRaw, freeSpinsTriggered: results.freeSpinsTriggered, baseSpins: results.baseSpins };

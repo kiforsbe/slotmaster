@@ -1,6 +1,11 @@
 // Game Coordinator for Bar Fruits Slot Machine
-import { SlotEngine } from '../../core/SlotEngine.js';
-import { generateReel } from '../../core/SlotMath.js';
+import { CoreSlotEngine } from '../../core/engine/CoreSlotEngine.js';
+import { LineMechanic } from '../../core/engine/mechanics/LineMechanic.js';
+import { ReelScrollAnimator } from '../../core/engine/animators/ReelScrollAnimator.js';
+import { SlotRenderer } from '../../core/rendering/SlotRenderer.js';
+import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
+import { AudioController } from '../../core/engine/AudioController.js';
+import { generateReel } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 
@@ -312,7 +317,14 @@ async function initGame() {
   }
 
   // Create slot engine instance
-  engine = new SlotEngine(canvas, {
+  const renderer = new SlotRenderer();
+  engine = new CoreSlotEngine(canvas, {
+    mechanic: LineMechanic,
+    animator: new ReelScrollAnimator(renderer),
+    renderer,
+    spinLogRecorder: new SpinLogRecorder({ betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, scatterSymbol: 'star' }),
+    audioController: new AudioController(),
+
     reelsCount: REELS_COUNT,
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
@@ -334,6 +346,7 @@ async function initGame() {
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo),
   });
+  engine.init();
 
   updateUI();
   setupUIHandlers();

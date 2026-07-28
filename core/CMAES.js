@@ -8,7 +8,7 @@
  * simulation), both of which Nelder-Mead's pairwise-comparison, n+1-vertex-simplex approach
  * handles poorly.
  */
-import { createSeededRng } from './SlotMath.js';
+import { createSeededRng } from './math/SlotMath.js';
 
 /**
  * Eigendecomposition of a symmetric matrix via the classical (cyclic Jacobi) eigenvalue

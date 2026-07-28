@@ -1,7 +1,8 @@
 // Cluster-pays win evaluation: orthogonal flood-fill clustering plus a cluster-size payout
-// tier lookup. Sits alongside core/SlotMath.js's checkWins/checkWildLineWins as a sibling
-// win-evaluation strategy, not a replacement - CascadeEngine (core/CascadeEngine.js) never
-// imports this directly, a game's own winEvaluator closure does (see games/candyfrenzy/game.js).
+// tier lookup. Sits alongside core/math/SlotMath.js's checkWins/checkWildLineWins as a sibling
+// win-evaluation strategy, not a replacement - CoreSlotEngine (core/engine/CoreSlotEngine.js)
+// never imports this directly, a game's own winEvaluator closure does (see
+// games/candyfrenzy/game.js).
 import { checkScatterCount } from './CascadeMath.js';
 
 /**

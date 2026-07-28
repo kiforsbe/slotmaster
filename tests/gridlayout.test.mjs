@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { computeGridLayout } from '../core/GridLayout.js';
+import { computeGridLayout } from '../core/rendering/GridLayout.js';
 
 test('computeGridLayout fits the grid to the narrower dimension and centers it, matching a 5x3 grid at a wide parent', () => {
   const layout = computeGridLayout(1000, 400, 1, 5, 3);

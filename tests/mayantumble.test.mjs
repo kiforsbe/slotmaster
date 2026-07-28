@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins } from '../core/SpinSimulator.js';
-import { createSeededRng } from '../core/SlotMath.js';
-import { CascadeSpinMechanic } from '../core/CascadeSpinMechanic.js';
+import { createSeededRng } from '../core/math/SlotMath.js';
+import { CascadeSpinMechanic } from '../core/engine/mechanics/CascadeSpinMechanic.js';
 import { resolveWinEvaluator } from '../core/mechanicRegistry.js';
 import {
   REELS_COUNT, ROWS_COUNT, PAYTABLE, PAYLINES, REEL_STRIPS, REEL_LENGTH, BET_AMOUNT, SCATTER_TRIGGER_COUNT, FREE_SPINS_AWARD, checkLineCascadeWins,

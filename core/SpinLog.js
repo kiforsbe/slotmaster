@@ -1,8 +1,9 @@
 import { downloadTextFile } from './FileIO.js';
 
 // Shared per-spin log entry construction, used by both core/SpinSimulator.js (a batch of
-// synchronous simulated spins) and core/SlotEngine.js (real, animated interactive play). The two
-// build entries at different times relative to an expanding win resolving - a simulated spin
+// synchronous simulated spins) and core/engine/SpinLogRecorder.js (real, animated interactive
+// play, called from CoreSlotEngine). The two build entries at different times relative to an
+// expanding win resolving - a simulated spin
 // already knows its expanding win by the time it logs anything, while live play only finds out
 // once the expansion animation finishes playing out - but the entry SHAPE, and how a line/scatter
 // win turns into a currency amount, is identical either way. Keeping that one definition here

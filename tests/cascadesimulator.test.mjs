@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { simulateSpins, tuneFrequencies, computeValueRanks } from '../core/SpinSimulator.js';
-import { LineMechanic } from '../core/LineMechanic.js';
-import { CascadeSpinMechanic } from '../core/CascadeSpinMechanic.js';
-import { createMultiplierTilesMode } from '../core/FreeSpinsModes.js';
-import { checkWildLineWins, generateReel, createSeededRng } from '../core/SlotMath.js';
+import { LineMechanic } from '../core/engine/mechanics/LineMechanic.js';
+import { CascadeSpinMechanic } from '../core/engine/mechanics/CascadeSpinMechanic.js';
+import { createMultiplierTilesMode } from '../core/engine/FreeSpinsModes.js';
+import { checkWildLineWins, generateReel, createSeededRng } from '../core/math/SlotMath.js';
 
 test('simulateSpins with mechanic: LineMechanic passed explicitly reproduces the default (omitted) behavior exactly', () => {
   const PAYLINES3 = [[0, 0, 0], [1, 1, 1], [2, 2, 2]];

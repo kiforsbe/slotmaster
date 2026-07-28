@@ -4,8 +4,8 @@
 // tuning) alike, via config.mechanic. This is the default mechanic, so every existing
 // line-pay game keeps working unchanged without ever passing it explicitly. See
 // core/CascadeSpinMechanic.js for the cluster-pays sibling.
-import { generateTargetGrid, checkExpandingWins, checkWins } from './SlotMath.js';
-import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
+import { generateTargetGrid, checkExpandingWins, checkWins, createSeededRng } from '../../math/SlotMath.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../../SpinLog.js';
 
 export const LineMechanic = {
   name: 'line',
@@ -30,6 +30,31 @@ export const LineMechanic = {
   // see hasExpandingWild's own doc on SpinSimulator's simulateSpins).
   evaluateExpandingWin(grid, expandingSymbol, config, linesCount) {
     return checkExpandingWins(grid, expandingSymbol, config.paytable, config.paylines, linesCount);
+  },
+
+  // Live-play entry point (core/engine/CoreSlotEngine.js) - the normalized step-sequence
+  // counterpart to resolveSpin's batch-simulation entry point below. Always a single-step
+  // sequence: a line-pay spin has no cascade steps. Derives its own rng from `seed` internally so
+  // the caller never needs to know whether a mechanic wants a seed or an rng function.
+  // `forcedGrid` (non-empty array) skips getTargetGrid entirely and evaluates that grid instead -
+  // CoreSlotEngine.forceWinResult()'s debug/cheat path.
+  //
+  // step.payout is an already-monetized dollar amount, not a bare multiplier - a line-pay spin
+  // has two different bet bases (line wins scale by betPerLine, scatter wins scale by the full
+  // totalBet, per resolveSpin's own batch-simulation math below), so only this mechanic can
+  // correctly convert its own multiplier(s) into money. CoreSlotEngine just sums step.payout
+  // across every step, mechanic-agnostic.
+  resolveLiveSpin({ reelStrips, rowsCount, seed, config, linesCount, forcedGrid }) {
+    const rng = createSeededRng(seed);
+    const grid = (forcedGrid && forcedGrid.length > 0) ? forcedGrid : this.getTargetGrid(reelStrips, rowsCount, rng);
+    const winData = this.evaluateWin(grid, config, linesCount);
+    const totalBet = config.betPerLine * linesCount;
+    const payout = (winData.totalLinePayoutMultiplier || 0) * config.betPerLine
+      + (winData.scatterWin ? winData.scatterWin.payout * totalBet : 0);
+    return {
+      steps: [{ grid, lineWins: winData.lineWins || [], scatterWin: winData.scatterWin || null, payout }],
+      scatterWin: winData.scatterWin || null,
+    };
   },
 
   // Picks this free-spins round's expanding symbol once, at the round's start - never

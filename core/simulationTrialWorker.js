@@ -13,7 +13,7 @@
 // directly - the caller sends their *names* instead (mechanicName/winEvaluatorName/
 // freeSpinsModeName, resolved back to the real thing via core/mechanicRegistry.js).
 import { simulateSpins } from './SpinSimulator.js';
-import { createSeededRng } from './SlotMath.js';
+import { createSeededRng } from './math/SlotMath.js';
 import { resolveWinEvaluator, resolveMechanic, resolveFreeSpinsMode } from './mechanicRegistry.js';
 
 self.onmessage = (event) => {

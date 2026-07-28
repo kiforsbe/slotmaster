@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findClusters, checkClusterWins } from '../core/ClusterMath.js';
+import { findClusters, checkClusterWins } from '../core/math/ClusterMath.js';
 
 const PAYTABLE = {
   cottoncandy: { clusterPayout: [{ min: 5, multiplier: 0.25 }, { min: 7, multiplier: 0.50 }, { min: 10, multiplier: 1.0 }, { min: 15, multiplier: 2.5 }, { min: 25, multiplier: 7.5 }] },

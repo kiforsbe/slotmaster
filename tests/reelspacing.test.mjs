@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateReel } from '../core/SlotMath.js';
+import { generateReel } from '../core/math/SlotMath.js';
 
 // Properties of generateReel's symbol placement, asserted as BEHAVIOUR rather than as exact
 // output. An earlier version of this file hashed generated strips and compared against goldens;

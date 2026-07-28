@@ -7,9 +7,9 @@
 // CascadeMath.js's own doc), so a future line-win-based cascade game reuses this same mechanic
 // unmodified, just with its own evaluator/payoutOf. See core/LineMechanic.js for the line-pay
 // sibling (the default mechanic).
-import { resolveCascadeSequence } from './CascadeMath.js';
-import { createCascadeSpinLogEntry } from './SpinLog.js';
-import { createFlatMultiplierMode } from './FreeSpinsModes.js';
+import { resolveCascadeSequence } from '../../math/CascadeMath.js';
+import { createCascadeSpinLogEntry } from '../../SpinLog.js';
+import { createFlatMultiplierMode } from '../FreeSpinsModes.js';
 
 export const CascadeSpinMechanic = {
   name: 'cascade',
@@ -23,6 +23,22 @@ export const CascadeSpinMechanic = {
   // (no animation, used immediately).
   resolveSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps) {
     return resolveCascadeSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps);
+  },
+
+  // Live-play entry point (core/engine/CoreSlotEngine.js) - resolveSequence already returns
+  // cascadeSteps in the normalized { grid, fallOffsets, clusterWins, payout } shape, so this only
+  // has to convert each step's payout multiplier into money (config.betAmount - this mechanic's
+  // one flat bet, no per-line concept) before returning, matching LineMechanic.resolveLiveSpin's
+  // "CoreSlotEngine just sums step.payout, mechanic-agnostic" contract. Only the step-level
+  // payout is rewritten - clusterWins[].payout stays the raw multiplier SpinLogRecorder's
+  // createCascadeSpinLogEntry expects and monetizes itself. scatterWin lives at the sequence
+  // level (not per-step) because free-spins triggering is a whole-spin question, not a per-step
+  // one.
+  resolveLiveSpin({ reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps, config }) {
+    const sequence = this.resolveSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps);
+    const betAmount = config?.betAmount ?? 1;
+    const steps = sequence.cascadeSteps.map(step => ({ ...step, payout: step.payout * betAmount }));
+    return { steps, scatterWin: sequence.scatterWin };
   },
 
   // Wraps a base winEvaluator with the active free-spins mode's bonus (core/FreeSpinsModes.js),

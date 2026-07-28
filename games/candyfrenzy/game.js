@@ -1,10 +1,15 @@
 // Game coordinator for Candy Frenzy - a 7x7 cluster-pays cascading slot.
-import { CascadeEngine } from '../../core/CascadeEngine.js';
-import { generateReel } from '../../core/SlotMath.js';
-import { checkClusterWins } from '../../core/ClusterMath.js';
+import { CoreSlotEngine } from '../../core/engine/CoreSlotEngine.js';
+import { CascadeDropAnimator } from '../../core/engine/animators/CascadeDropAnimator.js';
+import { SlotRenderer } from '../../core/rendering/SlotRenderer.js';
+import { ParticleSystem } from '../../core/rendering/ParticleSystem.js';
+import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
+import { AudioController } from '../../core/engine/AudioController.js';
+import { generateReel } from '../../core/math/SlotMath.js';
+import { checkClusterWins } from '../../core/math/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
-import { createMultiplierTilesMode } from '../../core/FreeSpinsModes.js';
-import { CascadeSpinMechanic } from '../../core/CascadeSpinMechanic.js';
+import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
+import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 
 export const REELS_COUNT = 7;
@@ -252,6 +257,24 @@ export const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(fr
 
 const winEvaluator = (grid) => checkClusterWins(grid, PAYTABLE, MIN_CLUSTER_SIZE, 'bonus', SCATTER_TRIGGER_COUNT);
 
+// This game's own playfield look - CascadeEngine.js's DEFAULT_PLAYFIELD_THEME (pink-on-purple)
+// used to be the shared engine's own default, since it was Candy Frenzy's own colors baked in as
+// "no theme = this game's theme". core/rendering/SlotRenderer.js's default theme now matches
+// SlotEngine.js's gold look instead (see its own DEFAULT_THEME doc), so this game passes its
+// look explicitly rather than relying on an implicit default that changed underneath it.
+const PLAYFIELD = {
+  backdropInner: '#3a1440',
+  backdropOuter: '#140518',
+  outline: '#ff6ec7',
+  outlineGlow: 10,
+  frame: '#2d1030',
+  gridLines: 'rgba(255, 110, 199, 0.25)',
+  background: null,
+  loadingBackground: '#2a0e2e',
+  loadingColor: '#ff6ec7',
+  loadingText: 'LOADING CANDY...',
+};
+
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let displayBalance, betValue, betMinus, betPlus, gameTicker;
 let btnSpinLog, btnSim, btnTune, simModal, simStats;
@@ -433,7 +456,16 @@ async function initGame() {
     return;
   }
 
-  engine = new CascadeEngine(canvas, {
+  const renderer = new SlotRenderer();
+  const particleSystem = new ParticleSystem();
+  engine = new CoreSlotEngine(canvas, {
+    mechanic: CascadeSpinMechanic,
+    animator: new CascadeDropAnimator(renderer, particleSystem),
+    renderer,
+    particleSystem,
+    spinLogRecorder: new SpinLogRecorder({ betAmount: BET_AMOUNT, scatterSymbol: 'bonus' }),
+    audioController: new AudioController(),
+
     reelsCount: REELS_COUNT,
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
@@ -441,6 +473,7 @@ async function initGame() {
     winEvaluator,
     scatterSymbol: 'bonus',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
+    playfield: PLAYFIELD,
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betAmount: BET_AMOUNT,
@@ -448,6 +481,7 @@ async function initGame() {
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo),
   });
+  engine.init();
 
   updateUI();
   setupUIHandlers();

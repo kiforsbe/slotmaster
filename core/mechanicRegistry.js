@@ -5,11 +5,11 @@
 // simulateSpins() trial on its own thread (see core/simulationTrialWorker.js, spun up in a pool
 // by core/SimulationWorkerPool.js) so this table has exactly one home instead of being
 // duplicated per Worker script.
-import { checkWins, checkWildLineWins } from './SlotMath.js';
-import { checkClusterWins } from './ClusterMath.js';
-import { LineMechanic } from './LineMechanic.js';
-import { CascadeSpinMechanic } from './CascadeSpinMechanic.js';
-import { createFlatMultiplierMode, createMultiplierTilesMode } from './FreeSpinsModes.js';
+import { checkWins, checkWildLineWins } from './math/SlotMath.js';
+import { checkClusterWins } from './math/ClusterMath.js';
+import { LineMechanic } from './engine/mechanics/LineMechanic.js';
+import { CascadeSpinMechanic } from './engine/mechanics/CascadeSpinMechanic.js';
+import { createFlatMultiplierMode, createMultiplierTilesMode } from './engine/FreeSpinsModes.js';
 
 const WIN_EVALUATORS = { checkWins, checkWildLineWins };
 
