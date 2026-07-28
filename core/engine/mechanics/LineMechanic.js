@@ -4,7 +4,7 @@
 // tuning) alike, via config.mechanic. This is the default mechanic, so every existing
 // line-pay game keeps working unchanged without ever passing it explicitly. See
 // core/CascadeSpinMechanic.js for the cluster-pays sibling.
-import { generateTargetGrid, checkExpandingWins, checkWins } from '../../math/SlotMath.js';
+import { generateTargetGrid, checkExpandingWins, checkWins, createSeededRng } from '../../math/SlotMath.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../../SpinLog.js';
 
 export const LineMechanic = {
@@ -30,6 +30,21 @@ export const LineMechanic = {
   // see hasExpandingWild's own doc on SpinSimulator's simulateSpins).
   evaluateExpandingWin(grid, expandingSymbol, config, linesCount) {
     return checkExpandingWins(grid, expandingSymbol, config.paytable, config.paylines, linesCount);
+  },
+
+  // Live-play entry point (core/engine/CoreSlotEngine.js) - the normalized step-sequence
+  // counterpart to resolveSpin's batch-simulation entry point below. Always a single-step
+  // sequence: a line-pay spin has no cascade steps. Derives its own rng from `seed` internally so
+  // the caller never needs to know whether a mechanic wants a seed or an rng function.
+  resolveLiveSpin({ reelStrips, rowsCount, seed, config, linesCount }) {
+    const rng = createSeededRng(seed);
+    const grid = this.getTargetGrid(reelStrips, rowsCount, rng);
+    const winData = this.evaluateWin(grid, config, linesCount);
+    const payout = (winData.totalLinePayoutMultiplier || 0) + (winData.totalScatterPayoutMultiplier || 0);
+    return {
+      steps: [{ grid, lineWins: winData.lineWins || [], scatterWin: winData.scatterWin || null, payout }],
+      scatterWin: winData.scatterWin || null,
+    };
   },
 
   // Picks this free-spins round's expanding symbol once, at the round's start - never
