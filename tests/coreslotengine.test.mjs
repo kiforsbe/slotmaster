@@ -57,31 +57,43 @@ test('spin() moves idle -> spinning -> idle when the mechanic reports no payout'
   assert.equal(engine.state, 'idle');
 });
 
-test('spin() plays every step of a multi-step (cascade) sequence in order', async () => {
-  const playedGrids = [];
+test('spin() plays only the first step\'s entrance, then transitions through every later cascade step', async () => {
+  const entranceGrids = [];
+  const transitionPairs = [];
   const engine = new CoreSlotEngine(stubCanvas(), {
     mechanic: {
       resolveLiveSpin: () => ({
         steps: [
           { grid: [['a']], payout: 2 },
           { grid: [['b']], payout: 3 },
+          { grid: [['c']], payout: 0 },
         ],
         scatterWin: null,
       }),
     },
     animator: {
-      playEntrance: (engine, step, onDone) => { playedGrids.push(step.grid); onDone(); },
-      playTransition: (engine, prevStep, nextStep, onDone) => onDone(),
+      playEntrance: (engine, step, onDone) => { entranceGrids.push(step.grid); onDone(); },
+      playTransition: (engine, prevStep, nextStep, onDone) => { transitionPairs.push([prevStep.grid, nextStep.grid]); onDone(); },
     },
     renderer: { draw: () => {} },
   });
 
   await engine.spin(1);
 
-  assert.deepEqual(playedGrids, [[['a']], [['b']]]);
+  // playEntrance must run exactly once, for the very first grid - every later step is reached
+  // only through playTransition (see CoreSlotEngine._advanceCascadeSteps). Calling playEntrance
+  // again for an already-landed step was a real bug: CascadeDropAnimator would treat that
+  // correct, already-displayed grid as a stale "outgoing" board to fall away, while an identical
+  // copy re-entered from above - a visible double-drop on every cascade step past the first.
+  assert.deepEqual(entranceGrids, [[['a']]]);
+  assert.deepEqual(transitionPairs, [
+    [[['a']], [['b']]],
+    [[['b']], [['c']]],
+  ]);
+  assert.deepEqual(engine.grid, [['c']]);
   // step.payout is already money (see LineMechanic/CascadeSpinMechanic.resolveLiveSpin's own
   // docs) - CoreSlotEngine sums it as-is, no further bet scaling.
-  assert.equal(engine.lastWin, 2 + 3);
+  assert.equal(engine.lastWin, 2 + 3 + 0);
 });
 
 test('enterFreeSpins sets inFreeSpins and the spins counters; exitFreeSpins clears them', () => {

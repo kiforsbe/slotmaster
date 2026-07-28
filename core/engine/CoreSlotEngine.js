@@ -329,16 +329,32 @@ export class CoreSlotEngine {
     return this.freeSpinsMode.wrapWinEvaluator(this.config.winEvaluator, this.freeSpinsModeState, this);
   }
 
+  // playEntrance plays exactly once per spin, for the very first step (index is always 0 at the
+  // call site below) - every later cascade step is reached exclusively through _advanceCascadeSteps'
+  // playTransition chain. Calling playEntrance again for a later step (the original recursive
+  // design here did, by having this method call itself) reintroduces a real bug: by the time
+  // that call happens, playTransition's own fall phase has already correctly landed the grid, so
+  // CascadeDropAnimator sees an already-correct board and mistakes it for a stale "outgoing" one
+  // to animate away, while an identical copy re-enters from above - a visible double-drop (and,
+  // mid-cascade, a moment where an already-cleared cluster's symbols flash back before vanishing
+  // again) before things settle back to the very state that was already correct.
   async _playStep(index) {
+    console.log(`CoreSlotEngine: playing step ${index + 1}/${this.spinSequence.length}`);
     const step = this.spinSequence[index];
     this.grid = step.grid;
     await new Promise((resolve) => this.animator.playEntrance(this, step, resolve));
-    if (index + 1 < this.spinSequence.length) {
-      this.stepIndex = index + 1;
-      const nextStep = this.spinSequence[this.stepIndex];
-      await new Promise((resolve) => this.animator.playTransition(this, step, nextStep, resolve));
-      await this._playStep(this.stepIndex);
-    }
+    await this._advanceCascadeSteps(index);
+  }
+
+  async _advanceCascadeSteps(index) {
+    if (index + 1 >= this.spinSequence.length) return;
+    console.log(`CoreSlotEngine: advancing to cascade step ${index + 2}/${this.spinSequence.length}`);
+    const step = this.spinSequence[index];
+    this.stepIndex = index + 1;
+    const nextStep = this.spinSequence[this.stepIndex];
+    await new Promise((resolve) => this.animator.playTransition(this, step, nextStep, resolve));
+    this.grid = nextStep.grid;
+    await this._advanceCascadeSteps(this.stepIndex);
   }
 
   _finishSpin() {
