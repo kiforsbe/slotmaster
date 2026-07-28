@@ -25,13 +25,20 @@ export const CascadeSpinMechanic = {
     return resolveCascadeSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps);
   },
 
-  // Live-play entry point (core/engine/CoreSlotEngine.js) - a thin adapter, since resolveSequence
-  // already returns cascadeSteps in the normalized { grid, fallOffsets, wins, payout } shape
-  // CoreSlotEngine expects. scatterWin lives at the sequence level (not per-step) because
-  // free-spins triggering is a whole-spin question, not a per-step one.
-  resolveLiveSpin({ reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps }) {
+  // Live-play entry point (core/engine/CoreSlotEngine.js) - resolveSequence already returns
+  // cascadeSteps in the normalized { grid, fallOffsets, clusterWins, payout } shape, so this only
+  // has to convert each step's payout multiplier into money (config.betAmount - this mechanic's
+  // one flat bet, no per-line concept) before returning, matching LineMechanic.resolveLiveSpin's
+  // "CoreSlotEngine just sums step.payout, mechanic-agnostic" contract. Only the step-level
+  // payout is rewritten - clusterWins[].payout stays the raw multiplier SpinLogRecorder's
+  // createCascadeSpinLogEntry expects and monetizes itself. scatterWin lives at the sequence
+  // level (not per-step) because free-spins triggering is a whole-spin question, not a per-step
+  // one.
+  resolveLiveSpin({ reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps, config }) {
     const sequence = this.resolveSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps);
-    return { steps: sequence.cascadeSteps, scatterWin: sequence.scatterWin };
+    const betAmount = config?.betAmount ?? 1;
+    const steps = sequence.cascadeSteps.map(step => ({ ...step, payout: step.payout * betAmount }));
+    return { steps, scatterWin: sequence.scatterWin };
   },
 
   // Wraps a base winEvaluator with the active free-spins mode's bonus (core/FreeSpinsModes.js),

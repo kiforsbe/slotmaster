@@ -8,8 +8,8 @@ function stubCanvas() {
 
 function noAnimation() {
   return {
-    playEntrance: (step, ctx, onDone) => onDone(),
-    playTransition: (prev, next, ctx, onDone) => onDone(),
+    playEntrance: (engine, step, onDone) => onDone(),
+    playTransition: (engine, prevStep, nextStep, onDone) => onDone(),
   };
 }
 
@@ -69,8 +69,8 @@ test('spin() plays every step of a multi-step (cascade) sequence in order', asyn
       }),
     },
     animator: {
-      playEntrance: (step, ctx, onDone) => { playedGrids.push(step.grid); onDone(); },
-      playTransition: (prev, next, ctx, onDone) => onDone(),
+      playEntrance: (engine, step, onDone) => { playedGrids.push(step.grid); onDone(); },
+      playTransition: (engine, prevStep, nextStep, onDone) => onDone(),
     },
     renderer: { draw: () => {} },
   });
@@ -78,7 +78,9 @@ test('spin() plays every step of a multi-step (cascade) sequence in order', asyn
   await engine.spin(1);
 
   assert.deepEqual(playedGrids, [[['a']], [['b']]]);
-  assert.equal(engine.lastWin, (2 + 3) * (engine.betPerLine * engine.linesCount));
+  // step.payout is already money (see LineMechanic/CascadeSpinMechanic.resolveLiveSpin's own
+  // docs) - CoreSlotEngine sums it as-is, no further bet scaling.
+  assert.equal(engine.lastWin, 2 + 3);
 });
 
 test('enterFreeSpins sets inFreeSpins and the spins counters; exitFreeSpins clears them', () => {

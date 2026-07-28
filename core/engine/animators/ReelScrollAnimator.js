@@ -3,30 +3,146 @@
 // playTransition is never actually invoked by CoreSlotEngine - it exists only to satisfy the
 // SpinAnimator interface every animator implements.
 //
-// playEntrance's body below is intentionally a stub, not a finished extraction: SlotEngine.js's
-// animate()/update()/easeOutCubic() (lines ~230-480) and the symbol-placement half of
-// renderReelsSymbols (~928-949) implement a real-time requestAnimationFrame loop with
-// precomputed landing timestamps, per-reel bounce physics, and turbo-speed handling - genuinely
-// risky to rewrite blind against a canvas that isn't running (this file has no automated test
-// harness; canvas animation is verified by hand). Finishing this extraction is folded into
-// Task 14 (Lucky Fruits migration, docs/superpowers/plans/2026-07-28-core-modularization.md) -
-// the first point this animator has a running game to verify against.
+// Reel physics/timing below is a faithful port of SlotEngine.js's spin()/update()/easeOutCubic()
+// (formulas kept identical - only the control flow changed, from a continuous engine-owned
+// update() loop polled every frame to a self-contained tween loop scoped to one playEntrance
+// call). The reel array itself is owned here (not by CoreSlotEngine), built lazily on first use
+// so it persists across spins the same way SlotEngine.js's this.reels did.
+const SPIN_SPEED_NORMAL_MAX = 50;
+const SPIN_SPEED_TURBO_MAX = 80;
+
+function easeOutCubic(t) {
+  return 1 - Math.pow(1 - t, 3);
+}
+
 export class ReelScrollAnimator {
   constructor(renderer, { spinDuration = 2000, reelDelay = 150 } = {}) {
     this.renderer = renderer;
     this.spinDuration = spinDuration;
     this.reelDelay = reelDelay;
+    this.reels = null;
+    this.expandedReelsState = [];
   }
 
-  playEntrance(step, ctx, onDone) {
-    // TODO(Task 14): extract SlotEngine.js's animate()/update()/easeOutCubic() and the
-    // symbol-placement half of renderReelsSymbols here, replacing `this.state`-driven control
-    // flow with a local tween loop scoped to this one call. Call onDone() once every reel's
-    // landing tween has completed against step.grid.
-    onDone();
+  _ensureReels(engine) {
+    if (this.reels) return;
+    this.reels = [];
+    for (let r = 0; r < engine.config.reelsCount; r++) {
+      const strip = engine.config.reelStrips[r];
+      const symbols = [];
+      for (let i = 0; i < engine.config.rowsCount + 3; i++) {
+        symbols.push(this._getRandomSymbol(strip));
+      }
+      this.reels.push({
+        symbols, offsetY: 0, speed: 0, state: 'idle', strip,
+        landStartTime: 0, landElapsedStart: 0, landDuration: 0,
+        bounceProgress: 0, bounceDirection: 1,
+      });
+    }
+    this.expandedReelsState = Array(engine.config.reelsCount).fill(false);
   }
 
-  playTransition(prevStep, nextStep, ctx, onDone) {
+  _getRandomSymbol(strip) {
+    return strip[Math.floor(Math.random() * strip.length)];
+  }
+
+  playEntrance(engine, step, onDone) {
+    this._ensureReels(engine);
+
+    const turbo = engine.turboMode;
+    const spinStart = Date.now();
+    const stopInterval = turbo ? 100 : this.reelDelay;
+    const landDuration = turbo ? 150 : 450;
+    const symbolHeight = engine.symbolHeight;
+    const targetGrid = step.grid;
+
+    this.reels.forEach((reel, r) => {
+      reel.state = 'spinning';
+      reel.speed = 20;
+      const stopDelay = (turbo ? 500 : this.spinDuration) + (r * stopInterval);
+      reel.landDuration = landDuration;
+      // The reel is guaranteed fully landed by spinStart + stopDelay - landing itself begins
+      // landDuration ms before that instant, so it always finishes exactly on time regardless
+      // of frame rate or the acceleration constant below.
+      reel.landStartTime = spinStart + stopDelay - landDuration;
+    });
+
+    const tick = () => {
+      const now = Date.now();
+      let allSettled = true;
+
+      this.reels.forEach((reel, r) => {
+        if (reel.state === 'spinning') {
+          allSettled = false;
+
+          const maxSpeed = turbo ? SPIN_SPEED_TURBO_MAX : SPIN_SPEED_NORMAL_MAX;
+          if (reel.speed < maxSpeed) reel.speed += 3;
+          reel.offsetY += reel.speed;
+
+          if (reel.offsetY >= symbolHeight) {
+            const shiftCount = Math.floor(reel.offsetY / symbolHeight);
+            reel.offsetY = reel.offsetY % symbolHeight;
+            for (let s = 0; s < shiftCount; s++) {
+              reel.symbols.pop();
+              reel.symbols.unshift(this._getRandomSymbol(reel.strip));
+            }
+          }
+
+          if (now >= reel.landStartTime) {
+            reel.symbols = [
+              this._getRandomSymbol(reel.strip),
+              targetGrid[r][0], targetGrid[r][1], targetGrid[r][2],
+              this._getRandomSymbol(reel.strip),
+              this._getRandomSymbol(reel.strip),
+            ];
+            reel.offsetY = symbolHeight;
+            reel.speed = 0;
+            reel.state = 'landing';
+            reel.landElapsedStart = now;
+          }
+        } else if (reel.state === 'landing') {
+          allSettled = false;
+
+          const elapsed = now - reel.landElapsedStart;
+          const progress = Math.min(elapsed / reel.landDuration, 1);
+          reel.offsetY = symbolHeight * (1 - easeOutCubic(progress));
+
+          if (progress >= 1) {
+            reel.offsetY = 0;
+            reel.state = 'bounce';
+            reel.bounceProgress = 0;
+            reel.bounceDirection = 1;
+            engine.audioController?.onReelStop(r);
+          }
+        } else if (reel.state === 'bounce') {
+          allSettled = false;
+
+          const bounceMax = symbolHeight * 0.12;
+          const speed = bounceMax / 4;
+          if (reel.bounceDirection === 1) {
+            reel.offsetY += speed;
+            if (reel.offsetY >= bounceMax) reel.bounceDirection = -1;
+          } else {
+            reel.offsetY -= speed;
+            if (reel.offsetY <= 0) {
+              reel.offsetY = 0;
+              reel.state = 'idle';
+            }
+          }
+        }
+      });
+
+      if (allSettled) {
+        onDone();
+        return;
+      }
+      requestAnimationFrame(tick);
+    };
+
+    requestAnimationFrame(tick);
+  }
+
+  playTransition(engine, prevStep, nextStep, onDone) {
     onDone();
   }
 }

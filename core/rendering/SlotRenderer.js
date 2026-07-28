@@ -99,6 +99,24 @@ export class SlotRenderer {
     drawSpriteSymbol(ctx, spritesheet, symbolsConfig[name], x, y, width, height, blurSpeed);
   }
 
+  // Extracted from SlotEngine.js's renderReelsSymbols - draws each reel's rolling symbol window
+  // (see ReelScrollAnimator, which owns the `reels` array's physics/state) at its current
+  // scroll offset, with motion blur while spinning fast.
+  drawReelsSymbols(ctx, spritesheet, symbolsConfig, layout, reelsCount, reels) {
+    const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
+    for (let col = 0; col < reelsCount; col++) {
+      const reel = reels[col];
+      const cx = reelsX + (col * symbolWidth);
+
+      for (let s = 0; s < reel.symbols.length; s++) {
+        const symbol = reel.symbols[s];
+        const cy = reelsY + ((s - 1) * symbolHeight) + reel.offsetY;
+        const isSpinningFast = reel.state === 'spinning' && reel.speed > 30;
+        this.drawSymbol(ctx, spritesheet, symbolsConfig, symbol, cx, cy, symbolWidth, symbolHeight, isSpinningFast ? reel.speed : 0);
+      }
+    }
+  }
+
   // NOTE on fidelity: SlotEngine.js's own renderGridBorders drew only horizontal row separators
   // here (lineWidth 2), with vertical column separators drawn earlier/underneath by a separate
   // step (drawReelsBackground, lineWidth 1, a dimmer color, always on). CascadeEngine.js's
@@ -487,5 +505,47 @@ export class SlotRenderer {
 
       ctx.restore();
     });
+  }
+
+  // --- Top-level per-frame orchestration ---
+  //
+  // Called every frame by CoreSlotEngine.animate() (continuous, regardless of spin state - see
+  // its own doc). Mirrors SlotEngine.js's render() call sequence for a line-pay engine
+  // (engine.mechanic.name === 'line'); a cascade engine's own sequence
+  // (engine.mechanic.name === 'cascade') is added once CascadeDropAnimator's extraction lands
+  // (Task 17) - until then this method only knows how to draw a line-pay engine, which is all
+  // that's wired up through Task 14.
+  draw(engine, ctx) {
+    ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
+
+    const theme = engine.config.playfield || {};
+
+    if (!engine.assetsLoaded) {
+      this.drawLoading(ctx, engine.canvas.width, engine.canvas.height, theme);
+      return;
+    }
+
+    const layout = engine.layout;
+    this.drawCabinet(ctx, layout, theme);
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
+    ctx.clip();
+
+    this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
+    if (engine.animator?.reels) {
+      this.drawReelsSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.animator.reels);
+    }
+
+    ctx.restore();
+
+    this.drawGridBorders(ctx, layout, engine.config.rowsCount, engine.config.reelsCount, theme);
+    this.drawWinEffects(
+      ctx, engine.state,
+      { winData: engine.winData, expandingWinData: engine.expandingWinData, winCycleIndex: engine.winCycleIndex, activeWinLineIndex: engine.activeWinLineIndex },
+      layout, engine.config.paylines, engine.config.reelsCount,
+    );
+    engine.particleSystem?.render(ctx);
   }
 }
