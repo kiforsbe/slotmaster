@@ -4,9 +4,9 @@
 // nothing about clusters or paylines: config.winEvaluator is a single-argument closure the
 // game supplies (e.g. games/candyfrenzy/game.js wraps checkClusterWins), so this file is
 // reusable by any future cascading-grid game, not just cluster-pays ones.
-import { computeGridLayout } from './GridLayout.js';
-import { drawSpriteSymbol } from './SpriteDrawer.js';
-import { ParticleSystem } from './ParticleSystem.js';
+import { computeGridLayout } from './rendering/GridLayout.js';
+import { drawSpriteSymbol } from './rendering/SpriteDrawer.js';
+import { ParticleSystem } from './rendering/ParticleSystem.js';
 import { applyCascade } from './math/CascadeMath.js';
 import { createCascadeSpinLogEntry } from './SpinLog.js';
 import { createSeededRng } from './math/SlotMath.js';

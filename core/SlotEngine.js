@@ -4,9 +4,9 @@ import { audio } from './SlotAudio.js';
 import { simulateSpins } from './SpinSimulator.js';
 import { LineMechanic } from './LineMechanic.js';
 import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from './SpinLog.js';
-import { computeGridLayout } from './GridLayout.js';
-import { drawSpriteSymbol } from './SpriteDrawer.js';
-import { ParticleSystem } from './ParticleSystem.js';
+import { computeGridLayout } from './rendering/GridLayout.js';
+import { drawSpriteSymbol } from './rendering/SpriteDrawer.js';
+import { ParticleSystem } from './rendering/ParticleSystem.js';
 
 // Caps SlotEngine.spinLog's size (see its own doc) - generous for a dev-tooling export, small
 // enough that an unattended autoplay/turbo session doesn't grow memory usage without bound.
