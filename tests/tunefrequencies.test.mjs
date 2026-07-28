@@ -1484,7 +1484,7 @@ test('tuneFrequencies with options.runTrial produces identical results to its in
   // machinery (Promise.all batching, trial-index-ordered summation) doesn't change the answer,
   // only how it gets computed.
   const runTrial = async (config, numSpins, betPerLine, linesCount, rngSeed) => {
-    const { createSeededRng } = await import('../core/SlotMath.js');
+    const { createSeededRng } = await import('../core/math/SlotMath.js');
     const rng = rngSeed != null ? createSeededRng(rngSeed) : Math.random;
     const results = simulateSpins(config, numSpins, betPerLine, linesCount, rng);
     return { rtpRaw: results.rtpRaw, freeSpinsTriggered: results.freeSpinsTriggered, baseSpins: results.baseSpins };
