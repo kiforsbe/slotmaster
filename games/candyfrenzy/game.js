@@ -265,10 +265,10 @@ const winEvaluator = (grid) => checkClusterWins(grid, PAYTABLE, MIN_CLUSTER_SIZE
 const PLAYFIELD = {
   backdropInner: '#3a1440',
   backdropOuter: '#140518',
-  outline: 'rgb(249, 75, 255)',
+  //outline: '#f53c8b',
   outlineWidth: 2,
   outlineGlow: 10,
-  outlineGlowIntensity: 5,
+  outlineGlowIntensity: 3,
   frame: '#2d1030',
   gridLines: 'rgba(255, 110, 199, 0.25)',
   background: { type: "color", color: "#401d46bb" },
