@@ -38,6 +38,36 @@ test('record() builds a cascade entry from cascade-shaped steps', () => {
   assert.equal(entry.totalWin, 2); // clusterWin.payout * betAmount
 });
 
+test('record() folds a resolved expanding win into the entry, once known', () => {
+  const recorder = new SpinLogRecorder({ betPerLine: 2, linesCount: 10, scatterSymbol: 'book' });
+  const sequence = [{ grid: [['a']], lineWins: [], scatterWin: null, payout: 0 }];
+
+  const entry = recorder.record({
+    sequence, scatterWin: null, seed: 3, timestamp: 1, phase: 'free', chargedBet: 0,
+    expandingWinData: { expandingReels: [0, 2, 3], totalPayoutMultiplier: 5 },
+    expandingSymbol: 'tut',
+  });
+
+  assert.equal(entry.expandingSymbol, 'tut');
+  assert.equal(entry.expandingReels, 3);
+  assert.equal(entry.expandingWin, 10); // totalPayoutMultiplier * betPerLine
+  assert.equal(entry.totalWin, 10); // folded into totalWin alongside the (zero) line/scatter win
+});
+
+test('record() leaves the entry\'s expanding fields untouched when the expansion pays nothing', () => {
+  const recorder = new SpinLogRecorder({ betPerLine: 2, linesCount: 10, scatterSymbol: 'book' });
+  const sequence = [{ grid: [['a']], lineWins: [], scatterWin: null, payout: 0 }];
+
+  const entry = recorder.record({
+    sequence, scatterWin: null, seed: 4, timestamp: 1, phase: 'free', chargedBet: 0,
+    expandingWinData: { expandingReels: [], totalPayoutMultiplier: 0 },
+    expandingSymbol: 'tut',
+  });
+
+  assert.equal(entry.expandingSymbol, null);
+  assert.equal(entry.totalWin, 0);
+});
+
 test('record() trims the oldest entry once maxEntries is exceeded', () => {
   const recorder = new SpinLogRecorder({ betPerLine: 1, linesCount: 1, scatterSymbol: null, maxEntries: 3 });
   const sequence = [{ grid: [['a']], lineWins: [], scatterWin: null, payout: 0 }];

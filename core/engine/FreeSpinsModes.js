@@ -1,29 +1,29 @@
-// Pluggable free-spins payout modes for CascadeEngine (core/CascadeEngine.js). A mode is a
-// plain object of lifecycle hooks the engine calls without knowing which concrete mode is
-// active - config.freeSpinsMode picks one for a given game; a future mode (for this game or
-// a future cascade game) just needs to implement this same shape, no CascadeEngine changes
-// required. A mode owns any visuals it needs entirely itself (see renderOverlay below) -
-// CascadeEngine only ever hands it `engine` (for ctx/geometry/config) and its own state.
+// Pluggable free-spins payout modes for CoreSlotEngine (core/engine/CoreSlotEngine.js), cascade
+// games only. A mode is a plain object of lifecycle hooks the engine calls without knowing which
+// concrete mode is active - config.freeSpinsMode picks one for a given game; a future mode (for
+// this game or a future cascade game) just needs to implement this same shape, no CoreSlotEngine
+// changes required. A mode owns any visuals it needs entirely itself (see renderOverlay below) -
+// CoreSlotEngine only ever hands it `engine` (for ctx/geometry/config) and its own state.
 //
 // Hooks:
 //   createState(engine) -> any
 //     Builds this mode's own working state. Called once when free spins begin
-//     (CascadeEngine.enterFreeSpins) and again the instant they end (exitFreeSpins) - so a
+//     (CoreSlotEngine.enterFreeSpins) and again the instant they end (exitFreeSpins) - so a
 //     mode with persistent per-tile state (like multiplier tiles) always starts fresh at the
 //     top of a bonus round and is fully cleared the moment it's over, never leaking into the
 //     base game or a later bonus round.
 //   wrapWinEvaluator(baseEvaluator, state, engine) -> (grid) => results
-//     Only ever called while inFreeSpins (see CascadeEngine._buildWinEvaluatorForSpin). Wraps
+//     Only ever called while inFreeSpins (see CoreSlotEngine._buildWinEvaluatorForSpin). Wraps
 //     the game's own win evaluator so every cluster's payout - and the step's
 //     totalPayoutMultiplier - already reflects this mode's bonus by the time
-//     resolveCascadeSequence finishes resolving the whole spin. CascadeEngine's own money
-//     code (_finishSpin/_spawnClusterWinPopups/spin log) trusts these numbers as-is and never
-//     applies anything else on top.
+//     resolveCascadeSequence finishes resolving the whole spin. CoreSlotEngine's own money
+//     code (_finishSpin/CascadeDropAnimator's popups/spin log) trusts these numbers as-is and
+//     never applies anything else on top.
 //   onClusterCleared(cluster, state, engine)
-//     Called once per cluster, only while inFreeSpins, at the exact moment
-//     _beginClusterClear starts playing that cluster's own clear animation - a mode with
-//     visible per-tile state updates it here, in step with the animation, not all at once
-//     back when the whole spin was precomputed.
+//     Called once per cluster, only while inFreeSpins, at the exact moment the active
+//     SpinAnimator (CascadeDropAnimator) starts playing that cluster's own clear animation - a
+//     mode with visible per-tile state updates it here, in step with the animation, not all at
+//     once back when the whole spin was precomputed.
 //   renderOverlay(state, engine)
 //     Called once per frame from render(). Called every frame regardless of inFreeSpins; a
 //     mode's state is reset to "nothing to show" the instant free spins end, so this

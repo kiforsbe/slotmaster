@@ -154,6 +154,15 @@ export class CoreSlotEngine {
     };
   }
 
+  // Read-only view onto the plugged-in SpinLogRecorder's own buffer, matching
+  // SlotEngine.js's/CascadeEngine.js's own `engine.spinLog` property - core/SpinLogPanel.js
+  // (and a game's own DOM wiring) read this directly, with no idea a SpinLogRecorder component
+  // exists underneath. Empty, not undefined, when no recorder is configured (a game that never
+  // wires SPIN LOG can still safely read engine.spinLog.length).
+  get spinLog() {
+    return this.spinLogRecorder?.entries ?? [];
+  }
+
   // Runs continuously for the engine's whole lifetime (idle reels, particle decay, win-effect
   // presentation), not just during an active spin - matching SlotEngine.js's/CascadeEngine.js's
   // own animate(). A spin's own physics/timing is driven separately, inside the active
@@ -335,6 +344,8 @@ export class CoreSlotEngine {
         timestamp: Date.now(),
         phase: this.inFreeSpins ? 'free' : 'base',
         chargedBet: this.inFreeSpins ? 0 : this.totalBet,
+        expandingWinData: this.expandingWinData,
+        expandingSymbol: this.config.expandingSymbol,
       });
     }
 
