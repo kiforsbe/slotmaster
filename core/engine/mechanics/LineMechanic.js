@@ -36,15 +36,17 @@ export const LineMechanic = {
   // counterpart to resolveSpin's batch-simulation entry point below. Always a single-step
   // sequence: a line-pay spin has no cascade steps. Derives its own rng from `seed` internally so
   // the caller never needs to know whether a mechanic wants a seed or an rng function.
+  // `forcedGrid` (non-empty array) skips getTargetGrid entirely and evaluates that grid instead -
+  // CoreSlotEngine.forceWinResult()'s debug/cheat path.
   //
   // step.payout is an already-monetized dollar amount, not a bare multiplier - a line-pay spin
   // has two different bet bases (line wins scale by betPerLine, scatter wins scale by the full
   // totalBet, per resolveSpin's own batch-simulation math below), so only this mechanic can
   // correctly convert its own multiplier(s) into money. CoreSlotEngine just sums step.payout
   // across every step, mechanic-agnostic.
-  resolveLiveSpin({ reelStrips, rowsCount, seed, config, linesCount }) {
+  resolveLiveSpin({ reelStrips, rowsCount, seed, config, linesCount, forcedGrid }) {
     const rng = createSeededRng(seed);
-    const grid = this.getTargetGrid(reelStrips, rowsCount, rng);
+    const grid = (forcedGrid && forcedGrid.length > 0) ? forcedGrid : this.getTargetGrid(reelStrips, rowsCount, rng);
     const winData = this.evaluateWin(grid, config, linesCount);
     const totalBet = config.betPerLine * linesCount;
     const payout = (winData.totalLinePayoutMultiplier || 0) * config.betPerLine

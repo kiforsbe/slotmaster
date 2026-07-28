@@ -95,16 +95,24 @@ test('enterFreeSpins sets inFreeSpins and the spins counters; exitFreeSpins clea
 
   engine.enterFreeSpins(10);
   assert.equal(engine.inFreeSpins, true);
-  assert.equal(engine.freeSpinsRemaining, 10);
+  // enterFreeSpins immediately chains into spinFreeSpins(), which decrements freeSpinsRemaining
+  // before spin() even starts (matching SlotEngine.js's own enterFreeSpins) - so one spin is
+  // already "in flight" by the time this synchronous assertion runs.
+  assert.equal(engine.freeSpinsRemaining, 9);
   assert.equal(engine.freeSpinsTotal, 10);
 
   engine.retriggerFreeSpins(5);
-  assert.equal(engine.freeSpinsRemaining, 15);
+  assert.equal(engine.freeSpinsRemaining, 14);
   assert.equal(engine.freeSpinsTotal, 15);
 
   engine.exitFreeSpins();
   assert.equal(engine.inFreeSpins, false);
-  assert.equal(engine.freeSpinsRemaining, 0);
+  // exitFreeSpins deliberately does NOT reset freeSpinsRemaining/freeSpinsTotal/
+  // freeSpinsAccumulatedWin (matches SlotEngine.js) - a game's game_over handler reads
+  // freeSpinsAccumulatedWin for its summary modal immediately after this call, so resetting it
+  // here would always show $0. enterFreeSpins() resets these fields at the start of the next
+  // round instead.
+  assert.equal(engine.freeSpinsRemaining, 14);
 });
 
 test('spin() calls audioController.onSpinStart and onWin when configured', async () => {

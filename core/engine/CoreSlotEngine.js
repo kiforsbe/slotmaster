@@ -65,6 +65,8 @@ export class CoreSlotEngine {
     this.turboMode = false;
     this.autoPlay = false;
     this.pendingSpinRequest = false;
+    this.autoPlayTimer = null;
+    this._forcedGrid = null;
 
     // Win-presentation state a Renderer reads (see core/rendering/SlotRenderer.js's
     // drawWinEffects). winCycleIndex is fixed at -1 ("show every active win at once") rather
@@ -205,7 +207,9 @@ export class CoreSlotEngine {
       linesCount: this.linesCount,
       winEvaluator: this._buildWinEvaluatorForSpin(),
       maxCascadeSteps: this.config.maxCascadeSteps,
+      forcedGrid: this._forcedGrid,
     });
+    this._forcedGrid = null;
 
     this.spinSequence = result.steps;
     this.stepIndex = 0;
@@ -268,6 +272,10 @@ export class CoreSlotEngine {
     this.lastWin += totalPayout;
     this.balance += this.lastWin;
 
+    if (this.inFreeSpins) {
+      this.freeSpinsAccumulatedWin += this.lastWin;
+    }
+
     if (this.spinLogRecorder) {
       this.spinLogRecorder.record({
         sequence: this.spinSequence,
@@ -291,12 +299,91 @@ export class CoreSlotEngine {
       this.pendingSpinRequest = false;
       this.requestSpin();
     }
+
+    // Always run, matching SlotEngine.js's own evaluateSpinResult() - this is what chains free
+    // spins forward automatically (spinFreeSpins() below) and continues base-game autoplay.
+    this.handleAutoPlay();
   }
 
   stopSpin() {
     // Turbo/skip hook - a real animator's playEntrance/playTransition should resolve immediately
     // when this is set; the skeleton just exposes the flag components read.
     this._skipAnimation = true;
+  }
+
+  // Debug/cheat helper - forces the next spin's grid to contain a given outcome. Builds the
+  // grid itself (ported verbatim from SlotEngine.js's own forceWinResult) and hands it to the
+  // mechanic via spin()'s forcedGrid param; only meaningful for LineMechanic (a mechanic that
+  // ignores forcedGrid, e.g. CascadeSpinMechanic, just spins normally).
+  forceWinResult(winType) {
+    if (this.state !== 'idle' && this.state !== 'showing_wins') return;
+    this._forcedGrid = this._buildForcedGrid(winType);
+    this.spin();
+  }
+
+  _buildForcedGrid(winType) {
+    const grid = [];
+    const randomSymbol = (strip) => strip[Math.floor(Math.random() * strip.length)];
+
+    if (winType === 'scatter') {
+      const scatterSym = this.config.scatterSymbol || 'book';
+      const reelsCount = this.config.reelsCount;
+      const midRow = Math.floor(this.config.rowsCount / 2);
+      const triggerCols = [0, Math.floor(reelsCount / 2), reelsCount - 1];
+      for (let col = 0; col < reelsCount; col++) {
+        const strip = this.config.reelStrips[col];
+        const colSymbols = [];
+        for (let row = 0; row < this.config.rowsCount; row++) colSymbols.push(randomSymbol(strip));
+        if (triggerCols.includes(col)) colSymbols[midRow] = scatterSym;
+        grid.push(colSymbols);
+      }
+    } else if (winType === 'expanding') {
+      const sym = this.config.expandingSymbol || 'tut';
+      for (let col = 0; col < 5; col++) {
+        const strip = this.config.reelStrips[col];
+        const colSymbols = [randomSymbol(strip), randomSymbol(strip), randomSymbol(strip)];
+        if (col === 0 || col === 2 || col === 3) colSymbols[Math.floor(Math.random() * 3)] = sym;
+        grid.push(colSymbols);
+      }
+    } else if (winType === 'bigwin') {
+      const firstLineSymbol = randomSymbol(this.config.reelStrips[0]);
+      for (let col = 0; col < this.config.reelsCount; col++) {
+        grid.push(Array(this.config.rowsCount).fill(firstLineSymbol));
+      }
+    }
+    return grid;
+  }
+
+  // Schedules the next base-game autoplay spin, or the next free-spins round's spin - matches
+  // SlotEngine.js's own handleAutoPlay(). Called unconditionally at the end of every resolved
+  // spin (see _finishSpin), which is what makes free spins actually progress: without it, a
+  // free-spins round would stall after its first spin with nothing left to trigger the next one.
+  handleAutoPlay() {
+    if (this.autoPlayTimer) {
+      clearTimeout(this.autoPlayTimer);
+      this.autoPlayTimer = null;
+    }
+
+    if (this.inFreeSpins) {
+      this.autoPlayTimer = setTimeout(() => {
+        this.spinFreeSpins();
+      }, this.turboMode ? 800 : 1800);
+    } else if (this.autoPlay) {
+      this.autoPlayTimer = setTimeout(() => {
+        if (this.autoPlay && (this.state === 'idle' || this.state === 'showing_wins')) {
+          this.spin();
+        }
+      }, this.turboMode ? 300 : 1000);
+    }
+  }
+
+  spinFreeSpins() {
+    if (this.freeSpinsRemaining <= 0) {
+      this.exitFreeSpins();
+      return;
+    }
+    this.freeSpinsRemaining--;
+    this.spin();
   }
 
   enterFreeSpinsIntro() {
@@ -312,7 +399,9 @@ export class CoreSlotEngine {
     if (this.freeSpinsMode) {
       this.freeSpinsModeState = this.freeSpinsMode.createState(this);
     }
-    this._setState('spinning');
+    this.audio.startBGM();
+    this._setState('idle');
+    this.spinFreeSpins();
   }
 
   retriggerFreeSpins(spinsCount) {
@@ -320,15 +409,18 @@ export class CoreSlotEngine {
     this.freeSpinsTotal += spinsCount;
   }
 
+  // Deliberately does NOT reset freeSpinsRemaining/freeSpinsTotal/freeSpinsAccumulatedWin -
+  // matches SlotEngine.js's own exitFreeSpins() exactly. A game's game_over handler (fired by
+  // the _setState below) reads freeSpinsAccumulatedWin to show the round's total win in a
+  // summary modal; resetting it here would zero it out before that handler ever runs.
+  // enterFreeSpins() is what resets these fields, at the start of the *next* round.
   exitFreeSpins() {
     this.inFreeSpins = false;
-    this.freeSpinsRemaining = 0;
-    this.freeSpinsTotal = 0;
-    this.freeSpinsAccumulatedWin = 0;
     this.config.expandingSymbol = null;
     if (this.freeSpinsMode) {
       this.freeSpinsModeState = this.freeSpinsMode.createState(this);
     }
+    this.audio.stopBGM();
     this._setState('game_over');
   }
 
