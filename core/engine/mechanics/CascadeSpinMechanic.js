@@ -25,6 +25,15 @@ export const CascadeSpinMechanic = {
     return resolveCascadeSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps);
   },
 
+  // Live-play entry point (core/engine/CoreSlotEngine.js) - a thin adapter, since resolveSequence
+  // already returns cascadeSteps in the normalized { grid, fallOffsets, wins, payout } shape
+  // CoreSlotEngine expects. scatterWin lives at the sequence level (not per-step) because
+  // free-spins triggering is a whole-spin question, not a per-step one.
+  resolveLiveSpin({ reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps }) {
+    const sequence = this.resolveSequence(reelStrips, rowsCount, seed, winEvaluator, maxCascadeSteps);
+    return { steps: sequence.cascadeSteps, scatterWin: sequence.scatterWin };
+  },
+
   // Wraps a base winEvaluator with the active free-spins mode's bonus (core/FreeSpinsModes.js),
   // exactly as CascadeEngine._buildWinEvaluatorForSpin does for live play - so every cascade
   // step's payout already reflects the bonus by the time resolveSequence finishes.
