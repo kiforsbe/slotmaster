@@ -149,10 +149,23 @@ export class CoreSlotEngine {
     this.resize();
   }
 
+  // this.canvas's direct parent is a plain `.canvas-frame` div (see each game's index.html) whose
+  // own parent is the "stage" (`.game-viewport`) - the flex-grow element that actually reserves
+  // the available on-screen space and centers its content. Measuring the stage rather than the
+  // frame means the frame can be shrunk to exactly the fitted canvas size below without the next
+  // resize() call reading its own previous output back as if it were the available space.
   resize() {
-    const parentRect = this.canvas.parentElement.getBoundingClientRect();
+    const canvasFrame = this.canvas.parentElement;
+    const stage = canvasFrame.parentElement;
+    const parentRect = stage.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const layout = computeGridLayout(parentRect.width, parentRect.height, dpr, this.config.reelsCount, this.config.rowsCount);
+
+    // Shrink-wrap the frame to the canvas's own fitted CSS size (rather than leaving it at the
+    // stage's full, possibly letterboxed size) - a CSS background set on `.canvas-frame` then
+    // lines up pixel-for-pixel with the canvas, with no dead-space border around it.
+    canvasFrame.style.width = `${layout.cssWidth}px`;
+    canvasFrame.style.height = `${layout.cssHeight}px`;
 
     this.canvas.style.width = `${layout.cssWidth}px`;
     this.canvas.style.height = `${layout.cssHeight}px`;

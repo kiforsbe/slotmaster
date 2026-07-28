@@ -388,6 +388,38 @@ export class SlotRenderer {
   // never agreed on where a game passes this (cascade: config.playfield.background, replacing
   // its older config.playfield.noise; line-pay: config.background, top-level) - callers below
   // pass whichever their own engine family uses, this method itself doesn't care.
+  // Full-viewport background: same descriptor shape as drawPlayfieldBackground above (color/
+  // noise/image), but stretched across the whole canvas rather than just the reels rect - drawn
+  // first, so drawCabinet/drawReelsBackground/everything else layers on top of it same as before.
+  // Two ways to give the viewport a background, picked per game by whichever's more convenient:
+  //   - `{ type: 'color' | 'noise' | 'image', ... }` paints it directly into the canvas here.
+  //   - omit config.viewportBackground entirely (or pass `{ type: 'css' }`) and this draws
+  //     nothing - the canvas is already cleared to transparent this frame (see _drawLine's/
+  //     _drawCascade's own ctx.clearRect call above), so a CSS `background` set on `.canvas-frame`
+  //     (the div CoreSlotEngine.resize() now sizes to match the canvas exactly - see its own doc)
+  //     shows through pixel-for-pixel instead.
+  drawViewportBackground(ctx, canvasWidth, canvasHeight, background) {
+    if (!background || background.type === 'css' || background.type === 'transparent') return;
+    if (background.type === 'color') {
+      ctx.fillStyle = background.color;
+      ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    } else if (background.type === 'noise') {
+      if (!this._viewportNoiseCanvas || this._viewportNoiseCanvasW !== canvasWidth || this._viewportNoiseCanvasH !== canvasHeight) {
+        this._viewportNoiseCanvas = this.buildPlayfieldNoise(canvasWidth, canvasHeight, background);
+        this._viewportNoiseCanvasW = canvasWidth;
+        this._viewportNoiseCanvasH = canvasHeight;
+      }
+      if (this._viewportNoiseCanvas) ctx.drawImage(this._viewportNoiseCanvas, 0, 0);
+    } else if (background.type === 'image') {
+      if (!this._viewportBackgroundImage || this._viewportBackgroundImageSrc !== background.image) {
+        this._viewportBackgroundImage = new Image();
+        this._viewportBackgroundImage.src = background.image;
+        this._viewportBackgroundImageSrc = background.image;
+      }
+      if (this._viewportBackgroundImage) ctx.drawImage(this._viewportBackgroundImage, 0, 0, canvasWidth, canvasHeight);
+    }
+  }
+
   drawPlayfieldBackground(ctx, layout, background) {
     if (!background) return;
     if (background.type === 'noise') {
@@ -673,6 +705,7 @@ export class SlotRenderer {
 
   _drawLine(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
+    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, engine.config.viewportBackground);
 
     const theme = engine.config.playfield || {};
 
@@ -714,6 +747,7 @@ export class SlotRenderer {
 
   _drawCascade(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
+    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, engine.config.viewportBackground);
 
     const theme = engine.config.playfield || {};
 
