@@ -3,6 +3,63 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.7.0 — 2026-07-28
+
+`core/SlotEngine.js` and `core/CascadeEngine.js` — the two ~1,200-line monolith classes every
+game's live rendering, animation, and state machine ran through — are gone, replaced by
+`core/engine/CoreSlotEngine.js`: a skeleton owning only the state machine and the animation
+dispatch loop. Everything else the two old classes each did their own way (grid resolution,
+spin animation, drawing, particles, audio, free-spins payout rules, spin logging) is now a
+separate, independently testable component class the engine calls through a small fixed
+interface, never importing a concrete implementation itself. All five games run on it. No
+gameplay behaviour is intended to change — see Fixed below for the two places it actually did,
+both real gaps the migration surfaced rather than anything deliberately different.
+
+### Changed
+
+- **`core/` is reorganized into subfolders** — `math/` (`SlotMath.js`, `CascadeMath.js`,
+  `ClusterMath.js`), `rendering/` (`GridLayout.js`, `SpriteDrawer.js`, `ParticleSystem.js`, and
+  the new `SlotRenderer.js`), `audio/` (`SlotAudio.js`), and `engine/` (`CoreSlotEngine.js`,
+  the mechanics, the animators, and every other new component below). `SpinSimulator.js` and
+  the tuner support modules stay where they were — they were never engine-specific.
+- **A mechanic gained a normalized live-play entry point.** `LineMechanic`/
+  `CascadeSpinMechanic` already shared `resolveSpin` for batch simulation; each now also
+  exposes `resolveLiveSpin`, returning `{ steps, scatterWin }` with every step's `payout`
+  already converted to money. `CoreSlotEngine` sums that across every step and never needs to
+  know which mechanic it's driving.
+- **Spin animation is a pluggable `SpinAnimator`**, not baked into the engine class:
+  `ReelScrollAnimator` (reel spin-up/land physics, the Book-of-Dead expanding reveal) and
+  `CascadeDropAnimator` (drop-in/clear/fall) are faithful ports of the two old engines' own
+  `update()` loops, restructured into self-contained `playEntrance`/`playTransition` calls.
+- **Drawing is a pluggable `Renderer`.** `SlotRenderer` holds every drawing primitive both
+  animators call into — symbols, borders, win effects, paylines, playfield theming, cascade
+  clear/fall visuals, cluster win popups — for both engine families, branching once at the top
+  on which mechanic is active.
+- **Audio and spin logging are pluggable components too** — `AudioController` (spin-lifecycle
+  hooks forwarding to the `SlotAudio` singleton) and `SpinLogRecorder` (replaces the duplicated
+  `_pushSpinLogEntry` each old engine used to maintain separately).
+- **Playfield backgrounds gained an `image` type**, alongside the existing generated `noise`
+  texture — `{ type: 'image', image: url }` stretches a static image behind the reels. Mayan
+  Tumble and Book of Book Book both use it now.
+
+### Fixed
+
+- **The SPIN LOG button silently showed zero spins** on every migrated game — `CoreSlotEngine`
+  never exposed a `spinLog` property, so `SpinLogPanel.js`'s `engine.spinLog || []` always read
+  as empty. Added a getter backed by the plugged-in `SpinLogRecorder`'s own entries.
+- **Book of Book Book's expanding-wild wins were paid but never logged** — resolved correctly
+  and added to the balance, but the spin log entry's `expandingWin`/`expandingReels` fields
+  stayed at their zeroed defaults, since nothing wired the resolved expansion result through to
+  the recorder. `CoreSlotEngine._finishSpin` now passes it through.
+
+### Known issues
+
+- Mayan Tumble's RUN SIMULATION still reports an RTP far from its 96% target (currently
+  measuring well above it, on both this release's reel frequencies and the ones tuned
+  independently on `main` while this refactor was in progress). Not yet root-caused; not
+  believed to be caused by this refactor, since it reproduces against the pre-refactor engine
+  too, but not yet confirmed either way.
+
 ## 0.6.1 — 2026-07-27
 
 Documentation only. No behaviour changed — 0.6.0 shipped a fifth game and a substantially
