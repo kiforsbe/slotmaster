@@ -341,7 +341,6 @@ window.addEventListener('load', async () => {
     renderer,
     spinLogRecorder: new SpinLogRecorder({ betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, scatterSymbol: 'book' }),
     audioController: new AudioController(),
-
     reelsCount: REELS_COUNT,
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
@@ -359,7 +358,15 @@ window.addEventListener('load', async () => {
     // This game's free spins really do include an expanding wild (see EXPANDING_CANDIDATES) -
     // without this, RUN SIMULATION would assume no expanding-wild mechanic at all.
     hasExpandingWild: true,
-    background: { type: "image", image: "./assets/backgrounds/bookbookbook_background_2.png" },
+    // background: { type: "image", image: "./assets/backgrounds/bookbookbook_background_2.png" },
+    // Full-canvas backdrop behind the cabinet frame (see SlotRenderer.drawViewportBackground) -
+    // background_1's wider tomb-corridor shot, distinct from background_2's close-up tomb room
+    // used just above for the reels' own playfield, so the two don't visibly tile/repeat.
+    viewportBackground: { type: "image", image: "./assets/backgrounds/bookbookbook_background_1.png" },
+    playfield: {
+      outlineWidth: 2,
+      outlineGlow: 7,
+    },
     music: { main: "./assets/music/bookbookbook_theme.mp3" },
 
     onStateChange: (state) => handleStateChange(state),

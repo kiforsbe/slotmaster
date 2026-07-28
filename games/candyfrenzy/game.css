@@ -85,13 +85,12 @@ header {
   color: #201028;
 }
 
+/* GridLayout.computeGridLayout sizes the canvas to fill this exactly (see its own doc) - no
+   letterboxing, no dead-space gap - so a CSS `background` set here lines up pixel-for-pixel with
+   the canvas. */
 .game-viewport {
   position: relative;
   flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
   min-height: 0;
 }
 
@@ -124,13 +123,6 @@ header {
 }
 
 .free-spins-panel.active {
-  display: block;
-}
-
-/* CoreSlotEngine.resize() sizes this to exactly match the canvas's fitted CSS box (see its own
-   doc) - a CSS `background` set here lines up pixel-for-pixel with the canvas, no dead-space gap.
-   .game-viewport centers it via flex, same as it centered the bare canvas before. */
-.canvas-frame {
   display: block;
 }
 
@@ -199,25 +191,34 @@ header {
 .bet-adjuster {
   display: flex;
   align-items: center;
-  gap: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .btn-adjust {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 1px solid var(--gold);
   background: transparent;
+  border: none;
   color: var(--gold);
+  width: 36px;
+  height: 36px;
+  font-size: 18px;
+  font-weight: bold;
   cursor: pointer;
-  font-size: 14px;
+  transition: background 0.2s;
+}
+
+.btn-adjust:hover {
+  background: rgba(255, 233, 74, 0.15);
 }
 
 .bet-display-value {
-  font-size: 15px;
-  font-weight: 700;
-  min-width: 44px;
+  width: 60px;
   text-align: center;
+  font-size: 18px;
+  font-weight: bold;
+  color: #fff;
 }
 
 .spin-section {

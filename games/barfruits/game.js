@@ -333,6 +333,7 @@ async function initGame() {
     wildSymbol: null,
     scatterSymbol: 'star',
     music: { main: "./assets/music/barfruits_theme.mp3" },
+    viewportBackground: { type: "image", image: "./assets/backgrounds/barfruits_background_1.png" },
     symbolsConfig: themeAssets.symbolsConfig,
     spritesheetUrl: themeAssets.spritesheetUrl,
     betPerLine: BET_PER_LINE,

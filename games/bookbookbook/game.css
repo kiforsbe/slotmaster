@@ -116,22 +116,13 @@ header {
 }
 
 /* Game Window Wrapper */
+/* GridLayout.computeGridLayout sizes the canvas to fill this exactly (see its own doc) - no
+   letterboxing, no dead-space gap - so this background lines up pixel-for-pixel with the canvas. */
 .game-viewport {
   flex: 1;
   position: relative;
   background-color: #050508;
   overflow: hidden;
-}
-
-/* CoreSlotEngine.resize() sizes this to exactly match the canvas's fitted CSS box (see its own
-   doc) - a CSS `background` set here lines up pixel-for-pixel with the canvas, no dead-space gap.
-   Centered the same way the bare canvas used to be. */
-.canvas-frame {
-  display: block;
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
 }
 
 canvas {

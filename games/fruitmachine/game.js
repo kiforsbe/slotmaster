@@ -262,6 +262,7 @@ async function initGame() {
     spritesheetUrl: themeAssets.spritesheetUrl,
     betPerLine: BET_PER_LINE,
     linesCount: LINES_COUNT,
+    viewportBackground: { type: "image", image: "./assets/backgrounds/fruitmachine_background_1.png" },
 
     onStateChange: (state) => handleStateChange(state),
     onWin: (winInfo) => handleWin(winInfo),

@@ -3,8 +3,10 @@
 // centered-in-parent layout without duplicating the formula.
 
 /**
- * Fits a reelsCount x rowsCount grid of square cells into a parent box, preserving aspect
- * ratio (never stretching/letterboxing), and centers it within a small margin.
+ * Sizes the canvas to fill its parent box exactly (no letterboxing - any leftover space around
+ * the reels stays inside the canvas itself, for drawCabinet/drawViewportBackground to paint into,
+ * rather than showing as bare DOM behind it), then fits a reelsCount x rowsCount grid of square
+ * cells into that box preserving aspect ratio, centered within a small margin.
  * @param {number} parentWidth - CSS pixels.
  * @param {number} parentHeight - CSS pixels.
  * @param {number} dpr - devicePixelRatio, for sizing the canvas's backing buffer.
@@ -16,16 +18,8 @@
  *   cellSize: number, reelsWidth: number, reelsHeight: number, reelsX: number, reelsY: number }}
  */
 export function computeGridLayout(parentWidth, parentHeight, dpr, reelsCount, rowsCount, marginXFrac = 0.05, marginYFrac = 0.08) {
-  const targetAspect =
-    (reelsCount * (1 - 2 * marginYFrac)) /
-    (rowsCount * (1 - 2 * marginXFrac));
-
-  let cssWidth = parentWidth;
-  let cssHeight = parentWidth / targetAspect;
-  if (cssHeight > parentHeight) {
-    cssHeight = parentHeight;
-    cssWidth = parentHeight * targetAspect;
-  }
+  const cssWidth = parentWidth;
+  const cssHeight = parentHeight;
 
   const marginX = cssWidth * marginXFrac;
   const marginY = cssHeight * marginYFrac;

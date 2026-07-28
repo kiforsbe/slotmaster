@@ -38,6 +38,8 @@ const DEFAULT_THEME = {
   backdropOuter: '#07070b',
   outline: '#d4af37',
   outlineGlow: 10,
+  outlineWidth: 4,
+  outlineGlowIntensity: 1,
   frame: '#2d2510',
   gridLines: 'rgba(212, 175, 55, 0.3)',
   loadingBackground: '#0f0f13',
@@ -65,7 +67,13 @@ export class SlotRenderer {
     ctx.shadowBlur = 0;
   }
 
-  drawCabinet(ctx, layout, theme = {}) {
+  // `skipBackdropFill`: the radial-gradient wash below and drawViewportBackground (see its own
+  // doc) both fill the same area behind the reels - when a game configures a real
+  // viewportBackground, that wash would just opaquely paint over it every frame.
+  // The outline/glow itself is NOT drawn here - see drawCabinetGlow below for why it has to be
+  // drawn later, after drawGridBorders.
+  drawCabinet(ctx, layout, theme = {}, { skipBackdropFill = false } = {}) {
+    if (skipBackdropFill) return;
     const t = { ...DEFAULT_THEME, ...theme };
     const { reelsX: rx, reelsY: ry, reelsWidth: rw, reelsHeight: rh } = layout;
 
@@ -78,13 +86,79 @@ export class SlotRenderer {
 
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, rx * 2 + rw, ry * 2 + rh);
+  }
+
+  // The reels' own glow border. By default drawn LAST (see _drawLine's/_drawCascade's own
+  // callers), after drawGridBorders' `frame` stroke and grid lines, not alongside drawCabinet's
+  // backdrop fill above - drawGridBorders' frame stroke sits at almost the exact same radius as
+  // this one (rx,ry,rw,rh vs this method's own inset rect, only a couple px apart), so drawing
+  // the glow first let the later, wider `frame` stroke paint straight over it, silently erasing
+  // it every frame. It only went unnoticed because the old backdrop wash was dark enough that a
+  // missing glow line didn't stand out - a bright/busy viewportBackground made it obvious.
+  // `theme.outlineBehindSymbols` (default false/in-front) flips this: true calls this right after
+  // drawCabinet instead, before the reels are drawn at all, so the glow sits under the grid/
+  // symbols rather than over them - a game whose grid isn't fully opaque up to its own edge (or
+  // that just wants the glow to read as ambient light behind the reels rather than a frame in
+  // front of them) can pick that look instead.
+  drawCabinetGlow(ctx, layout, theme = {}) {
+    const t = { ...DEFAULT_THEME, ...theme };
+    const { reelsX: rx, reelsY: ry, reelsWidth: rw, reelsHeight: rh } = layout;
+
+    // ctx.shadowBlur on a thin stroke has very little rendered "ink" to diffuse - even a large
+    // blur radius stays faint, so the crisp strokes underneath visually dominate and it reads as
+    // a hard line, not a glow. ctx.filter's actual gaussian blur operates on the rendered pixels
+    // themselves instead, which produces a real soft spread. Each layer below is drawn at
+    // increasing physical thickness (more source "ink") and increasing blur (more spread),
+    // building up a true falloff the way a neon sign's glow actually looks; the final pass has no
+    // filter at all, so the core line stays crisp.
+    // Inset scales with outlineWidth (half of it, same as the old fixed "2" was half of the old
+    // fixed lineWidth 4) so the stroke stays centered on the reels' own edge at any width instead
+    // of drifting inward/outward as outlineWidth changes.
+    const inset = t.outlineWidth / 2;
+    const glowRect = [rx - inset, ry - inset, rw + inset * 2, rh + inset * 2];
+
+    ctx.save();
+    // The blur layers' visual spread reaches well past outlineWidth/outlineGlow's own numbers
+    // (a gaussian blur's footprint is several times its blur radius) - without this, that inward
+    // bleed covers the outermost ring of symbols, in front-of-grid mode as much as behind-it
+    // mode (drawn behind still bleeds over the grid's own margin before the animator's symbols
+    // paint over it, which does nothing for the reels' own inner cells). Punching the reels' own
+    // rect out of the clip (evenodd: outer canvas rect + inner reels rect) means the glow can only
+    // ever be visible in the margin OUTSIDE the reels - however wide the blur gets, it's masked
+    // the instant it would cross into grid territory.
+    ctx.beginPath();
+    ctx.rect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.rect(rx, ry, rw, rh);
+    ctx.clip('evenodd');
 
     ctx.strokeStyle = t.outline;
-    ctx.lineWidth = 4;
-    ctx.shadowColor = t.outline;
-    ctx.shadowBlur = t.outlineGlow;
-    ctx.strokeRect(rx - 2, ry - 2, rw + 4, rh + 4);
-    ctx.shadowBlur = 0;
+    // outlineGlowIntensity independently scales how OPAQUE/saturated the glow reads, separate
+    // from outlineGlow (spread) and outlineWidth (thickness) - a busy or similarly-hued backdrop
+    // (a pink outline over a pink-toned viewportBackground image, say) needs more of THIS to
+    // still read as a glow at all, not more blur or width. A single pass's opacity caps at 1
+    // (globalAlpha can't exceed that), so >1 repeats each layer's full-alpha pass that many times
+    // instead - normal alpha-over compositing stacks each repeat on the last, building up
+    // brightness a single pass structurally cannot reach. <1 just fades the one pass, same as
+    // before.
+    const passes = Math.max(1, Math.ceil(t.outlineGlowIntensity));
+    const perPassScale = t.outlineGlowIntensity / passes;
+    [
+      { blurPx: t.outlineGlow * 2, width: t.outlineWidth * 5, alpha: 0.5 },
+      { blurPx: t.outlineGlow * 1.2, width: t.outlineWidth * 3, alpha: 0.75 },
+      { blurPx: t.outlineGlow * 0.5, width: t.outlineWidth * 1.75, alpha: 1 },
+    ].forEach(layer => {
+      ctx.filter = `blur(${layer.blurPx}px)`;
+      ctx.lineWidth = layer.width;
+      for (let i = 0; i < passes; i++) {
+        ctx.globalAlpha = Math.min(1, layer.alpha * perPassScale);
+        ctx.strokeRect(...glowRect);
+      }
+    });
+    ctx.filter = 'none';
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = t.outlineWidth;
+    ctx.strokeRect(...glowRect);
+    ctx.restore();
   }
 
   drawReelsBackground(ctx, layout, reelsCount) {
@@ -380,24 +454,16 @@ export class SlotRenderer {
     ctx.drawImage(noiseCanvas, layout.reelsX, layout.reelsY);
   }
 
-  // Playfield background: a generated noise texture ('noise' type - buildPlayfieldNoise/
-  // drawPlayfieldNoise above, cached per size) or a static image ('image' type, cached per src),
-  // stretched to fill the reels area. Ported from CascadeEngine.js's/SlotEngine.js's own
-  // _renderPlayfieldBackground()/renderPlayfieldBackground() - added to both engines after this
-  // refactor's worktree branched, so this is a forward-port, not an extraction. The two engines
-  // never agreed on where a game passes this (cascade: config.playfield.background, replacing
-  // its older config.playfield.noise; line-pay: config.background, top-level) - callers below
-  // pass whichever their own engine family uses, this method itself doesn't care.
-  // Full-viewport background: same descriptor shape as drawPlayfieldBackground above (color/
-  // noise/image), but stretched across the whole canvas rather than just the reels rect - drawn
-  // first, so drawCabinet/drawReelsBackground/everything else layers on top of it same as before.
+  // Full-viewport background: same descriptor shape as drawPlayfieldBackground below (color/
+  // noise/image), but covering the whole canvas rather than just the reels rect - drawn first,
+  // so drawCabinet/drawReelsBackground/everything else layers on top of it same as before.
   // Two ways to give the viewport a background, picked per game by whichever's more convenient:
   //   - `{ type: 'color' | 'noise' | 'image', ... }` paints it directly into the canvas here.
   //   - omit config.viewportBackground entirely (or pass `{ type: 'css' }`) and this draws
   //     nothing - the canvas is already cleared to transparent this frame (see _drawLine's/
-  //     _drawCascade's own ctx.clearRect call above), so a CSS `background` set on `.canvas-frame`
-  //     (the div CoreSlotEngine.resize() now sizes to match the canvas exactly - see its own doc)
-  //     shows through pixel-for-pixel instead.
+  //     _drawCascade's own ctx.clearRect call above), so a CSS `background` set on `.game-viewport`
+  //     (which GridLayout now sizes the canvas to fill exactly - see its own doc) shows through
+  //     pixel-for-pixel instead.
   drawViewportBackground(ctx, canvasWidth, canvasHeight, background) {
     if (!background || background.type === 'css' || background.type === 'transparent') return;
     if (background.type === 'color') {
@@ -416,13 +482,38 @@ export class SlotRenderer {
         this._viewportBackgroundImage.src = background.image;
         this._viewportBackgroundImageSrc = background.image;
       }
-      if (this._viewportBackgroundImage) ctx.drawImage(this._viewportBackgroundImage, 0, 0, canvasWidth, canvasHeight);
+      const img = this._viewportBackgroundImage;
+      // "Cover" fit, not stretch: scale uniformly so the image's own aspect ratio is preserved
+      // and it fills canvasWidth x canvasHeight completely, cropping whatever overflows on the
+      // shorter axis instead of distorting a photographic background to the canvas's own shape.
+      if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+        const scale = Math.max(canvasWidth / img.naturalWidth, canvasHeight / img.naturalHeight);
+        const drawWidth = img.naturalWidth * scale;
+        const drawHeight = img.naturalHeight * scale;
+        ctx.drawImage(img, (canvasWidth - drawWidth) / 2, (canvasHeight - drawHeight) / 2, drawWidth, drawHeight);
+      }
     }
   }
 
+  // Playfield background: a flat/alpha color ('color' type - e.g. a translucent hex8 or rgba()
+  // wash, drawn UNDER drawReelsBackground's own fixed rgba(10,10,15,0.85) tint and everything
+  // else within the same reels-rect clip, so it blends with - and is deliberately never fully
+  // hidden by - whatever's beneath it (drawCabinet's backdrop, or drawViewportBackground when a
+  // game sets one), a generated noise texture ('noise' type - buildPlayfieldNoise/
+  // drawPlayfieldNoise above, cached per size), or a static image ('image' type, cached per src),
+  // all stretched to fill just the reels area (not the full canvas - see drawViewportBackground
+  // above for that). Read from the single top-level `config.playfieldBackground` - see
+  // Read from `config.playfield.background` - see _drawLine's/_drawCascade's own callers - the
+  // same key for both a line-pay and a cascade game.
+  // Ported from CascadeEngine.js's/SlotEngine.js's own _renderPlayfieldBackground()/
+  // renderPlayfieldBackground() - added to both engines after this refactor's worktree branched,
+  // so this is a forward-port, not an extraction.
   drawPlayfieldBackground(ctx, layout, background) {
     if (!background) return;
-    if (background.type === 'noise') {
+    if (background.type === 'color') {
+      ctx.fillStyle = background.color;
+      ctx.fillRect(layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
+    } else if (background.type === 'noise') {
       if (!this._noiseCanvas || this._noiseCanvasW !== layout.reelsWidth || this._noiseCanvasH !== layout.reelsHeight) {
         this._noiseCanvas = this.buildPlayfieldNoise(layout.reelsWidth, layout.reelsHeight, background);
         this._noiseCanvasW = layout.reelsWidth;
@@ -715,14 +806,15 @@ export class SlotRenderer {
     }
 
     const layout = engine.layout;
-    this.drawCabinet(ctx, layout, theme);
+    this.drawCabinet(ctx, layout, theme, { skipBackdropFill: !!engine.config.viewportBackground });
+    if (theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
 
     ctx.save();
     ctx.beginPath();
     ctx.rect(layout.reelsX, layout.reelsY, layout.reelsWidth, layout.reelsHeight);
     ctx.clip();
 
-    this.drawPlayfieldBackground(ctx, layout, engine.config.background);
+    this.drawPlayfieldBackground(ctx, layout, theme.background);
     this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
     if (engine.animator?.reels) {
       this.drawReelsSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.animator.reels);
@@ -737,6 +829,7 @@ export class SlotRenderer {
     ctx.restore();
 
     this.drawGridBorders(ctx, layout, engine.config.rowsCount, engine.config.reelsCount, theme);
+    if (!theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
     this.drawWinEffects(
       ctx, engine.state,
       { winData: engine.winData, expandingWinData: engine.expandingWinData, winCycleIndex: engine.winCycleIndex, activeWinLineIndex: engine.activeWinLineIndex },
@@ -757,7 +850,8 @@ export class SlotRenderer {
     }
 
     const layout = engine.layout;
-    this.drawCabinet(ctx, layout, theme);
+    this.drawCabinet(ctx, layout, theme, { skipBackdropFill: !!engine.config.viewportBackground });
+    if (theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
 
     ctx.save();
     ctx.beginPath();
@@ -795,6 +889,7 @@ export class SlotRenderer {
     ctx.restore();
 
     this.drawGridBorders(ctx, layout, engine.config.rowsCount, engine.config.reelsCount, theme);
+    if (!theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
     this.drawWinLine(ctx, { state: engine.state, currentClusterWins: animator?.currentClusterWins, currentClusterIndex: animator?.currentClusterIndex }, layout, engine.config.paylines, engine.config.reelsCount);
     engine.particleSystem?.render(ctx);
     if (animator?.activePopups) {
