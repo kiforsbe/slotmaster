@@ -117,6 +117,11 @@ export class CoreSlotEngine {
   init() {
     this.setupResize();
     this.loadAssets();
+    // Decorative-only, not a real spin: matches SlotEngine.js's/CascadeEngine.js's own eager
+    // initial-fill call from their constructor-invoked init(), so the game never shows a blank
+    // playfield before the player's first spin. Optional - an animator that has nothing
+    // decorative to show (or is under test with a stub) simply skips this.
+    this.animator?.showIdle?.(this);
     this.animate();
   }
 

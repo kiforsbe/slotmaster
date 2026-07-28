@@ -13,6 +13,8 @@
 // (engine.animator.grid, not engine.grid) because it tracks in-progress fall/clear
 // interpolation, not just the final resolved position. Mirrors ReelScrollAnimator owning
 // `this.reels` separately from `engine.grid` for the same reason.
+import { applyCascade } from '../../math/CascadeMath.js';
+
 const CLEAR_VARIANTS = ['scaleFade', 'stretch', 'jump', 'spin'];
 
 export class CascadeDropAnimator {
@@ -32,6 +34,25 @@ export class CascadeDropAnimator {
     this.currentClearPositions = [];
     this.currentClearVariants = new Map();
     this.activePopups = [];
+  }
+
+  // Populates a decorative, non-winning-evaluated grid before any real spin has happened, so
+  // the game never shows a blank playfield on load - called once from CoreSlotEngine.init().
+  // Ported from CascadeEngine.js's own _fillInitialGrid: uses a throwaway cursor per column
+  // (not the real seeded one resolveCascadeSequence builds for an actual spin), so this never
+  // consumes/desyncs any spin's own randomness - the first real spin() still treats this as an
+  // "existing grid" and animates it falling out first, same as any other spin's leftover grid.
+  showIdle(engine) {
+    if (this.grid || !engine.config.reelStrips.length) return;
+    const { reelStrips, reelsCount, rowsCount } = engine.config;
+    const cursorStateByColumn = reelStrips.map(strip => ({ index: Math.floor(Math.random() * strip.length) }));
+    const emptyGrid = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(null));
+    const allCleared = [];
+    for (let col = 0; col < reelsCount; col++) for (let row = 0; row < rowsCount; row++) allCleared.push([col, row]);
+
+    const { grid } = applyCascade(emptyGrid, cursorStateByColumn, reelStrips, allCleared);
+    this.grid = grid;
+    this.cellOffsets = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(0));
   }
 
   _rampSpeed(baseSpeed, localElapsedMs, rampDurationMs) {

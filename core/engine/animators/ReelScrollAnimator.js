@@ -46,6 +46,14 @@ export class ReelScrollAnimator {
     return strip[Math.floor(Math.random() * strip.length)];
   }
 
+  // Populates decorative idle reels before any real spin has happened, so the game never shows
+  // a blank playfield on load - called once from CoreSlotEngine.init(). _ensureReels already
+  // builds reels with 'idle' state/zero offset, matching SlotEngine.js's own eager setupReels()
+  // call from its constructor-invoked init().
+  showIdle(engine) {
+    this._ensureReels(engine);
+  }
+
   playEntrance(engine, step, onDone) {
     this._ensureReels(engine);
 
