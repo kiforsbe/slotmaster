@@ -1,5 +1,10 @@
 // Game coordinator for Mayan Tumble - a 5x3 payline-based cascading slot.
-import { CascadeEngine } from '../../core/CascadeEngine.js';
+import { CoreSlotEngine } from '../../core/engine/CoreSlotEngine.js';
+import { CascadeDropAnimator } from '../../core/engine/animators/CascadeDropAnimator.js';
+import { SlotRenderer } from '../../core/rendering/SlotRenderer.js';
+import { ParticleSystem } from '../../core/rendering/ParticleSystem.js';
+import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
+import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWins } from '../../core/math/SlotMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
@@ -248,7 +253,16 @@ async function initGame() {
     return;
   }
 
-  engine = new CascadeEngine(canvas, {
+  const renderer = new SlotRenderer();
+  const particleSystem = new ParticleSystem();
+  engine = new CoreSlotEngine(canvas, {
+    mechanic: CascadeSpinMechanic,
+    animator: new CascadeDropAnimator(renderer, particleSystem),
+    renderer,
+    particleSystem,
+    spinLogRecorder: new SpinLogRecorder({ betAmount: BET_AMOUNT, scatterSymbol: 'gold' }),
+    audioController: new AudioController(),
+
     reelsCount: REELS_COUNT,
     rowsCount: ROWS_COUNT,
     paytable: PAYTABLE,
@@ -281,6 +295,7 @@ async function initGame() {
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo),
   });
+  engine.init();
 
   updateUI();
   setupUIHandlers();
