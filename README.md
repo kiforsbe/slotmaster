@@ -40,6 +40,13 @@ ES modules need to be served over HTTP (`file://` won't work). On Windows:
 This starts a static server (`npx serve`) on a random free port and prints the
 URL to open.
 
+### Publishing on GitHub Pages
+
+The repository includes a manual-only workflow at `.github/workflows/deploy-pages.yml`.
+To publish the games, enable **Settings → Pages → Source: GitHub Actions**, then open
+the **Actions** tab, select **Deploy to GitHub Pages**, and choose **Run workflow**.
+The deployed site URL is shown on the completed workflow run.
+
 ## Running the tests
 
 ```bash
