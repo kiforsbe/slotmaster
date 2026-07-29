@@ -75,6 +75,7 @@ export class CoreSlotEngine {
     this.freeSpinsTotal = 0;
     this.freeSpinsAccumulatedWin = 0;
     this.freeSpinsModeState = null;
+    this.freeSpinsIntroPending = false;
 
     this.spinSequence = null;
     this.stepIndex = 0;
@@ -212,6 +213,9 @@ export class CoreSlotEngine {
   }
 
   requestSpin() {
+    // A scatter-triggered intro owns the game until the player has explicitly entered
+    // free spins. Do not queue a click from the still-visible base-game controls.
+    if (this.freeSpinsIntroPending || this.state === 'free_spins_intro') return;
     if (this.state !== 'idle' && this.state !== 'showing_wins' && this.state !== 'game_over') {
       this.pendingSpinRequest = true;
       return;
@@ -479,6 +483,11 @@ export class CoreSlotEngine {
       this.autoPlayTimer = null;
     }
 
+    // The trigger callback runs before the current spin finishes its bookkeeping. The
+    // callback may put the engine in this state while autoplay is still enabled; never
+    // schedule another base spin while the free-spins intro modal is waiting for entry.
+    if (this.freeSpinsIntroPending || this.state === 'free_spins_intro') return;
+
     if (this.inFreeSpins) {
       this.autoPlayTimer = setTimeout(() => {
         this.spinFreeSpins();
@@ -502,10 +511,22 @@ export class CoreSlotEngine {
   }
 
   enterFreeSpinsIntro() {
+    this.freeSpinsIntroPending = true;
+    this.pendingSpinRequest = false;
+    if (this.autoPlayTimer) {
+      clearTimeout(this.autoPlayTimer);
+      this.autoPlayTimer = null;
+    }
     this._setState('free_spins_intro');
   }
 
   enterFreeSpins(spinsCount, expandingSymbol = null) {
+    this.freeSpinsIntroPending = false;
+    this.pendingSpinRequest = false;
+    if (this.autoPlayTimer) {
+      clearTimeout(this.autoPlayTimer);
+      this.autoPlayTimer = null;
+    }
     this.inFreeSpins = true;
     this.freeSpinsRemaining = spinsCount;
     this.freeSpinsTotal = spinsCount;
@@ -530,6 +551,7 @@ export class CoreSlotEngine {
   // summary modal; resetting it here would zero it out before that handler ever runs.
   // enterFreeSpins() is what resets these fields, at the start of the *next* round.
   exitFreeSpins() {
+    this.freeSpinsIntroPending = false;
     this.inFreeSpins = false;
     this.config.expandingSymbol = null;
     if (this.freeSpinsMode) {

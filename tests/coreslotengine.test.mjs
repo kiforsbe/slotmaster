@@ -128,6 +128,33 @@ test('enterFreeSpins sets inFreeSpins and the spins counters; exitFreeSpins clea
   assert.equal(engine.freeSpinsRemaining, 14);
 });
 
+test('free-spins intro pauses autoplay and ignores spin requests until entry', () => {
+  const engine = new CoreSlotEngine(stubCanvas(), {
+    mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+    animator: noAnimation(),
+    renderer: { draw: () => {} },
+  });
+
+  engine.autoPlay = true;
+  engine.pendingSpinRequest = true;
+  engine.autoPlayTimer = setTimeout(() => {}, 60_000);
+
+  engine.enterFreeSpinsIntro();
+
+  assert.equal(engine.state, 'free_spins_intro');
+  assert.equal(engine.pendingSpinRequest, false);
+  assert.equal(engine.autoPlayTimer, null);
+
+  // The triggering spin may finish its own bookkeeping and move the visible state back to
+  // idle/showing_wins while the intro modal is still open. The persistent lock must survive that.
+  engine._setState('idle');
+  engine.handleAutoPlay();
+  assert.equal(engine.autoPlayTimer, null);
+
+  engine.requestSpin();
+  assert.equal(engine.pendingSpinRequest, false);
+});
+
 test('spin() calls audioController.onSpinStart and onWin when configured', async () => {
   const calls = [];
   const engine = new CoreSlotEngine(stubCanvas(), {
