@@ -343,6 +343,10 @@ async function initGame() {
     paytable: PAYTABLE,
     reelStrips: REEL_STRIPS,
     paylines: PAYLINES,
+    // All paylines are evaluated against the same settled grid. Show their paths one at a time,
+    // then explode the union of their winning cells together before the next tumble.
+    cascadeWinClearMode: 'all-at-once',
+    cascadeWinPreviewDurationMs: 500,
     // Stone and jungle rather than the engine's default candy pink-on-purple, which is Candy
     // Frenzy's look and was showing through under this game's art. No ruled cells: this is a
     // payline game, so a win is a path across the grid rather than a shape made of cells, and the

@@ -218,6 +218,11 @@ export class CascadeDropAnimator {
       return;
     }
 
+    if (engine.config.cascadeWinClearMode === 'all-at-once') {
+      this._playAllAtOnceWinTransition(engine, prevStep, nextStep, onDone);
+      return;
+    }
+
     // A fresh copy, not prevStep.grid itself - each cluster's cells get nulled out below as its
     // poof finishes, and prevStep.grid must stay untouched (SpinLogRecorder/replay reads the
     // original resolved grid for every step after the spin completes, not this animator's
@@ -275,6 +280,83 @@ export class CascadeDropAnimator {
     };
 
     clearNextCluster();
+  }
+
+  // Payline cascades show each winning path in turn, but all of the lines belong to one
+  // evaluation of the same grid. Keep that grid intact while the paths are previewed, then
+  // clear the union of every winning position in one shared explode phase. Cluster games keep
+  // the branch above, where each cluster gets its own visual clear.
+  _playAllAtOnceWinTransition(engine, prevStep, nextStep, onDone) {
+    this.grid = prevStep.grid.map(col => col.slice());
+
+    const wins = prevStep.clusterWins;
+    const lineWins = wins.filter(win => win.lineIndex != null);
+    this.currentClusterWins = lineWins;
+    this.currentClusterIndex = 0;
+
+    const previewDuration = engine.config.cascadeWinPreviewDurationMs ?? 500;
+    const previewStartTime = Date.now();
+
+    const beginCombinedClear = () => {
+      this.currentClusterWins = null;
+      this.currentClusterIndex = -1;
+
+      const clearPositions = [];
+      wins.forEach(win => {
+        win.winningPositions.forEach(position => {
+          if (!clearPositions.some(([col, row]) => col === position[0] && row === position[1])) {
+            clearPositions.push(position);
+          }
+        });
+      });
+
+      const clearDuration = engine.turboMode ? this.turboClearDurationMs : this.normalClearDurationMs;
+      this._clearStartTime = Date.now();
+      this.currentClearPositions = clearPositions;
+      this.currentClearVariants = new Map();
+      clearPositions.forEach(([col, row]) => {
+        this.currentClearVariants.set(`${col},${row}`, {
+          variant: CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
+          spinDirection: Math.random() < 0.5 ? -1 : 1,
+        });
+      });
+
+      this._spawnClearParticles(engine, clearPositions);
+      this._spawnClusterWinPopups(engine, wins);
+      wins.forEach(win => engine.audioController?.onClusterWin?.(win.payout));
+      if (engine.inFreeSpins && engine.freeSpinsMode) {
+        wins.forEach(win => engine.freeSpinsMode.onClusterCleared(win, engine.freeSpinsModeState, engine));
+      }
+
+      const waitForClear = () => {
+        if (Date.now() - this._clearStartTime < clearDuration) {
+          requestAnimationFrame(waitForClear);
+          return;
+        }
+        clearPositions.forEach(([col, row]) => {
+          this.grid[col][row] = null;
+        });
+        this.currentClearPositions = [];
+        this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone);
+      };
+      requestAnimationFrame(waitForClear);
+    };
+
+    if (lineWins.length === 0) {
+      beginCombinedClear();
+      return;
+    }
+
+    const showNextLine = () => {
+      const lineIndex = Math.floor((Date.now() - previewStartTime) / previewDuration);
+      if (lineIndex >= lineWins.length) {
+        beginCombinedClear();
+        return;
+      }
+      this.currentClusterIndex = lineIndex;
+      requestAnimationFrame(showNextLine);
+    };
+    requestAnimationFrame(showNextLine);
   }
 
   _spawnClearParticles(engine, positions) {
