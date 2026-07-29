@@ -224,7 +224,6 @@ export class SlotRenderer {
         const finalY = reelsY + (r * symbolHeight);
 
         if (finalY + (symbolHeight / 2) >= animY && finalY + (symbolHeight / 2) <= animY + animH) {
-          const margin = symbolWidth * 0.08;
           const scale = 0.5 + (0.5 * reelProgress);
 
           ctx.save();
@@ -234,8 +233,8 @@ export class SlotRenderer {
           ctx.drawImage(
             spritesheet,
             tile.x, tile.y, tile.w, tile.h,
-            -symbolWidth / 2 + margin, -symbolHeight / 2 + margin,
-            symbolWidth - (2 * margin), symbolHeight - (2 * margin),
+            -symbolWidth / 2, -symbolHeight / 2,
+            symbolWidth, symbolHeight,
           );
 
           ctx.restore();

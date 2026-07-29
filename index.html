@@ -3,186 +3,460 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SlotMaster Engine Portal</title>
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-  
+  <meta name="description" content="Choose a themed SlotMaster browser game and start spinning instantly.">
+  <title>SlotMaster | Pick a game</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
   <style>
     :root {
-      --gold: #d4af37;
-      --gold-glow: rgba(212, 175, 55, 0.4);
-      --obsidian: #050508;
-      --panel: #0e0d16;
-      --text: #e0e0ea;
+      --ink: #08070d;
+      --panel: rgba(18, 16, 29, 0.88);
+      --panel-solid: #15121f;
+      --line: rgba(255, 255, 255, 0.12);
+      --muted: #aaa7bb;
+      --text: #f8f6ff;
+      --gold: #f1c84b;
+      --gold-soft: #ffe89a;
+      --pink: #ef69bd;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
 
     body {
-      background-color: var(--obsidian);
+      margin: 0;
+      min-width: 320px;
       color: var(--text);
+      background:
+        radial-gradient(circle at 14% 4%, rgba(119, 66, 146, 0.3), transparent 30rem),
+        radial-gradient(circle at 92% 20%, rgba(205, 132, 39, 0.15), transparent 28rem),
+        var(--ink);
       font-family: 'Outfit', sans-serif;
-      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    a { color: inherit; }
+
+    .skip-link {
+      position: absolute;
+      top: -4rem;
+      left: 1rem;
+      z-index: 10;
+      padding: .7rem 1rem;
+      color: var(--ink);
+      background: var(--gold);
+      border-radius: .5rem;
+      font-weight: 700;
+    }
+
+    .skip-link:focus { top: 1rem; }
+
+    .shell {
+      width: min(1180px, calc(100% - 2rem));
+      margin: 0 auto;
+    }
+
+    .site-header {
       display: flex;
-      flex-direction: column;
       align-items: center;
-      justify-content: center;
-      background: radial-gradient(circle at center, #1b1725 0%, #030305 100%);
-      padding: 20px;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.4rem 0;
     }
 
-    .portal-card {
-      width: 100%;
-      max-width: 720px;
-      background: linear-gradient(135deg, var(--panel) 0%, #08080c 100%);
-      border: 3px solid var(--gold);
-      border-radius: 20px;
-      padding: 40px;
-      box-shadow: 0 15px 40px rgba(0,0,0,0.8), 0 0 25px var(--gold-glow);
-      text-align: center;
-      animation: fadeIn 1s ease-out;
+    .brand {
+      color: var(--text);
+      font-family: 'Cinzel', serif;
+      font-size: clamp(1.2rem, 2vw, 1.55rem);
+      font-weight: 900;
+      letter-spacing: .14em;
+      text-decoration: none;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
+    .brand span { color: var(--gold); }
+
+    .header-note {
+      color: var(--muted);
+      font-size: .86rem;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr);
+      align-items: end;
+      gap: 3rem;
+      padding: clamp(3rem, 9vw, 7rem) 0 clamp(3rem, 7vw, 5.5rem);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      margin: 0 0 1.1rem;
+      color: var(--gold-soft);
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 2rem;
+      height: 1px;
+      background: var(--gold);
+      content: '';
     }
 
     h1 {
+      max-width: 750px;
+      margin: 0;
       font-family: 'Cinzel', serif;
-      font-size: 42px;
+      font-size: clamp(2.6rem, 7vw, 5.8rem);
       font-weight: 900;
-      color: #fff;
-      text-shadow: 0 0 15px var(--gold), 0 0 30px var(--gold-glow);
-      letter-spacing: 3px;
-      margin-bottom: 20px;
+      letter-spacing: -.035em;
+      line-height: 1.02;
+      text-wrap: balance;
     }
 
     h1 span {
       color: var(--gold);
+      text-shadow: 0 0 28px rgba(241, 200, 75, .3);
     }
 
-    p.subtitle {
-      font-size: 18px;
-      color: #b0b0cf;
-      margin-bottom: 30px;
-      font-weight: 300;
+    .hero-copy {
+      max-width: 620px;
+      margin: 1.4rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1rem, 1.6vw, 1.2rem);
     }
 
-    .features-list {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      text-align: left;
-      margin: 30px 0;
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .8rem;
+      margin-top: 2rem;
     }
 
-    .feature-item {
-      background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(212, 175, 55, 0.2);
-      padding: 16px;
-      border-radius: 10px;
-      transition: all 0.3s;
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 3rem;
+      padding: .75rem 1.15rem;
+      border: 1px solid var(--gold);
+      border-radius: .65rem;
+      background: var(--gold);
+      color: #171108;
+      font-weight: 800;
+      text-decoration: none;
+      transition: transform .2s ease, box-shadow .2s ease, background .2s ease;
     }
 
-    .feature-item:hover {
-      background: rgba(212, 175, 55, 0.05);
-      border-color: var(--gold);
+    .button:hover {
       transform: translateY(-2px);
+      box-shadow: 0 10px 28px rgba(241, 200, 75, .23);
     }
 
-    .feature-title {
-      font-weight: 600;
-      color: var(--gold);
-      font-size: 16px;
-      margin-bottom: 6px;
+    .button.secondary {
+      border-color: var(--line);
+      background: rgba(255, 255, 255, .04);
+      color: var(--text);
+    }
+
+    .hero-panel {
+      padding: 1.4rem;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: linear-gradient(145deg, rgba(255,255,255,.08), rgba(255,255,255,.025));
+      box-shadow: var(--shadow);
+    }
+
+    .hero-panel strong {
+      display: block;
+      margin-bottom: .8rem;
+      color: var(--gold-soft);
+      font-size: .78rem;
+      letter-spacing: .15em;
+      text-transform: uppercase;
+    }
+
+    .hero-panel p { margin: 0; color: var(--muted); }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: .7rem;
+      margin-top: 1.3rem;
+    }
+
+    .stat {
+      padding-top: .8rem;
+      border-top: 1px solid var(--line);
+    }
+
+    .stat b { display: block; color: var(--text); font-size: 1.2rem; }
+    .stat small { color: var(--muted); font-size: .72rem; }
+
+    .library-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.2rem;
+    }
+
+    h2 {
+      margin: 0;
+      font-family: 'Cinzel', serif;
+      font-size: clamp(1.5rem, 3vw, 2.25rem);
+    }
+
+    .library-heading p { margin: 0; color: var(--muted); }
+
+    .game-grid {
+      display: grid;
+      grid-template-columns: repeat(6, 1fr);
+      gap: 1rem;
+      padding-bottom: 4rem;
+    }
+
+    .game-card {
+      display: flex;
+      grid-column: span 2;
+      flex-direction: column;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: var(--panel);
+      box-shadow: 0 12px 38px rgba(0,0,0,.25);
+      transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+    }
+
+    .game-card:nth-child(4) { grid-column: 2 / span 2; }
+
+    .game-card:hover {
+      transform: translateY(-5px);
+      border-color: rgba(241, 200, 75, .7);
+      box-shadow: 0 18px 44px rgba(0,0,0,.42);
+    }
+
+    .game-art {
+      position: relative;
+      aspect-ratio: 5 / 3;
+      overflow: hidden;
+      background: #09080d;
+    }
+
+    .game-art::after {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, transparent 55%, rgba(8,7,13,.78));
+      content: '';
+    }
+
+    .game-art img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      object-position: center;
+      transition: transform .35s ease;
+    }
+
+    .game-card:hover .game-art img { transform: scale(1.04); }
+
+    .game-tag {
+      position: absolute;
+      z-index: 1;
+      top: .8rem;
+      left: .8rem;
+      padding: .32rem .55rem;
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 999px;
+      background: rgba(8,7,13,.68);
+      color: var(--gold-soft);
+      font-size: .7rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .game-body {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      padding: 1.15rem;
+    }
+
+    .game-body h3 {
+      margin: 0;
+      font-family: 'Cinzel', serif;
+      font-size: 1.25rem;
+    }
+
+    .game-body p {
+      flex: 1;
+      margin: .45rem 0 1rem;
+      color: var(--muted);
+      font-size: .9rem;
+    }
+
+    .play-link {
       display: flex;
       align-items: center;
-      gap: 8px;
-    }
-
-    .feature-desc {
-      font-size: 13px;
-      color: #a0a0b8;
-      line-height: 1.4;
-    }
-
-    .btn-play {
-      display: inline-block;
-      background: var(--gold);
-      color: #000;
-      font-family: 'Cinzel', serif;
-      font-weight: 900;
-      font-size: 20px;
-      letter-spacing: 2px;
-      padding: 16px 40px;
-      border: none;
-      border-radius: 10px;
+      justify-content: space-between;
+      padding: .7rem .85rem;
+      border: 1px solid rgba(241, 200, 75, .45);
+      border-radius: .55rem;
+      color: var(--gold-soft);
+      font-size: .85rem;
+      font-weight: 800;
       text-decoration: none;
-      box-shadow: 0 4px 15px var(--gold-glow);
-      transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-      margin-top: 20px;
+      transition: background .2s ease, color .2s ease;
     }
 
-    .btn-play:hover {
-      transform: scale(1.06);
-      box-shadow: 0 8px 25px var(--gold);
-    }
+    .play-link::after { content: '→'; font-size: 1.1rem; }
+    .play-link:hover { background: var(--gold); color: #171108; }
 
-    .btn-play:active {
-      transform: scale(0.98);
+    :focus-visible {
+      outline: 3px solid var(--gold-soft);
+      outline-offset: 3px;
     }
 
     footer {
-      margin-top: 30px;
-      font-size: 12px;
-      color: #555;
+      padding: 1.3rem 0 2rem;
+      border-top: 1px solid var(--line);
+      color: #777387;
+      font-size: .82rem;
+      text-align: center;
+    }
+
+    @media (max-width: 800px) {
+      .hero { grid-template-columns: 1fr; gap: 2rem; }
+      .game-grid { grid-template-columns: repeat(2, 1fr); }
+      .game-card, .game-card:nth-child(4) { grid-column: auto; }
+    }
+
+    @media (max-width: 520px) {
+      .shell { width: min(100% - 1.25rem, 1180px); }
+      .site-header { align-items: flex-start; }
+      .header-note { display: none; }
+      .hero { padding-top: 3.5rem; }
+      .hero-actions .button { width: 100%; }
+      .game-grid { grid-template-columns: 1fr; }
+      .stats { gap: .5rem; }
+      .stat b { font-size: 1rem; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#games">Skip to games</a>
 
-  <div class="portal-card">
-    <h1>SLOT<span>MASTER</span></h1>
-    <p class="subtitle">Next-Gen WebGL & HTML5 Canvas Slot Machine Engine</p>
-    
-    <div style="border-bottom: 1px solid rgba(212,175,55,0.2); margin: 20px 0;"></div>
+  <div class="shell">
+    <header class="site-header">
+      <a class="brand" href="index.html">SLOT<span>MASTER</span></a>
+      <div class="header-note">Browser games · no install required</div>
+    </header>
 
-    <div class="features-list">
-      <div class="feature-item">
-        <div class="feature-title">🎰 Double-Buffered Canvas</div>
-        <div class="feature-desc">Sub-pixel reel physics, stop bounce springs, and dynamic vertical motion-blur rendering for physical feedback.</div>
-      </div>
-      <div class="feature-item">
-        <div class="feature-title">🔮 Specialized Free Spins</div>
-        <div class="feature-desc">Awarding Scatter modes, 3D interactive flipping book animations, and random expanding symbols with full line evaluation.</div>
-      </div>
-      <div class="feature-item">
-        <div class="feature-title">🎵 Web Audio Synthesizer</div>
-        <div class="feature-desc">Adaptive sound synthesizer engine producing reels hum, stops clicks, alarms, and a spooky Egyptian adventure melody loop.</div>
-      </div>
-      <div class="feature-item">
-        <div class="feature-title">🎨 Live Theme Swapping</div>
-        <div class="feature-desc">Load spritesheets and tiles layouts dynamically. Instantly toggle between flat, neon glow, or royal theme styles.</div>
-      </div>
-    </div>
+    <main>
+      <section class="hero" aria-labelledby="welcome-title">
+        <div>
+          <p class="eyebrow">Your next spin starts here</p>
+          <h1 id="welcome-title">Find your <span>lucky</span> machine.</h1>
+          <p class="hero-copy">Pick a world, press play, and explore five themed slot games built to run right in your browser.</p>
+          <div class="hero-actions">
+            <a class="button" href="#games">Browse the games</a>
+            <a class="button secondary" href="games/fruitmachine/">Quick play: Lucky Fruits</a>
+          </div>
+        </div>
 
-    <div style="display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;">
-      <a href="games/bookbookbook/index.html" class="btn-play">ENTER THE TEMPLE</a>
-      <a href="games/fruitmachine/index.html" class="btn-play">PLAY LUCKY FRUITS</a>
-      <a href="games/barfruits/index.html" class="btn-play">PLAY BAR FRUITS</a>
-      <a href="games/candyfrenzy/index.html" class="btn-play">PLAY CANDY FRENZY</a>
-      <a href="games/mayantumble/index.html" class="btn-play">PLAY MAYAN TUMBLE</a>
-    </div>
+        <aside class="hero-panel" aria-label="About SlotMaster">
+          <strong>Simple to start</strong>
+          <p>No account, download, or setup. Every game opens in one click and includes its own rules, sound, and bonus features.</p>
+          <div class="stats" aria-label="SlotMaster facts">
+            <div class="stat"><b>5</b><small>themed games</small></div>
+            <div class="stat"><b>100%</b><small>in-browser</small></div>
+            <div class="stat"><b>∞</b><small>free spins</small></div>
+          </div>
+        </aside>
+      </section>
 
-    <footer>
-      SlotMaster Engine Core v0.3.0 • Powered by HTML5 Canvas & Web Audio API
-    </footer>
+      <section id="games" aria-labelledby="games-title">
+        <div class="library-heading">
+          <div>
+            <p class="eyebrow">The game room</p>
+            <h2 id="games-title">Choose your adventure</h2>
+          </div>
+          <p>Each machine has a different mood.</p>
+        </div>
+
+        <div class="game-grid">
+          <article class="game-card">
+            <div class="game-art">
+              <span class="game-tag">Egyptian · free spins</span>
+              <img src="games/bookbookbook/screenshot.png" alt="Book of Book Book slot machine with Egyptian symbols" loading="lazy">
+            </div>
+            <div class="game-body">
+              <h3>Book of Book Book</h3>
+              <p>Enter an ancient temple for expanding symbols and book-triggered free spins.</p>
+              <a class="play-link" href="games/bookbookbook/">Enter the temple</a>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <span class="game-tag">Classic · quick play</span>
+              <img src="games/fruitmachine/screenshot.png" alt="Lucky Fruits classic fruit slot machine" loading="lazy">
+            </div>
+            <div class="game-body">
+              <h3>Lucky Fruits</h3>
+              <p>A bright, classic fruit machine with familiar symbols and a fast route to the spin.</p>
+              <a class="play-link" href="games/fruitmachine/">Play Lucky Fruits</a>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <span class="game-tag">Classic · free spins</span>
+              <img src="games/barfruits/screenshot.png" alt="Bar Fruits slot machine with bells, fruit, and BAR symbols" loading="lazy">
+            </div>
+            <div class="game-body">
+              <h3>Bar Fruits</h3>
+              <p>Classic bells, bars, and fruit with a star scatter bonus waiting in the reels.</p>
+              <a class="play-link" href="games/barfruits/">Play Bar Fruits</a>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <span class="game-tag">Candy · cascading</span>
+              <img src="games/candyfrenzy/screenshot.png" alt="Candy Frenzy colorful candy cascade slot machine" loading="lazy">
+            </div>
+            <div class="game-body">
+              <h3>Candy Frenzy</h3>
+              <p>Match clusters of candy through cascading wins, multipliers, and a sugary bonus round.</p>
+              <a class="play-link" href="games/candyfrenzy/">Play Candy Frenzy</a>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <span class="game-tag">Mayan · cascading</span>
+              <img src="games/mayantumble/screenshot.png" alt="Mayan Tumble stone-themed slot machine" loading="lazy">
+            </div>
+            <div class="game-body">
+              <h3>Mayan Tumble</h3>
+              <p>Follow the path to a golden temple with cascading reels and growing free-spin multipliers.</p>
+              <a class="play-link" href="games/mayantumble/">Play Mayan Tumble</a>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>SlotMaster · Canvas games and Web Audio, made to play in your browser.</footer>
   </div>
-
 </body>
 </html>
