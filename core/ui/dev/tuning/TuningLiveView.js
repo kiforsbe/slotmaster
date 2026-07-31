@@ -1,4 +1,4 @@
-import { symbolTypeColor, renderSymbolLabel } from './TuningReports.js';
+import { symbolTypeColor, renderSymbolLabel } from './TuningSymbolPresentation.js';
 // One symbol's gauge: a single horizontal track, scaled 0 -> reelMax (the highest frequency
 // value seen anywhere on this symbol's own reel - configured bounds, tested range, current, or
 // best value, across every symbol on that reel, not just this one) so every symbol's bar on a
@@ -115,4 +115,3 @@ export function renderLiveFrequencyTable(reelFrequencyTables, boundsByReel, test
   html += `</div>`;
   return html;
 }
-

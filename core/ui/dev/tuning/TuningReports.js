@@ -338,35 +338,6 @@ export function renderDiagnosisHtml({ validation = [], structuralHeadroom = null
   return sections.join('');
 }
 
-// Shared symbol-type -> color mapping, used anywhere a symbol name is listed next to others of
-// mixed type (the TUNE FREQUENCIES live/results tables) so type is visible at a glance without
-// needing a separate column or section per type. Deliberately distinct from the gauge's own
-// palette (configured/tested bands, current tick) so the two don't read as related.
-export function symbolTypeColor(type) {
-  switch (type) {
-    case 'scatter': return '#ffd700';
-    case 'wild': return '#c792ea';
-    case 'premium': return '#7ec8ff';
-    case 'regular': return '#eee';
-    default: return '#888';
-  }
-}
-
-// A symbol name span colored by its paytable type, with a title (hover) attribute spelling out
-// the friendly name and type explicitly for anyone who can't rely on color alone. `displayText`
-// defaults to the raw symbol key (compact, for the space-constrained live gauge table) but can
-// be overridden (e.g. to the friendly name) where there's room for it.
-export function renderSymbolLabel(symbol, paytable, displayText = symbol) {
-  const meta = paytable?.[symbol];
-  const type = meta?.type || 'other';
-  const friendlyName = meta?.friendlyName || symbol;
-  const color = symbolTypeColor(type);
-  const title = `${friendlyName} (${type})`;
-  return `<span title="${title}" style="color: ${color}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${displayText}</span>`;
-}
-
-
-
 function formatFrequencyForCopy(freq) {
   if (freq === 0) return '0';
   return Number(freq.toPrecision(4)).toString();
