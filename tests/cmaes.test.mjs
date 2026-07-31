@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { eigenSymmetric, cmaes } from '../core/CMAES.js';
+import { eigenSymmetric, cmaes } from '../core/tuning/CMAES.js';
 
 test('eigenSymmetric decomposes a symmetric matrix such that V * diag(eigenvalues) * V^T reconstructs it', () => {
   const matrix = [[4, 1, 0], [1, 3, 1], [0, 1, 2]];

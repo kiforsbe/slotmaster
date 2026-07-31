@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createTuneLogEntry, describeTuneEntryQuality, summarizeTuneLogEntry, tuneLogToJson,
-} from '../core/TuneLog.js';
+} from '../core/tuning/TuneLog.js';
 
 // A search reports one final answer and throws away every candidate it accepted on the way there -
 // several of which may be better for a purpose the loss function knows nothing about. "Best" means

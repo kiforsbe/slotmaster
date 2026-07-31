@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateSpins, tuneFrequencies, computeValueRanks } from '../core/SpinSimulator.js';
+import { simulateSpins } from '../core/simulation/SpinSimulator.js';
+import { tuneFrequencies } from '../core/tuning/FrequencyTuner.js';
+import { computeValueRanks } from '../core/tuning/Payouts.js';
 import { LineMechanic } from '../core/engine/mechanics/LineMechanic.js';
 import { CascadeSpinMechanic } from '../core/engine/mechanics/CascadeSpinMechanic.js';
 import { createMultiplierTilesMode } from '../core/engine/FreeSpinsModes.js';

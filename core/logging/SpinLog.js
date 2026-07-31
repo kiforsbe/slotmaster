@@ -1,6 +1,6 @@
 import { downloadTextFile } from '../io/FileIO.js';
 
-// Shared per-spin log entry construction, used by both core/SpinSimulator.js (a batch of
+// Shared per-spin log entry construction, used by both core/simulation/SpinSimulator.js (a batch of
 // synchronous simulated spins) and core/engine/SpinLogRecorder.js (real, animated interactive
 // play, called from CoreSlotEngine). The two build entries at different times relative to an
 // expanding win resolving - a simulated spin

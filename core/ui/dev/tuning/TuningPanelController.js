@@ -30,7 +30,7 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
   const inputs = {
     targetRtp: tuneContainer.querySelector('#tune-target-rtp'),
     rtpTolerancePct: tuneContainer.querySelector('#tune-rtp-tolerance'),
-    // Entered as "one bonus every N spins" and converted at the boundary - see core/TuningUnits.js
+    // Entered as "one bonus every N spins" and converted at the boundary - see core/tuning/Units.js
     // for why the panel and the library deliberately speak different units here.
     targetTriggerSpins: tuneContainer.querySelector('#tune-target-trigger-spins'),
     triggerRateTolerancePct: tuneContainer.querySelector('#tune-trigger-tolerance'),
@@ -80,7 +80,7 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
   const diagnosisEl = tuneContainer.querySelector('#tune-diagnosis');
   const diagnosis = { validation: [], structuralHeadroom: null, sensitivity: null, structuralRecommendation: null, lossPreview: null };
   // Every candidate the search accepted as its new best, kept rather than overwritten - see
-  // core/TuneLog.js for why the final answer alone is not enough.
+  // core/tuning/TuneLog.js for why the final answer alone is not enough.
   const tuneLog = [];
   const bestLogEl = tuneContainer.querySelector('#tune-best-log');
   const bestLogBtn = tuneContainer.querySelector('#tune-best-log-btn');
@@ -242,7 +242,7 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
     reelCoupling: inputs.reelCoupling.value,
     // Which denomination the weights above are in. The panel defaults to normalized (the library
     // to raw), because the named levels in the shape section are only meaningful against
-    // normalized penalties - see core/SpinSimulator.js's own penaltyNormalization doc.
+    // normalized penalties - see core/simulation/SpinSimulator.js's own penaltyNormalization doc.
     penaltyNormalization: inputs.penaltyNormalization.value,
     // Empty string means "No preference", which must reach the engine as null rather than as a
     // band nothing satisfies - the penalty is inert with no target, whatever its weight.
@@ -676,7 +676,7 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
         // Fired once, at the Phase 1 -> Phase 2 handover. Phase 1 finishing SHORT of the target
         // trigger rate is a normal outcome rather than a malfunction - the reachable trigger
         // rates form a coarse lattice, so the target can simply not exist (see bisect1D in
-        // core/SpinSimulator.js) - but without saying so here the log runs straight on into
+        // core/simulation/SpinSimulator.js) - but without saying so here the log runs straight on into
         // Phase 2's steps and reads as the phase quietly giving up. It also matters that this is
         // FINAL: Phase 2 excludes trigger symbols from its search entirely, so nothing later in
         // the run will revisit it.
@@ -1064,7 +1064,7 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
     // A trigger-rate target that no multiplier can reach is a fundamentally different problem
     // from one the search merely ran out of budget on, and it has a different fix - the trigger
     // rate moves in coarse jumps because generateReel rounds each symbol's share to a whole
-    // number of strip positions (see bisect1D's own doc in core/SpinSimulator.js), so the
+    // number of strip positions (see bisect1D's own doc in core/tuning/Optimizers.js), so the
     // reachable rates form a sparse lattice and the target can simply fall between two of them.
     // Spelling out the closest achievable rates either side turns an otherwise baffling
     // "did not converge" into an actionable choice: widen the tolerance, move the target onto a

@@ -7,7 +7,7 @@
  * and nothing in a converged tune would say so.
  *
  * Pure and simulation-free. It reads the round-shape figures `simulateSpins` already produced (see
- * `roundStats` in core/SpinSimulator.js) and turns them into sentences. Session outcomes are
+ * `roundStats` in core/simulation/SpinSimulator.js) and turns them into sentences. Session outcomes are
  * BOOTSTRAP RESAMPLED from the round histogram rather than simulated again - the rounds have
  * already been paid for once.
  *

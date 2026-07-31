@@ -78,7 +78,7 @@ export function sigmaToVolatilityBand(sigma) {
 /**
  * Named strengths for the soft shaping penalties (ordering, uniformity, spacing, trigger rate,
  * std error). The numbers are only meaningful against NORMALIZED penalties - see
- * `penaltyNormalization` in core/SpinSimulator.js - where a weight of 1 means "this is worth one
+ * `penaltyNormalization` in core/simulation/SpinSimulator.js - where a weight of 1 means "this is worth one
  * percentage point of RTP to me". Against the raw penalties they are arbitrary, because the raw
  * terms are on incommensurable scales: on Candy Frenzy at 849bc8a the ordering penalty reads 5.45
  * (raw frequency units) while the spacing penalty reads 301 (a violation count), so the same

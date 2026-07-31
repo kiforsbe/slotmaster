@@ -1,9 +1,9 @@
 // Resolves the name-based "recipes" a config crosses a postMessage boundary with (mechanic/
-// winEvaluator/freeSpinsMode - see core/SpinSimulator.js's own doc on why these can't cross
+// winEvaluator/freeSpinsMode - see core/simulation/SpinSimulator.js's own doc on why these can't cross
 // postMessage directly, being objects with function hooks or plain functions/closures) back
 // into the real objects/functions simulateSpins() needs. Shared by every Worker that runs a
-// simulateSpins() trial on its own thread (see core/simulationTrialWorker.js, spun up in a pool
-// by core/SimulationWorkerPool.js) so this table has exactly one home instead of being
+// simulateSpins() trial on its own thread (see core/simulation/trialWorker.js, spun up in a pool
+// by core/simulation/SimulationWorkerPool.js) so this table has exactly one home instead of being
 // duplicated per Worker script.
 import { checkWins, checkWildLineWins } from '../math/SlotMath.js';
 import { checkClusterWins } from '../math/ClusterMath.js';

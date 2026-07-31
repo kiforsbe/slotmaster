@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { validateTuningConfig } from '../core/TuningValidation.js';
+import { validateTuningConfig } from '../core/tuning/Validation.js';
 
 // A minimal healthy cluster config, cloned and broken one way at a time by the tests below. Kept
 // deliberately small: these are arithmetic checks on the config itself, so a realistic 12-symbol

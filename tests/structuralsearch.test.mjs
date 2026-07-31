@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGrid, predictRtp, structuralSearch, SEARCHABLE_KNOBS } from '../core/StructuralSearch.js';
+import { buildGrid, predictRtp, structuralSearch, SEARCHABLE_KNOBS } from '../core/tuning/StructuralSearch.js';
 
 // Phase 0c ranks knobs one at a time. That answers "which knob do I turn" but not "what do I set
 // them ALL to" - and the knobs interact (maxStack only matters if stackChance is high enough to

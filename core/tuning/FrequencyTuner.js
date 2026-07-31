@@ -265,7 +265,7 @@ import { measureSimulationTrials } from '../simulation/TrialMeasurement.js';
  * @param {'nelderMead'|'cmaes'} [options.searchAlgorithm='nelderMead'] - Which algorithm Phase
  *   2 uses to search the joint per-symbol weight space. `'nelderMead'` (default, unchanged) is
  *   a simplex search - cheap and effective for a small number of tunable symbols. `'cmaes'`
- *   (`core/CMAES.js`) is a population-based search that scales better to many tunable symbols
+ *   (`core/tuning/CMAES.js`) is a population-based search that scales better to many tunable symbols
  *   at once (e.g. Candy Frenzy's ~84) and is more tolerant of noisy per-candidate RTP
  *   measurements, at the cost of evaluating a whole population every generation instead of one
  *   or two points. Both return the same shape, so switching this option doesn't change anything
@@ -322,7 +322,7 @@ import { measureSimulationTrials } from '../simulation/TrialMeasurement.js';
  *   through to `gradientDescent1D`/`nelderMead`.
  * @param {(config: Object, numSpins: number, betPerLine: number, linesCount: number, rngSeed: number|null) => Promise<{ rtpRaw: number, freeSpinsTriggered: number, baseSpins: number }>} [options.runTrial] -
  *   Optional hook letting each Monte Carlo trial run on a separate thread (e.g. a pool of
- *   Workers - see core/SimulationWorkerPool.js) instead of in-process on whichever thread
+ *   Workers - see core/simulation/SimulationWorkerPool.js) instead of in-process on whichever thread
  *   `tuneFrequencies` itself is running on. `config` is the same shape `measure()` would
  *   otherwise pass straight to `simulateSpins` (reelStrips already built, mechanic/winEvaluator/
  *   freeSpinsMode included as real objects - a caller crossing a postMessage boundary needs to
@@ -442,7 +442,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // a weight of 1 buys about one RTP percentage point everywhere.
     penaltyNormalization = 'raw',
     // Volatility as a soft target: either a named band ('low' | 'medium' | 'high', converted
-    // through core/TuningUnits.js so the band asked for and the band reported come from one table)
+    // through core/tuning/Units.js so the band asked for and the band reported come from one table)
     // or a raw sigma. `volatilityTolerance` widens a raw target into a band; a named band already
     // is one. Null (default) means no target and the penalty is inert whatever its weight.
     //
@@ -930,7 +930,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // for it to cap).
   //
   // Off by default. It is a recommendation about design values, and a caller who did not ask for
-  // one should not pay for the measurements. See core/StructuralSearch.js for why a grid, and for
+  // one should not pay for the measurements. See core/tuning/StructuralSearch.js for why a grid, and for
   // why the grid is ranked for free and measured sparingly.
   let structuralRecommendation = null;
   if (tuneStructural && sensitivity && sweepContext) {
@@ -1234,7 +1234,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return targets;
   });
 
-  // Resolved once: a named band comes straight from core/TuningUnits.js so the band a developer
+  // Resolved once: a named band comes straight from core/tuning/Units.js so the band a developer
   // ASKED for and the band a result is CLASSIFIED into are the same table - otherwise picking
   // "Low" and being told the answer is "Low" would prove nothing. A raw number becomes a band by
   // widening with volatilityTolerance. Null when no target was set, which is what makes the weight
@@ -2165,7 +2165,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     scaledPaytable: payoutScale?.scaledPaytable ?? null,
     diagnostics: {
       inputParameters,
-      // Static config checks (core/TuningValidation.js), reported whether or not they blocked -
+      // Static config checks (core/tuning/Validation.js), reported whether or not they blocked -
       // a `skipValidation: true` run still carries its errors here, so a result derived from a
       // knowingly-broken config says so rather than looking like any other result.
       validation,

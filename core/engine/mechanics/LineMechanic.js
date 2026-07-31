@@ -1,6 +1,6 @@
 // Line-pay gameplay mechanic: the pluggable component pair - "get the symbols for the
 // playfield" (getTargetGrid) and "calculate wins" (evaluateWin/evaluateExpandingWin) - shared
-// by core/SlotEngine.js (live, animated play) and core/SpinSimulator.js (batch simulation/
+// by core/SlotEngine.js (live, animated play) and core/simulation/SpinSimulator.js (batch simulation/
 // tuning) alike, via config.mechanic. This is the default mechanic, so every existing
 // line-pay game keeps working unchanged without ever passing it explicitly. See
 // core/CascadeSpinMechanic.js for the cluster-pays sibling.
@@ -71,7 +71,7 @@ export const LineMechanic = {
     };
   },
 
-  // Batch-simulation entry point (core/SpinSimulator.js) - composed entirely from the same
+  // Batch-simulation entry point (core/simulation/SpinSimulator.js) - composed entirely from the same
   // getTargetGrid/evaluateWin/evaluateExpandingWin components above, just called synchronously
   // with no animation in between.
   resolveSpin({ simConfig, betPerLine, linesCount, rng, isFreeSpin, freeSpinsState, spinIndex, chargedBet, logSpins }) {

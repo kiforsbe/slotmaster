@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLadders, summarize } from '../core/StructuralSensitivity.js';
+import { buildLadders, summarize } from '../core/tuning/StructuralSensitivity.js';
 
 const candyDefaults = { minGap: 4, maxStack: 4, minStack: 2, stackChance: 0.3 };
 const table = (defaults = candyDefaults) => ({ defaults, symbols: { a: { frequency: 1 }, b: { frequency: 1 } } });

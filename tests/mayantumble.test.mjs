@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateSpins } from '../core/SpinSimulator.js';
+import { simulateSpins } from '../core/simulation/SpinSimulator.js';
 import { createSeededRng } from '../core/math/SlotMath.js';
 import { CascadeSpinMechanic } from '../core/engine/mechanics/CascadeSpinMechanic.js';
-import { resolveWinEvaluator } from '../core/mechanicRegistry.js';
+import { resolveWinEvaluator } from '../core/simulation/workerMechanicRegistry.js';
 import {
   REELS_COUNT, ROWS_COUNT, PAYTABLE, PAYLINES, REEL_STRIPS, REEL_LENGTH, BET_AMOUNT, SCATTER_TRIGGER_COUNT, FREE_SPINS_AWARD, checkLineCascadeWins,
 } from '../games/mayantumble/game.js';
@@ -39,7 +39,7 @@ test('mayan tumble reels space the gold scatter at least ROWS_COUNT apart (minGa
 // ---- The worker-side rebuild of this game's evaluator -------------------------------------
 // Tuning runs its trials in Worker threads, and a closure cannot cross postMessage. The worker
 // gets `winEvaluatorName` plus loose primitives and rebuilds an equivalent evaluator from them
-// (core/mechanicRegistry.js). That makes a game's tuneConfig responsible for carrying everything
+// (core/simulation/workerMechanicRegistry.js). That makes a game's tuneConfig responsible for carrying everything
 // its evaluator closes over - and nothing checked that it did.
 
 test('rebuilding this game\'s evaluator without paylines fails by name, not as a TypeError', () => {

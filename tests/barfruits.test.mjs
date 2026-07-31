@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateSpins } from '../core/SpinSimulator.js';
+import { simulateSpins } from '../core/simulation/SpinSimulator.js';
 import {
   REELS_COUNT, ROWS_COUNT, PAYTABLE, PAYLINES, REEL_STRIPS, REEL_LENGTH, BET_PER_LINE, LINES_COUNT,
 } from '../games/barfruits/game.js';

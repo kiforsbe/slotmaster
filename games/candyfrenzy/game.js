@@ -33,7 +33,7 @@ export const FREE_SPINS_AWARD = 10;
 // Every symbol carries its OWN ladder rather than sharing one of two group ladders. That makes
 // the seven symbols strictly ranked by payout (cottoncandy 300x down to chocolate 40x) where
 // they used to be two tied groups of three and four, and symbol ranking is exactly what the
-// tuner's ordering preference reads - see checkPayoutLadders in core/TuningValidation.js, which
+// tuner's ordering preference reads - see checkPayoutLadders in core/tuning/Validation.js, which
 // ranks on the LAST tier only.
 const COTTONCANDY_PAYOUT = [
   { min:  5, multiplier:   2.00 },

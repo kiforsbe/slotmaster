@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { describePlayerExperience } from '../core/PlayerExperience.js';
+import { describePlayerExperience } from '../core/tuning/PlayerExperience.js';
 
 // "96% RTP" and "biggest win in 40,000 spins was 29x" are two facts about the SAME game, and only
 // the first has ever been visible. This module answers the third question the whole project set

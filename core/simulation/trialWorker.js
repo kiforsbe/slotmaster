@@ -1,5 +1,5 @@
 // Runs exactly one simulateSpins() trial per message, on its own OS thread. Spawned in a pool
-// by core/SimulationWorkerPool.js so tuneFrequencies() can measure several candidates' trials
+// by core/simulation/SimulationWorkerPool.js so tuneFrequencies() can measure several candidates' trials
 // concurrently across every available CPU core instead of one at a time on a single thread -
 // see SpinSimulator.js's `options.runTrial` doc for how this plugs into the search itself.
 //
@@ -11,7 +11,7 @@
 // config.mechanic/config.winEvaluator/config.freeSpinsMode (SpinSimulator.js's pluggable
 // components) are functions/objects-with-function-hooks, so they can't cross postMessage
 // directly - the caller sends their *names* instead (mechanicName/winEvaluatorName/
-// freeSpinsModeName, resolved back to the real thing via core/mechanicRegistry.js).
+// freeSpinsModeName, resolved back to the real thing via core/simulation/workerMechanicRegistry.js).
 import { simulateSpins } from './SpinSimulator.js';
 import { createSeededRng } from '../math/SlotMath.js';
 import { resolveWinEvaluator, resolveMechanic, resolveFreeSpinsMode } from './workerMechanicRegistry.js';

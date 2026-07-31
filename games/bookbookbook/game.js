@@ -42,7 +42,7 @@ const PAYLINES = [
 // 1. Paytable Config (Classic Book of Dead/Ra multipliers)
 // Rules only (payout, type, paymode, wild, triggerFreeSpins, friendlyName) - no `.frequency`
 // field. Frequencies live only on the per-reel FREQUENCY_REELn tables below (same model as
-// games/fruitmachine/game.js) - see tuneFrequencies' own docs in core/SpinSimulator.js for
+// games/fruitmachine/game.js) - see tuneFrequencies' own docs in core/tuning/FrequencyTuner.js for
 // why frequencies must come from the reels, not the paytable.
 const PAYTABLE = {
   book:     { payout: [0,  0,   2,   20,  200], type: 'scatter', paymode: 'any',  wild: false, triggerFreeSpins: true,  friendlyName: 'Book of Books' },

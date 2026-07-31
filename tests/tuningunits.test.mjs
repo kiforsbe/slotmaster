@@ -4,7 +4,7 @@ import {
   spinsPerTriggerToPct, pctToSpinsPerTrigger,
   volatilityBandToSigma, sigmaToVolatilityBand, VOLATILITY_BANDS,
   intentToWeight, weightToIntent, INTENT_LEVELS,
-} from '../core/TuningUnits.js';
+} from '../core/tuning/Units.js';
 
 test('trigger rate round-trips between percent and 1-in-N without losing precision', () => {
   // The panel asks for "1 in N spins" because that is how the number is actually reasoned about,

@@ -297,7 +297,7 @@ async function initGame() {
           // Not optional here the way it is for a cluster game. Trials run in Worker threads, and
           // a closure cannot cross postMessage - the worker rebuilds this game's evaluator from
           // `winEvaluatorName` plus whatever primitives the config carries (see
-          // core/mechanicRegistry.js). checkLineCascadeWins is a LINE evaluator, so without the
+          // core/simulation/workerMechanicRegistry.js). checkLineCascadeWins is a LINE evaluator, so without the
           // paylines themselves it has nothing to evaluate against.
           paylines: PAYLINES,
           wildSymbol: null,

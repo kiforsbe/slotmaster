@@ -1,7 +1,7 @@
 /**
  * What should I set the structural knobs TO?
  *
- * Phase 0c (core/StructuralSensitivity.js) ranks knobs one at a time: it answers "which knob do I
+ * Phase 0c (core/tuning/StructuralSensitivity.js) ranks knobs one at a time: it answers "which knob do I
  * turn" and "how far, if I turn only that one". Neither question is quite the one a developer
  * actually has, because the knobs interact - `maxStack` only matters if `stackChance` is high
  * enough to produce vertical runs at all, so the one-at-a-time elasticity of each understates what
@@ -19,7 +19,7 @@
  * cells that prediction likes are ever simulated. 600 cells cost 8 measurements.
  *
  * Runs no simulation itself - the caller injects `measure` - so it stays a pure, directly testable
- * unit, the same way core/StructuralSensitivity.js does.
+ * unit, the same way core/tuning/StructuralSensitivity.js does.
  */
 
 // The reel-arrangement knobs, which is to say the ones that live on a reel table's `defaults` and

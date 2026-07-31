@@ -1,4 +1,4 @@
-// A small pool of persistent Worker threads, each running core/simulationTrialWorker.js, that
+// A small pool of persistent Worker threads, each running core/simulation/trialWorker.js, that
 // tuneFrequencies() dispatches individual simulateSpins() trials to via its `options.runTrial`
 // hook (see SpinSimulator.js's own doc) - this is what turns "many Monte Carlo measurements,
 // one at a time on a single CPU core" into "measured concurrently across every available core",

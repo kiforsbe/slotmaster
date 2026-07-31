@@ -14,7 +14,7 @@
  * achieved, how trustworthy that measurement was, what its payout actually looks like, what it
  * violated, and the frequencies themselves.
  *
- * Pure - no DOM, no simulation. The panel renders it; core/SpinSimulator.js never knows it exists.
+ * Pure - no DOM, no simulation. The panel renders it; core/simulation/SpinSimulator.js never knows it exists.
  */
 
 import { downloadTextFile } from '../io/FileIO.js';

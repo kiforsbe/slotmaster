@@ -2,7 +2,7 @@
 // for the playfield" (resolveSequence, which for a cascade interleaves grid refills with win
 // checks by nature) and the free-spins-mode wrapping that makes those wins "calculate"
 // correctly during a bonus round - shared by core/CascadeEngine.js (live, animated play) and
-// core/SpinSimulator.js (batch simulation/tuning) alike, via config.mechanic. Never imports
+// core/simulation/SpinSimulator.js (batch simulation/tuning) alike, via config.mechanic. Never imports
 // core/ClusterMath.js directly - config.winEvaluator is a closure the caller supplies (see
 // CascadeMath.js's own doc), so a future line-win-based cascade game reuses this same mechanic
 // unmodified, just with its own evaluator/payoutOf. See core/LineMechanic.js for the line-pay
@@ -60,7 +60,7 @@ export const CascadeSpinMechanic = {
     return { freeSpinsMode, fakeEngine, modeState: freeSpinsMode.createState(fakeEngine) };
   },
 
-  // Batch-simulation entry point (core/SpinSimulator.js) - composed entirely from
+  // Batch-simulation entry point (core/simulation/SpinSimulator.js) - composed entirely from
   // resolveSequence/wrapWinEvaluatorForFreeSpins above, just called synchronously with no
   // animation in between.
   resolveSpin({ simConfig, isFreeSpin, freeSpinsState, rng, spinIndex, chargedBet, logSpins }) {

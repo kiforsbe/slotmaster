@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
   formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow, renderTargetChipsHtml, renderPlayerExperienceHtml, renderTuneLogHtml,
-} from '../core/ui/dev/TuningPanel.js';
-import { scalePaytable } from '../core/SpinSimulator.js';
+} from '../core/ui/dev/tuning/TuningReports.js';
+import { scalePaytable } from '../core/tuning/Payouts.js';
 
 test('formatReelFrequencyTablesForCopy preserves distinct small frequencies instead of collapsing them', () => {
   // Reproduces the bookbookbook bug: several genuinely distinct tuned frequencies under 1

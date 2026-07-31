@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateSpins } from '../core/SpinSimulator.js';
+import { simulateSpins } from '../core/simulation/SpinSimulator.js';
 import { generateReel, createSeededRng } from '../core/math/SlotMath.js';
 
 // Mirrors games/bookbookbook/game.js's real PAYTABLE/PAYLINES/reel config. A moderate spin

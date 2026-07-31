@@ -310,7 +310,7 @@ export async function bisect1D({
  *
  * Every vertex evaluation is awaited, so `evaluate` may be sync or async - a plain in-process
  * evaluate() works exactly as before, but one backed by a Worker pool (see
- * core/SimulationWorkerPool.js) gets genuine parallelism for free: the initial n+1-vertex
+ * core/simulation/SimulationWorkerPool.js) gets genuine parallelism for free: the initial n+1-vertex
  * simplex and every simplex shrink (also n+1 vertices, and the one operation here that
  * re-evaluates the whole simplex at once) are dispatched together via Promise.all rather than
  * one at a time, so a pool-backed evaluate() measures every vertex concurrently instead of
