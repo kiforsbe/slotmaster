@@ -243,7 +243,6 @@ async function initGame() {
     viewportBackground: { type: "image", image: "./assets/backgrounds/fruitmachine_background_1.png" },
 
     onStateChange: (state) => handleStateChange(state),
-    onWin: (winInfo) => handleWin(winInfo),
   });
   await engine.init();
 
@@ -284,10 +283,6 @@ function handleStateChange(state) {
       gameTicker.textContent = 'IDLE';
     }
   }
-}
-
-function handleWin(winInfo) {
-  updateUI();
 }
 
 function setupUIHandlers() {
@@ -378,82 +373,6 @@ function setupUIHandlers() {
 // Renders the modal paytable descriptions and payline previews dynamically
 function buildPaytableContent() {
   renderLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, paylines: PAYLINES, reelsCount: REELS_COUNT, assets: engine?.assets, paylinePreviewContainer: document.getElementById('paylines-preview') });
-}
-
-function legacyBuildPaytableContent() {
-  const container = document.getElementById('paytable-grid-content');
-  container.innerHTML = '';
-
-  for (const symbol of Object.keys(PAYTABLE)) {
-    const meta = PAYTABLE[symbol];
-    const item = document.createElement('div');
-    item.className = 'paytable-item';
-
-    const title = document.createElement('span');
-    title.className = 'paytable-symbol-name';
-    title.textContent = meta.friendlyName || symbol;
-    item.appendChild(title);
-
-    const payLines = document.createElement('div');
-    payLines.className = 'paytable-payouts';
-
-    let content = '';
-    if (symbol === 'cherries') {
-      content += `<strong>3x:</strong> 1.60x<br><strong>2x:</strong> 0.80x<br><strong>1x:</strong> 0.40x<br>`;
-    } else if (meta.payout[meta.payout.length - 1] > 0) {
-      content += `<strong>3 of a kind:</strong> ${meta.payout[meta.payout.length - 1]}x<br>`;
-    }
-
-    if (meta.wild) {
-      const target = meta.wildOnly ? meta.wildOnly.join(', ') : 'most symbols';
-      content += `<em style="color:#ffd23f; font-size:10px;">Wild for ${target} (reel 3 only)</em><br>`;
-    }
-    if (meta.aloneBonus) {
-      content += `<em style="color:#ffd23f; font-size:10px;">Pays ${meta.aloneBonus}x on reel 3, regardless of reels 1-2</em>`;
-    }
-    if (meta.wildPenalty) {
-      content += `<em style="color:#d9a891; font-size:10px;">-${meta.wildPenalty} when won via wild</em>`;
-    }
-
-    payLines.innerHTML = content;
-    item.appendChild(payLines);
-    container.appendChild(item);
-  }
-
-  const linesPreview = document.getElementById('paylines-preview');
-  linesPreview.innerHTML = '';
-  PAYLINES.forEach((path, idx) => {
-    const div = document.createElement('div');
-    div.style.cssText = `
-      width: 36px;
-      height: 30px;
-      border: 1px solid rgba(255,210,63,0.4);
-      background: #100303;
-      border-radius: 4px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 3px;
-      position: relative;
-      cursor: pointer;
-    `;
-    div.title = `Line ${idx + 1}`;
-
-    let innerHtml = '<div style="display:flex; justify-content:space-between; height:100%;">';
-    for (let c = 0; c < REELS_COUNT; c++) {
-      innerHtml += '<div style="display:flex; flex-direction:column; justify-content:space-between; height:100%; width: 5px;">';
-      for (let r = 0; r < ROWS_COUNT; r++) {
-        const active = (path[c] === r);
-        innerHtml += `<div style="width:5px; height:5px; border-radius:50%; background: ${active ? '#ffd23f' : '#3a1010'};"></div>`;
-      }
-      innerHtml += '</div>';
-    }
-    innerHtml += '</div>';
-    innerHtml += `<span style="position:absolute; bottom:1px; right:3px; font-size:8px; font-weight:bold; color:#b57d6c;">L${idx + 1}</span>`;
-
-    div.innerHTML = innerHtml;
-    linesPreview.appendChild(div);
-  });
 }
 
 // Guarded so this module can be imported under Node (e.g. by tests) without a DOM.

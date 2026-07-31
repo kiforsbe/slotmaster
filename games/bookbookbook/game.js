@@ -340,7 +340,6 @@ window.addEventListener('load', async () => {
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
-    onWin: (winInfo) => handleWin(winInfo)
   });
   await engine.init();
 
@@ -567,10 +566,6 @@ function closeFreeSpinsSummary() {
   engine.handleAutoPlay();
 }
 
-function handleWin(winInfo) {
-  updateUI();
-}
-
 // 8. Event Handlers Binding
 function setupUIHandlers() {
   // Spin button
@@ -686,81 +681,4 @@ function setupUIHandlers() {
 // 9. Render modal paytable descriptions dynamically
 function buildPaytableContent() {
   renderLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, paylines: PAYLINES, reelsCount: REELS_COUNT, assets: engine?.assets, scatterTriggerCount: 3, freeSpinsAward: 10, paylinePreviewContainer: document.getElementById('paylines-preview') });
-}
-
-function legacyBuildPaytableContent() {
-  const container = document.getElementById('paytable-grid-content');
-  container.innerHTML = '';
-
-  for (const [symbol, payouts] of Object.entries(PAYTABLE)) {
-    const item = document.createElement('div');
-    item.className = 'paytable-item';
-
-    const title = document.createElement('span');
-    title.className = 'paytable-symbol-name';
-    title.textContent = PAYTABLE[symbol].friendlyName || symbol;
-    item.appendChild(title);
-
-    const payLines = document.createElement('div');
-    payLines.className = 'paytable-payouts';
-
-    // List payouts in reverse (5 hits to 2 hits)
-    let content = '';
-    for (let hits = 5; hits >= 2; hits--) {
-      if (payouts[hits] > 0) {
-        if (symbol === 'book') {
-          content += `<strong>${hits}x Scatters:</strong> ${payouts[hits]}x Total Bet<br>`;
-        } else {
-          content += `<strong>${hits} of a kind:</strong> ${payouts[hits]}x<br>`;
-        }
-      }
-    }
-    
-    // Label books wild substitution
-    if (symbol === 'book') {
-      content += `<em style="color:#d4af37; font-size:10px;">Acts as Wild substitute</em>`;
-    }
-
-    payLines.innerHTML = content;
-    item.appendChild(payLines);
-    container.appendChild(item);
-  }
-
-  // Draw miniature line previews
-  const linesPreview = document.getElementById('paylines-preview');
-  linesPreview.innerHTML = '';
-  PAYLINES.forEach((path, idx) => {
-    const div = document.createElement('div');
-    div.style.cssText = `
-      width: 44px;
-      height: 30px;
-      border: 1px solid rgba(212,175,55,0.4);
-      background: #09090d;
-      border-radius: 4px;
-      display: flex;
-      flex-direction: column;
-      justify-content: space-between;
-      padding: 3px;
-      position: relative;
-      cursor: pointer;
-    `;
-    div.title = `Line ${idx + 1}`;
-    
-    // Draw miniature path representation using small grid cells
-    // 5 columns, 3 rows
-    let innerHtml = '<div style="display:flex; justify-content:space-between; height:100%;">';
-    for (let c = 0; c < 5; c++) {
-      innerHtml += '<div style="display:flex; flex-direction:column; justify-content:space-between; height:100%; width: 5px;">';
-      for (let r = 0; r < 3; r++) {
-        const active = (path[c] === r);
-        innerHtml += `<div style="width:5px; height:5px; border-radius:50%; background: ${active ? '#d4af37' : '#222'};"></div>`;
-      }
-      innerHtml += '</div>';
-    }
-    innerHtml += '</div>';
-    innerHtml += `<span style="position:absolute; bottom:1px; right:3px; font-size:8px; font-weight:bold; color:#777;">L${idx+1}</span>`;
-    
-    div.innerHTML = innerHtml;
-    linesPreview.appendChild(div);
-  });
 }

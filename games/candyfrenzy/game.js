@@ -476,7 +476,6 @@ async function initGame() {
     betAmount: BET_AMOUNT,
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
-    onWin: (winInfo) => handleWin(winInfo),
   });
   await engine.init();
 
@@ -528,10 +527,6 @@ function handleStateChange(state) {
       gameTicker.textContent = 'IDLE';
     }
   }
-}
-
-function handleWin(winInfo) {
-  updateUI();
 }
 
 function handleScatterTrigger(scatterCount, isInFreeSpins) {
@@ -661,47 +656,6 @@ function formatMultiplier(multiplier) {
 // added or a breakpoint moved changes this table without anyone remembering to edit it.
 function buildPaytableContent(gameAssets) {
   renderClusterPaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, scatterTriggerCount: SCATTER_TRIGGER_COUNT, freeSpinsAward: FREE_SPINS_AWARD, renderSymbol: (symbol) => symbolIconHtml(symbol, gameAssets) });
-}
-
-function legacyBuildPaytableContent(gameAssets) {
-  const container = document.getElementById('paytable-grid-content');
-  const topTierOf = (symbol) => PAYTABLE[symbol].clusterPayout.at(-1).multiplier;
-
-  // Columns run premium-to-cheap, ranked on the top tier - the same ranking the tuner's ordering
-  // preference uses (see checkPayoutLadders in core/TuningValidation.js), so the paytable a player
-  // reads and the frequencies the reels were built from are ordered by the same rule.
-  const paying = Object.keys(PAYTABLE)
-    .filter(s => Array.isArray(PAYTABLE[s].clusterPayout) && PAYTABLE[s].clusterPayout.length > 0)
-    .sort((a, b) => topTierOf(b) - topTierOf(a));
-
-  const sizes = [...new Set(paying.flatMap(s => PAYTABLE[s].clusterPayout.map(t => t.min)))]
-    .sort((a, b) => a - b);
-  const topSize = sizes.at(-1);
-
-  const head = `<th class="paytable-size">Cluster</th>` + paying.map(s =>
-    `<th>${symbolIconHtml(s, gameAssets)}<span class="paytable-col-name">${PAYTABLE[s].friendlyName || s}</span></th>`).join('');
-
-  // Biggest first: the top row is what anyone opens a paytable to find.
-  const rows = [...sizes].reverse().map(size => {
-    // The largest breakpoint has no upper bound - it pays for every cluster from there up to all
-    // 49 cells - so it is the only row that gets a "+".
-    const label = size === topSize ? `${size}+` : String(size);
-    const cells = paying.map(s => {
-      const tier = PAYTABLE[s].clusterPayout.filter(t => t.min <= size).at(-1);
-      return `<td>${tier ? formatMultiplier(tier.multiplier) : '&mdash;'}</td>`;
-    }).join('');
-    return `<tr${size === topSize ? ' class="paytable-top-row"' : ''}><th class="paytable-size">${label}</th>${cells}</tr>`;
-  }).join('');
-
-  // Anything without a ladder pays by its own rule and would be a column of dashes.
-  const notes = Object.keys(PAYTABLE)
-    .filter(s => !Array.isArray(PAYTABLE[s].clusterPayout))
-    .map(s => `<div class="paytable-note">${symbolIconHtml(s, gameAssets, 29)}<span><strong style="color: var(--gold);">`
-      + `${PAYTABLE[s].friendlyName || s}</strong> pays anywhere on the grid. ${SCATTER_TRIGGER_COUNT}+ triggers `
-      + `${FREE_SPINS_AWARD} Free Spins - winning tiles leave a growing multiplier.</span></div>`)
-    .join('');
-
-  container.innerHTML = `<table class="paytable-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>${notes}`;
 }
 
 if (typeof window !== 'undefined') {

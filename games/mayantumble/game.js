@@ -374,7 +374,6 @@ async function initGame() {
     betAmount: BET_AMOUNT,
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
-    onWin: (winInfo) => handleWin(winInfo),
   });
   await engine.init();
 
@@ -426,10 +425,6 @@ function handleStateChange(state) {
       gameTicker.textContent = 'TEMPLE OF GOLD';
     }
   }
-}
-
-function handleWin(winInfo) {
-  updateUI();
 }
 
 function handleScatterTrigger(scatterCount, isInFreeSpins) {
@@ -534,45 +529,6 @@ function setupUIHandlers() {
 
 function buildPaytableContent() {
   renderLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, paylines: PAYLINES, reelsCount: REELS_COUNT, assets: engine?.assets, scatterTriggerCount: SCATTER_TRIGGER_COUNT, freeSpinsAward: FREE_SPINS_AWARD });
-}
-
-function legacyBuildPaytableContent() {
-  const container = document.getElementById('paytable-grid-content');
-  container.innerHTML = '';
-
-  for (const symbol of Object.keys(PAYTABLE)) {
-    const meta = PAYTABLE[symbol];
-    const item = document.createElement('div');
-    item.className = 'paytable-item';
-
-    const title = document.createElement('span');
-    title.className = 'paytable-symbol-name';
-    title.textContent = meta.friendlyName || symbol;
-    item.appendChild(title);
-
-    const payLines = document.createElement('div');
-    payLines.className = 'paytable-payouts';
-
-    let content = '';
-    if (meta.payout) {
-      if (meta.type === 'scatter') {
-        const p = meta.payout;
-        content += `<strong>3+ Scatters:</strong> ${p[2]}x total bet<br>`;
-        content += `<strong>4+ Scatters:</strong> ${p[3]}x total bet<br>`;
-        content += `<strong>5+ Scatters:</strong> ${p[4]}x total bet<br>`;
-        content += `<em style="color:#ffe94a; font-size:10px;">3+ Scatters also trigger ${FREE_SPINS_AWARD} Free Spins!</em>`;
-      } else {
-        const p = meta.payout;
-        content += `<strong>3 matching:</strong> ${p[2]}x line bet<br>`;
-        content += `<strong>4 matching:</strong> ${p[3]}x line bet<br>`;
-        content += `<strong>5 matching:</strong> ${p[4]}x line bet<br>`;
-      }
-    }
-
-    payLines.innerHTML = content;
-    item.appendChild(payLines);
-    container.appendChild(item);
-  }
 }
 
 if (typeof window !== 'undefined') {
