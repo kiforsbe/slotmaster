@@ -1,5 +1,11 @@
 import { showDeveloperPanel } from '../../DeveloperPanels.js';
 import { startTuning } from './TuningPanelController.js';
+import {
+  INTENT_LEVELS, intentToWeight, pctToSpinsPerTrigger, spinsPerTriggerToPct,
+  volatilityBandToSigma, weightToIntent,
+} from '../../../tuning/Units.js';
+import { fmt } from './TuningFormat.js';
+import { PENALTY_INTENTS } from './TuningPanelSchema.js';
 export function openTuningPanel({ paytable, reelFrequencyTables, tuneConfig, panel }) {
   if (!panel) return;
   let tuneContainer = panel.querySelector('#tune-details');
@@ -459,4 +465,3 @@ ${PENALTY_INTENTS.map(p => `
   panel.style.maxWidth = '900px';
   panel.style.width = '95%';
 }
-

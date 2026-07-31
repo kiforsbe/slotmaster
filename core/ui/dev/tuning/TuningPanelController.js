@@ -5,11 +5,13 @@ import { describePlayerExperience } from '../../../tuning/PlayerExperience.js';
 import { createTuneLogEntry, describeTuneEntryQuality, tuneLogToJson, exportTuneLogJson } from '../../../tuning/TuneLog.js';
 import { runTuneFrequenciesWithPool } from './TuningRunService.js';
 import {
-  fmt, esc, PENALTY_INTENTS, renderTuneLogHtml, renderTargetChipsHtml,
+  renderTuneLogHtml, renderTargetChipsHtml,
   renderPlayerExperienceHtml, describePenaltyStateNow, renderLossBudgetHtml,
   renderDiagnosisHtml, formatScaledPaytableForCopy, renderPayoutScaleHtml,
   formatReelFrequencyTablesForCopy,
 } from './TuningReports.js';
+import { fmt, esc } from './TuningFormat.js';
+import { PENALTY_INTENTS } from './TuningPanelSchema.js';
 import { renderLiveFrequencyTable } from './TuningLiveView.js';
 export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, tuneContainer, originalReelFrequencyTables = reelFrequencyTables, continuedFrom = null, diagnoseOnly = false }) {
   const startBtn = tuneContainer.querySelector('#tune-start-btn');
