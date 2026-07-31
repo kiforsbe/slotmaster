@@ -475,6 +475,19 @@ async function initGame() {
     winEvaluator,
     scatterSymbol: 'bonus',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
+    // An opt-in cascade affordance: the renderer traces only the outside edge of the active
+    // cluster, so its silhouette stays legible while its symbols poof, particles burst, and the
+    // payout popup animates. Other grid games can omit this configuration entirely.
+    clusterVisualizer: {
+      color: '#fff0a6', alpha: 1, lineWidth: 4,
+      lineCap: 'round', lineJoin: 'round', lineDash: [], cornerRadius: 10,
+      roundConcaveCorners: false,
+      glowColor: '#ff54c7', glow: 18,
+      pulse: { minAlpha: 0.82, maxAlpha: 1, periodMs: 690 },
+    },
+    // The cluster outline replaces the legacy per-cell clear glow, avoiding a busy box around
+    // every candy while the cluster is being collected.
+    clearCellHighlight: false,
     playfield: PLAYFIELD,
     assetManifest: GAME_ASSET_MANIFEST,
     viewportBackground: { type: "image", image: "./assets/backgrounds/candyfrenzy_background_2.png" },
