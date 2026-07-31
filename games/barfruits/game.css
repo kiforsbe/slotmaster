@@ -6,7 +6,6 @@
   --red: #c0392b;
   --text: #fff3d6;
 }
-
 * {
   box-sizing: border-box;
   margin: 0;
@@ -509,20 +508,4 @@ canvas {
   font-size: 18px;
   font-weight: bold;
   color: #fff;
-}
-
-.btn-close-sim {
-  width: 100%;
-  padding: 12px;
-  background: var(--gold);
-  border: none;
-  color: #000;
-  font-weight: bold;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
-.btn-close-sim:hover {
-  transform: scale(1.05);
 }

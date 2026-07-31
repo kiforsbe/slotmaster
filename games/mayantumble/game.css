@@ -7,14 +7,12 @@
   --text: #e2f0e6;
   --basalt: #1a221d;
 }
-
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
   user-select: none;
 }
-
 body {
   background-color: #050a07;
   color: var(--text);
@@ -174,7 +172,6 @@ header {
   border-color: var(--gold);
   color: #fff;
 }
-
 .dashboard {
   display: flex;
   align-items: center;
@@ -434,16 +431,4 @@ header {
   font-weight: bold;
   color: #fff;
 }
-
-.btn-close-sim {
-  width: 100%;
-  padding: 12px;
-  margin-top: 16px;
-  background: var(--gold);
-  color: #0e1511;
-  border: none;
-  border-radius: 10px;
-  font-family: 'Cinzel', serif;
-  font-weight: 900;
-  cursor: pointer;
-}
+/* End of theme-specific styles. */

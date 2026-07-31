@@ -9,10 +9,12 @@ import { generateReel } from '../../core/math/SlotMath.js';
 import { checkClusterWins } from '../../core/math/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
+import { ensureDeveloperPanels } from '../../core/ui/DeveloperPanels.js';
 import { renderClusterPaytable } from '../../core/ui/PaytableRenderer.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
-import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
+import { runSimulationAndRender } from '../../core/SimulationPanel.js';
+import { openTuningPanel } from '../../core/TuningPanel.js';
 
 export const REELS_COUNT = 7;
 export const ROWS_COUNT = 7;
@@ -281,7 +283,7 @@ const PLAYFIELD = {
 
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
 let displayBalance, betValue, betMinus, betPlus, gameTicker;
-let btnSpinLog, btnSim, btnTune, simModal, simStats;
+let btnSpinLog, btnSim, btnTune, simModal, tuningPanel, spinLogPanel, simStats;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
 let modalPaytable, modalFsTrigger, modalFsSummary, btnStartFs, btnCloseFsSummary, fsAwardAmount;
 let fsPanel, fsCounter, fsTotalWin;
@@ -313,7 +315,10 @@ async function initGame() {
   btnSpinLog = document.getElementById('btn-spinlog');
   btnSim = document.getElementById('btn-sim');
   btnTune = document.getElementById('btn-tune');
-  simModal = document.getElementById('sim-modal');
+  const developerPanels = ensureDeveloperPanels();
+  simModal = developerPanels.simulation;
+  tuningPanel = developerPanels.tuning;
+  spinLogPanel = developerPanels.spinLog;
   simStats = document.getElementById('sim-stats');
   simRtpDisplay = document.getElementById('sim-rtp');
   simTotalSpinsDisplay = document.getElementById('sim-total-spins');
@@ -338,7 +343,7 @@ async function initGame() {
 
   if (btnSpinLog) {
     btnSpinLog.addEventListener('click', () => {
-      openSpinLogPanel({ engine, domRefs: { simModal, simStats } });
+      openSpinLogPanel({ engine, domRefs: { panel: spinLogPanel } });
     });
   }
   if (btnSim) {
@@ -356,7 +361,7 @@ async function initGame() {
   }
   if (btnTune) {
     btnTune.addEventListener('click', () => {
-      openTuneFrequenciesPanel({
+      openTuningPanel({
         paytable: PAYTABLE,
         reelFrequencyTables: FREQUENCY_REELS,
         tuneConfig: {
@@ -436,7 +441,7 @@ async function initGame() {
           // bounded to +/-maxReelDeviation around the shared answer.
           reelCoupling: 'linked-then-refine',
         },
-        domRefs: { simModal, simStats },
+        panel: tuningPanel,
       });
     });
   }

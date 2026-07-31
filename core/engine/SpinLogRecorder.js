@@ -11,6 +11,17 @@ export class SpinLogRecorder {
     this.gameConfig = gameConfig;
     this.maxEntries = gameConfig.maxEntries ?? DEFAULT_MAX_ENTRIES;
     this.entries = [];
+    this.listeners = new Set();
+  }
+
+  /**
+   * Subscribe to newly recorded live-spin entries. Returns an unsubscribe function so a
+   * developer panel can follow the recorder only while it is open.
+   */
+  subscribe(listener) {
+    if (typeof listener !== 'function') return () => {};
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   record({ sequence, scatterWin, seed, timestamp, phase, chargedBet, expandingWinData, expandingSymbol }) {
@@ -35,6 +46,14 @@ export class SpinLogRecorder {
     if (this.entries.length > this.maxEntries) {
       this.entries.shift();
     }
+    this.listeners.forEach(listener => {
+      try {
+        listener(entry);
+      } catch (error) {
+        // A dev-only observer must never be able to break the live spin lifecycle.
+        console.warn('SpinLogRecorder listener failed:', error);
+      }
+    });
     return entry;
   }
 

@@ -85,9 +85,10 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
   playfield's own look is a per-game `playfield` config passed to `CoreSlotEngine`.
 - **`core/SpinSimulator.js`** — runs many simulated spins to measure RTP/trigger rate, and
   `tuneFrequencies`, which automatically adjusts a game's reel frequencies to hit a target RTP.
-- **`core/SimulationPanel.js`** — the in-browser RUN SIMULATION / TUNE FREQUENCIES UI (a debug
-  panel included in each game's `index.html`), plus the formatter that turns a tuned result
-  back into pasteable `FREQUENCY_REELn` source.
+- **`core/SimulationPanel.js`** — the in-browser RUN SIMULATION UI (a debug panel included in
+  each game's `index.html`).
+- **`core/TuningPanel.js`** — the separate TUNE FREQUENCIES UI and formatter that turns a tuned
+  result back into pasteable `FREQUENCY_REELn` source.
 - **Tuner support modules**, all pure and separately tested — `core/TuningValidation.js` (static
   config checks that refuse to tune on arithmetic errors), `core/TuningUnits.js` (converting
   between what a developer asks for and what the search optimizes: spins-per-trigger ↔ percent,
@@ -192,7 +193,7 @@ to write it explicitly, only a symbol that wants to override that default.
 `tuneFrequencies` (`core/SpinSimulator.js`) always defaults to `-1` for every reel unless
 `orderingBiasByReel` is passed explicitly — i.e. "a higher-paying symbol should not be more
 frequent than a lower-paying one," same as before this option existed. The TUNE FREQUENCIES
-panel (`core/SimulationPanel.js`) pre-selects a different value per reel in its UI dropdowns
+panel (`core/TuningPanel.js`) pre-selects a different value per reel in its UI dropdowns
 only (early reels default to `1`, middle reels to `-1`, late reels to `0`) as a starting point
 for a "near miss" feel — premium symbols showing up often on the reels a player sees land, but
 rarely on the ones that would complete the line. That's a UI convenience, not a change to

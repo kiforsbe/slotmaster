@@ -6,14 +6,12 @@
   --red: #c0392b;
   --text: #fff3d6;
 }
-
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
   user-select: none;
 }
-
 body {
   background-color: #1a0505;
   color: var(--text);
@@ -198,7 +196,6 @@ canvas {
   font-weight: bold;
   color: #fff;
 }
-
 .spin-section {
   display: flex;
   justify-content: center;
@@ -428,19 +425,4 @@ canvas {
   font-weight: bold;
   color: #fff;
 }
-
-.btn-close-sim {
-  width: 100%;
-  padding: 12px;
-  background: var(--gold);
-  border: none;
-  color: #000;
-  font-weight: bold;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: transform 0.2s;
-}
-
-.btn-close-sim:hover {
-  transform: scale(1.05);
-}
+/* End of theme-specific styles. */

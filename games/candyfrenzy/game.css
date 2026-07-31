@@ -6,14 +6,12 @@
   --pink: #ff6ec7;
   --text: #ffe9fb;
 }
-
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
   user-select: none;
 }
-
 body {
   background-color: #17061c;
   color: var(--text);
@@ -187,7 +185,6 @@ header {
   font-weight: 700;
   color: #fff;
 }
-
 .bet-adjuster {
   display: flex;
   align-items: center;
@@ -440,15 +437,4 @@ header {
   font-weight: bold;
   color: #fff;
 }
-
-.btn-close-sim {
-  width: 100%;
-  padding: 12px;
-  margin-top: 16px;
-  background: var(--gold);
-  color: #2d1030;
-  border: none;
-  border-radius: 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
+/* End of theme-specific styles. */

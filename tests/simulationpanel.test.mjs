@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
   formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow, renderTargetChipsHtml, renderPlayerExperienceHtml, renderTuneLogHtml,
-} from '../core/SimulationPanel.js';
+} from '../core/TuningPanel.js';
 import { scalePaytable } from '../core/SpinSimulator.js';
 
 test('formatReelFrequencyTablesForCopy preserves distinct small frequencies instead of collapsing them', () => {

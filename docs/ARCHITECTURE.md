@@ -32,7 +32,8 @@ flowchart TB
     TuningReport["Tuner support - reporting side, pure<br/>PlayerExperience · TuneLog · TuningUnits"]
     WorkerPool["core/SimulationWorkerPool.js<br/>+ simulationTrialWorker.js"]
     MechanicRegistry["core/mechanicRegistry.js<br/>name -> mechanic/evaluator/mode"]
-    SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION / TUNE FREQUENCIES UI"]
+    SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION UI"]
+    TuningPanel["core/TuningPanel.js<br/>TUNE FREQUENCIES UI"]
 
     SpinLog["core/SpinLog.js<br/>per-spin log entries + CSV"]
     SpinLogPanel["core/SpinLogPanel.js<br/>SPIN LOG UI"]
@@ -688,11 +689,10 @@ classifier is far easier to test when it takes numbers and returns a value.
   what was asked for, its own error bar, the payout shape, what it violated, and a deep-copied
   snapshot of the frequencies themselves.
 
-## `core/SimulationPanel.js` — browser UI for the simulator
+## `core/SimulationPanel.js` — browser UI for simulation results
 
-The DOM/rendering glue between a game's RUN SIMULATION / TUNE FREQUENCIES buttons and
-`SpinSimulator.js`'s pure functions. A game never talks to `SpinSimulator.js` directly for its
-UI — it calls these instead:
+The DOM/rendering glue between a game's RUN SIMULATION button and the engine's simulation method.
+A game never talks to the simulator directly for its UI — it calls this module instead:
 
 - **`runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins, labels,
   domRefs })`** — runs `engine.runSimulation(...)` and renders RTP/win-distribution/per-symbol
@@ -700,22 +700,11 @@ UI — it calls these instead:
   bucket's header/column wording for a non-line-pay mechanic (e.g. Candy Frenzy passes
   `CascadeSpinMechanic.statsLabels` — "Cluster Wins"/"Cluster Size" instead of "Normal
   Wins"/"Hits"); omitted, it defaults to the line-pay wording.
-- **`openTuneFrequenciesPanel({ paytable, reelFrequencyTables, tuneConfig, domRefs })`** —
-  opens the tuner UI (target RTP/trigger-rate inputs, per-reel ordering-bias dropdowns,
-  live iteration progress), runs `tuneFrequencies` on this thread (its own control flow is
-  cheap — see `runTuneFrequenciesWithPool`'s own doc) backed by a pool of Worker threads
-  (`core/SimulationWorkerPool.js`, each running `core/simulationTrialWorker.js`) that every
-  individual Monte Carlo trial is dispatched to via `tuneFrequencies`' `options.runTrial` hook —
-  see "Parallel tuning" below — and renders a diff plus a copy-pasteable result via
-  `formatReelFrequencyTablesForCopy`. Never mutates the game's live reel tables itself —
-  applying a tuned result means pasting it back into `game.js` and reloading, a deliberate,
-  explicit source change rather than a silent runtime patch. `tuneConfig.mechanic`/
-  `.freeSpinsMode` (cascade-only) and `.winEvaluatorName` (needed because a cascade
-  `winEvaluator` is a per-game closure, not a reusable bare function its own `.name` can
-  identify) cross into each pool Worker by name, resolved back to real objects via
-  `core/mechanicRegistry.js` on that side of `postMessage` (`winEvaluatorName:
-  'checkClusterWins'` alongside `minClusterSize`/`scatterTriggerCount` for a cascade game, or
-  `'checkLineCascadeWins'` alongside `paylines`/`wildSymbol` for a line-pay cascade).
+## `core/TuningPanel.js` — browser UI for frequency tuning
+
+Tuning controls, diagnostics, worker-backed progress, tuning history, and copyable results live in
+this module. It never mutates a game's live reel tables; applying a result remains an explicit
+source change.
 - **`formatReelFrequencyTablesForCopy(reelFrequencyTables, context)`** — renders an array of
   `{ defaults, symbols }` tables back into pasteable `export const FREQUENCY_REELn = {...}`
   source text (4-significant-figure frequencies, so values under 1 don't collapse into each
@@ -763,7 +752,7 @@ names or payout math:
   `SpinLogPanel.js`'s.
 - **`core/SpinLogPanel.js`'s `openSpinLogPanel({ engine, domRefs })`** — the SPIN LOG dev
   button's panel: a live-refreshing table of `engine.spinLog`'s most recent entries plus an
-  export button. Reuses the same shared modal DOM as `SimulationPanel.js`'s panels.
+  export button. Renders into its own developer panel created by `DeveloperPanels.js`.
 - **`core/FileIO.js`'s `downloadTextFile(filename, text, mimeType)`** — generic
   browser-download utility `exportSpinLogCsv` is built on; not spin-log-specific.
 
@@ -839,10 +828,9 @@ cascade it is also `paylines`/`wildSymbol`.
    `core/engine/CoreSlotEngine.js` above), so a game that forgets this call gets a canvas that
    never resizes, loads assets, or renders anything.
 6. Wire the rest of the page's DOM controls (spin/auto/turbo/mute/bet/lines buttons) to the
-   engine's public methods, the RUN SIMULATION / TUNE FREQUENCIES buttons to
-   `runSimulationAndRender`/`openTuneFrequenciesPanel` from `SimulationPanel.js` (passing the
-   same `PAYTABLE`/`FREQUENCY_REELn`/`PAYLINES` the live engine uses), and a SPIN LOG button to
-   `openSpinLogPanel({ engine, domRefs: { simModal, simStats } })` from `SpinLogPanel.js`.
+   engine's public methods, the RUN SIMULATION button to `runSimulationAndRender` from
+   `SimulationPanel.js`, the TUNE FREQUENCIES button to `openTuningPanel` from
+   `TuningPanel.js`, and the SPIN LOG button to `openSpinLogPanel` from `SpinLogPanel.js`.
 
 ### 2. `index.html` — the DOM contract `game.js` expects
 
@@ -851,9 +839,9 @@ supply them. At minimum: `#game-canvas` (the render target), `#btn-spin`, `#btn-
 `#btn-turbo`, `#btn-mute`, bet/lines adjuster buttons and value spans, `#game-ticker`, a
 `#modal-paytable` with a `#paytable-grid-content` container `game.js` fills in dynamically
 (never hand-author paytable text — it drifts), and a `#sim-modal` with the stat elements
-`runSimulationAndRender`/`openTuneFrequenciesPanel` render into (`#sim-stats`, `#sim-rtp`,
-`#sim-total-spins`, `#sim-max-win`, `#sim-free-spins`, plus `#btn-sim`/`#btn-tune`/
-`#btn-close-sim`/`#btn-spinlog` — `SpinLogPanel.js`'s panel reuses the same `#sim-modal`).
+`runSimulationAndRender` renders into (`#sim-stats`, `#sim-rtp`, `#sim-total-spins`,
+`#sim-max-win`, `#sim-free-spins`). `DeveloperPanels.js` creates separate runtime panels for
+tuning and spin logging.
 Copy an existing game's `index.html` as the starting point rather than writing this from
 scratch — the exact id set is easiest to get right by example.
 

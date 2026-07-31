@@ -13,6 +13,20 @@ test('record() appends an entry built from a line-pay spin sequence', () => {
   assert.equal(recorder.entries[0].totalBet, 10);
 });
 
+test('subscribe() is notified for new entries and can unsubscribe', () => {
+  const recorder = new SpinLogRecorder({ betPerLine: 1, linesCount: 1, scatterSymbol: null });
+  const sequence = [{ grid: [['a']], lineWins: [], scatterWin: null, payout: 0 }];
+  const received = [];
+  const unsubscribe = recorder.subscribe(entry => received.push(entry));
+
+  recorder.record({ sequence, scatterWin: null, seed: 1, timestamp: 1, phase: 'base', chargedBet: 1 });
+  unsubscribe();
+  recorder.record({ sequence, scatterWin: null, seed: 2, timestamp: 2, phase: 'base', chargedBet: 1 });
+
+  assert.equal(received.length, 1);
+  assert.equal(received[0].seed, 1);
+});
+
 test('record() computes totalLinePayoutMultiplier from the step\'s own lineWins', () => {
   const recorder = new SpinLogRecorder({ betPerLine: 2, linesCount: 5, scatterSymbol: null });
   const sequence = [{
