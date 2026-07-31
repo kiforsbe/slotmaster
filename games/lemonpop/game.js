@@ -25,42 +25,29 @@ export const BET_STEP = 0.25;
 export const BET_MAX = 50;
 export const WILD_SYMBOL = 'lemonpop';
 export const POP_RUSH_CASCADE_COUNT = 4;
-// Calibrated over the complete no-refill + Pop Rush sequence. An initial 200k calibration was
-// corrected against independent 250k×3 and 1m holdouts (all ladders scale together, preserving
-// the symbol hierarchy and feature logic while targeting 96% RTP).
-export const PAYOUT_SCALE = 1.2557;
+// Calibrated over the complete no-refill + Pop Rush sequence for the seven-symbol reel set.
+// All ladders scale together, preserving hierarchy and feature logic while targeting 96% RTP.
+export const PAYOUT_SCALE = 0.7489;
 const ladder = values => values.map(value => value * PAYOUT_SCALE);
 
-// The five largest symbols are the premium family. They may combine with each other and wild
-// cans, paying half of the strongest natural premium. The ten regular symbols pay only when
-// their natural symbol matches; all fifteen supplied non-wild tiles are therefore in play.
+// Premiums may combine with each other and wild cans, paying half of the strongest natural
+// premium. Normal symbols pay only when their natural symbol matches.
 export const PAYTABLE = {
   lemonice:    { type: 'premium', friendlyName: 'Lemon Ice',    linePayout: ladder([1.30, 4.25, 18.00]) },
-  lemonwedge:  { type: 'premium', friendlyName: 'Lemon Wedge',  linePayout: ladder([1.10, 3.60, 14.00]) },
-  flower:      { type: 'premium', friendlyName: 'Citrus Flower', linePayout: ladder([0.95, 3.00, 11.00]) },
-  heart:       { type: 'premium', friendlyName: 'Lemon Heart', linePayout: ladder([0.80, 2.50, 8.50]) },
+  pinkpop:     { type: 'premium', friendlyName: 'Pink Pop',    linePayout: ladder([1.00, 3.30, 13.50]) },
   pinkfizz:    { type: 'premium', friendlyName: 'Pink Fizz',   linePayout: ladder([0.70, 2.10, 6.80]) },
-  lemoncandy:  { type: 'regular', friendlyName: 'Lemon Candy', linePayout: ladder([0.17, 0.42, 1.40]) },
-  orangeclub:  { type: 'regular', friendlyName: 'Orange Club', linePayout: ladder([0.16, 0.39, 1.25]) },
-  orangecandy: { type: 'regular', friendlyName: 'Orange Candy', linePayout: ladder([0.15, 0.36, 1.12]) },
-  lemon:       { type: 'regular', friendlyName: 'Lemon',       linePayout: ladder([0.14, 0.33, 1.00]) },
-  gumdrop:     { type: 'regular', friendlyName: 'Gumdrop',     linePayout: ladder([0.13, 0.30, 0.90]) },
-  pinkpop:     { type: 'regular', friendlyName: 'Pink Pop',   linePayout: ladder([0.12, 0.28, 0.82]) },
-  orange:      { type: 'regular', friendlyName: 'Orange',     linePayout: ladder([0.11, 0.25, 0.74]) },
-  mint:        { type: 'regular', friendlyName: 'Mint',       linePayout: ladder([0.10, 0.23, 0.67]) },
-  limewedge:   { type: 'regular', friendlyName: 'Lime Wedge', linePayout: ladder([0.09, 0.21, 0.60]) },
-  limecandy:   { type: 'regular', friendlyName: 'Lime Candy', linePayout: ladder([0.08, 0.19, 0.54]) },
+  lemonwedge:  { type: 'regular', friendlyName: 'Lemon Wedge', linePayout: ladder([0.20, 0.52, 1.72]) },
+  gumdrop:     { type: 'regular', friendlyName: 'Gumdrop',     linePayout: ladder([0.16, 0.40, 1.34]) },
+  heart:       { type: 'regular', friendlyName: 'Lemon Heart', linePayout: ladder([0.14, 0.35, 1.16]) },
+  lemoncandy:  { type: 'regular', friendlyName: 'Lemon Candy', linePayout: ladder([0.12, 0.30, 1.00]) },
   lemonpop:    { type: 'wild', friendlyName: 'Wild Can', wild: true, linePayout: ladder([0.45, 1.50, 6.00]) },
 };
 
 const FREQUENCIES = {
   defaults: { minGap: 1, maxStack: 2, minStack: 1, minFrequency: 0.01, maxFrequency: 0.30 },
   symbols: {
-    lemonice: { frequency: 0.036 }, lemonwedge: { frequency: 0.036 }, flower: { frequency: 0.036 },
-    heart: { frequency: 0.036 }, pinkfizz: { frequency: 0.036 },
-    lemoncandy: { frequency: 0.260 }, orangeclub: { frequency: 0.240 }, orangecandy: { frequency: 0.120 },
-    lemon: { frequency: 0.100 }, gumdrop: { frequency: 0.060 }, pinkpop: { frequency: 0.040 },
-    orange: { frequency: 0.020 }, mint: { frequency: 0.015 }, limewedge: { frequency: 0.010 }, limecandy: { frequency: 0.010 },
+    lemonice: { frequency: 0.025 }, pinkpop: { frequency: 0.040 }, pinkfizz: { frequency: 0.055 },
+    lemonwedge: { frequency: 0.150 }, gumdrop: { frequency: 0.170 }, heart: { frequency: 0.200 }, lemoncandy: { frequency: 0.250 },
   },
 };
 export const FREQUENCY_REELS = REEL_SEEDS.map(() => structuredClone(FREQUENCIES));

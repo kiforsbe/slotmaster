@@ -2,7 +2,7 @@
 
 Lemon Pop is a 5×5 no-refill cascade game. Horizontal and vertical straight runs of 3–5 symbols pay; a cross pays once in each direction.
 
-- All 15 non-wild Lemon Pop tiles appear on the reel strips. The `lemonpop` can is a persistent wild created only by wins and Pop Rush effects.
+- **Premiums:** Lemon Ice, Pink Pop, Pink Fizz. **Normal symbols:** Lemon Wedge, Gumdrop, Lemon Heart, Lemon Candy. The `lemonpop` can is a persistent wild created only by wins and Pop Rush effects.
 - Each paying run is removed, leaves a new 1× wild can at its centre, and the remaining symbols fall. Empty top cells are never refilled.
 - A natural single-symbol run with wilds pays full. Mixed premium runs pay half of the best premium; mixed regular runs do not pay. All-wild runs use the Wild Can ladder.
 - A 2× wild can doubles a winning run once; it is consumed when used. Four winning base cascades award one free Pop Rush respin, with no retrigger.

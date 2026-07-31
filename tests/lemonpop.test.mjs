@@ -14,15 +14,15 @@ const winsFor = (rows, wildMultipliers = null) => checkStraightLineWins(gridFrom
 
 test('Lemon Pop pays maximal 3/4/5 horizontal and vertical runs and a cross once per direction', () => {
   const three = winsFor([
-    ['lemon', WILD_SYMBOL, 'lemon', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
+    ['lemonwedge', WILD_SYMBOL, 'lemonwedge', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
   ]).clusterWins;
   assert.equal(three.length, 1);
   assert.equal(three[0].count, 3);
-  assert.equal(three[0].payout, PAYTABLE.lemon.linePayout[0]);
+  assert.equal(three[0].payout, PAYTABLE.lemonwedge.linePayout[0]);
   assert.deepEqual(three[0].wildSpawnPosition, [1, 0]);
 
   const four = winsFor([
-    ['heart', 'flower', 'heart', 'flower', null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
+    ['pinkpop', 'pinkfizz', 'pinkpop', 'pinkfizz', null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
   ]).clusterWins[0];
   assert.equal(four.count, 4);
   assert.equal(four.mixed, true);
@@ -45,18 +45,18 @@ test('Lemon Pop pays maximal 3/4/5 horizontal and vertical runs and a cross once
 
 test('Lemon Pop valuation honors natural, mixed premium, mixed regular, all-wild, and 2x rules', () => {
   const natural = winsFor([
-    ['heart', WILD_SYMBOL, 'heart', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
+    ['pinkpop', WILD_SYMBOL, 'pinkpop', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
   ]).clusterWins[0];
-  assert.equal(natural.payout, PAYTABLE.heart.linePayout[0]);
-  assert.equal(natural.symbol, 'heart');
+  assert.equal(natural.payout, PAYTABLE.pinkpop.linePayout[0]);
+  assert.equal(natural.symbol, 'pinkpop');
 
   const mixedPremium = winsFor([
-    ['heart', 'lemonice', 'flower', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
+    ['pinkpop', 'lemonice', 'pinkfizz', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
   ]).clusterWins[0];
   assert.equal(mixedPremium.symbol, 'lemonice');
   assert.equal(mixedPremium.payout, PAYTABLE.lemonice.linePayout[0] * 0.5);
   assert.equal(winsFor([
-    ['lemon', 'mint', 'orange', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
+    ['lemonwedge', 'gumdrop', 'heart', null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null], [null, null, null, null, null],
   ]).clusterWins.length, 0);
 
   const allWildMultipliers = Array.from({ length: 5 }, () => Array(5).fill(1));
@@ -84,7 +84,7 @@ test('no-refill gravity preserves spawned cans and their multiplier while leavin
 
 test('each seeded Pop Rush variant applies deterministically and Citrus Cross creates its specified cans', () => {
   const base = gridFromRows([
-    ['lemonice', 'lemonice', 'orange', 'mint', 'limecandy'], ['heart', 'heart', 'orange', 'mint', 'limecandy'], ['flower', 'flower', 'orange', 'mint', 'limecandy'], ['pinkfizz', 'pinkfizz', 'orange', 'mint', 'limecandy'], ['lemonwedge', 'lemonwedge', 'orange', 'mint', 'limecandy'],
+    ['lemonice', 'lemonice', 'gumdrop', 'heart', 'lemoncandy'], ['pinkpop', 'pinkpop', 'gumdrop', 'heart', 'lemoncandy'], ['pinkfizz', 'pinkfizz', 'gumdrop', 'heart', 'lemoncandy'], ['lemonice', 'lemonice', 'gumdrop', 'heart', 'lemoncandy'], ['pinkpop', 'pinkpop', 'gumdrop', 'heart', 'lemoncandy'],
   ]);
   const mults = Array.from({ length: 5 }, () => Array(5).fill(1));
   POP_RUSH_VARIANTS.forEach(variant => {
@@ -128,7 +128,7 @@ test('one paid spin triggers no more than one seeded Pop Rush and workers rebuil
   assert.deepEqual(rebuilt(board, null), checkStraightLineWins(board, PAYTABLE, { wildSymbol: WILD_SYMBOL, wildMultipliers: null }));
 });
 
-test('Lemon Pop uses a 5x5 reel shape, includes every supplied paying symbol, and never puts the wild can on strips', () => {
+test('Lemon Pop uses a 5x5 reel shape, includes every configured paying symbol, and never puts the wild can on strips', () => {
   assert.equal(REEL_STRIPS.length, REELS_COUNT);
   REEL_STRIPS.forEach(strip => {
     assert.equal(strip.length > ROWS_COUNT, true);
