@@ -330,7 +330,7 @@ export class CascadeDropAnimator {
 
       const waitForClear = () => {
         const effectiveClearDuration = engine._stopRequested
-          ? Math.min(clearDuration, turbo ? 80 : 180)
+          ? Math.min(clearDuration, engine.turboMode ? 80 : 180)
           : clearDuration;
         if (Date.now() - this._clearStartTime < effectiveClearDuration) {
           requestAnimationFrame(waitForClear);

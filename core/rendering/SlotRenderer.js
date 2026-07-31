@@ -13,7 +13,7 @@
 import { drawSpriteSymbol } from './SpriteDrawer.js';
 import { SpriteAnimation } from '../assets/AssetLoader.js';
 import { resolveAnimatedValue } from '../animation/AnimatedValue.js';
-import { buildClusterOutlinePaths, buildRoundedClusterOutlineCommands } from './ClusterOutline.js';
+import { ClusterOutlineRenderer } from './ClusterOutlineRenderer.js';
 
 // How far outside the grid a payline's numbered tag sits - matches both engines' own
 // LINE_TAG_OFFSET constant, so the line runs tag to tag either way.
@@ -25,15 +25,6 @@ const LINE_TAG_OFFSET = 15;
 // at all has its whole duration as that "post-breakdown segment", so this is the only fade rule
 // there is - not a breakdown-specific quirk.
 const POPUP_FADE_START_FRACTION = 0.6;
-
-// One per payline, cycled if a game declares more - CascadeEngine.js's own LINE_COLORS, used by
-// drawWinLine (a cascade game's payline win, e.g. Mayan Tumble). SlotEngine.js's own line-pay
-// coloring (getNeonColorForLine) is a different, longer palette - kept separate below rather
-// than unified, since changing either game's existing win-line colors is not this refactor's job.
-const CASCADE_LINE_COLORS = [
-  '#ff003c', '#00ff66', '#00d2ff', '#ffcc00', '#ff00ff',
-  '#ff6600', '#00ffff', '#9933ff', '#d4af37', '#33ff33',
-];
 
 const DEFAULT_THEME = {
   backdropInner: '#1a1405',
@@ -53,6 +44,10 @@ const DEFAULT_THEME = {
 };
 
 export class SlotRenderer {
+  constructor({ clusterOutlineRenderer = new ClusterOutlineRenderer() } = {}) {
+    this.clusterOutlineRenderer = clusterOutlineRenderer;
+  }
+
   drawLoading(ctx, canvasWidth, canvasHeight, theme = {}) {
     const t = { ...DEFAULT_THEME, ...theme };
     ctx.fillStyle = t.loadingBackground;
@@ -695,104 +690,6 @@ export class SlotRenderer {
     }
   }
 
-  // A cascade win's payline path (line-pay-over-cascade games, e.g. Mayan Tumble) - a no-op for
-  // any win with no lineIndex (a cluster win), so a cluster game (Candy Frenzy) never draws this.
-  // Gated on the animator actively clearing a cluster (currentClusterWins non-null), not on a
-  // 'clearing' engine state - CoreSlotEngine's state machine doesn't have CascadeEngine.js's
-  // fine-grained per-frame states (dropping_in/clearing/falling), only the coarser
-  // idle/spinning/evaluating/showing_wins shared with the line-pay engine.
-  drawWinLine(ctx, engineState, layout, paylines, reelsCount) {
-    const { currentClusterWins, currentClusterIndex } = engineState;
-    if (!currentClusterWins || !paylines) return;
-    const win = currentClusterWins?.[currentClusterIndex];
-    if (!win || win.lineIndex == null) return;
-    const path = paylines[win.lineIndex];
-    if (!path) return;
-
-    const { reelsX, reelsY, reelsWidth, symbolWidth, symbolHeight } = layout;
-    const color = CASCADE_LINE_COLORS[win.lineIndex % CASCADE_LINE_COLORS.length];
-    const lastReel = reelsCount - 1;
-    const centerOf = (col) => ({
-      x: reelsX + (col + 0.5) * symbolWidth,
-      y: reelsY + (path[col] + 0.5) * symbolHeight,
-    });
-    const leftTagX = reelsX - LINE_TAG_OFFSET;
-    const rightTagX = reelsX + reelsWidth + LINE_TAG_OFFSET;
-
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 12;
-    ctx.beginPath();
-    ctx.moveTo(leftTagX, centerOf(0).y);
-    for (let col = 0; col < reelsCount; col++) {
-      const { x, y } = centerOf(col);
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(rightTagX, centerOf(lastReel).y);
-    ctx.stroke();
-    ctx.restore();
-
-    const label = win.lineIndex + 1;
-    this.drawLineTag(ctx, label, leftTagX, centerOf(0).y, color);
-    this.drawLineTag(ctx, label, rightTagX, centerOf(lastReel).y, color);
-  }
-
-  // Draw the outer perimeter of the cluster currently being collected. Unlike a translucent
-  // fill, this leaves the symbols, their clear effect, particles, and win popup visible while
-  // still making an irregular cluster's actual shape immediately readable. This is deliberately
-  // configured per game: line-pay cascades have paths, not cluster shapes, so they simply omit
-  // `clusterVisualizer`. Its drawing options intentionally mirror CanvasRenderingContext2D:
-  // { color, alpha, lineWidth, lineCap, lineJoin, miterLimit, lineDash, lineDashOffset,
-  //   cornerRadius, roundConcaveCorners, glow, glowColor, pulse }. Corner radius is built from
-  // exact, validated cubic arcs along an ordered perimeter (not from line joins). `glow` is a
-  // blur radius (or false for no glow), and `pulse` may be false or { minAlpha, maxAlpha, periodMs }.
-  drawClusterOutline(ctx, engineState, layout, visualizer = {}) {
-    const { currentClusterWins, currentClusterIndex } = engineState;
-    const cluster = currentClusterWins?.[currentClusterIndex];
-    if (!cluster?.winningPositions?.length || cluster.lineIndex != null) return;
-
-    const { symbolWidth, symbolHeight } = layout;
-    const pulseOptions = visualizer.pulse === false ? null : (visualizer.pulse || {});
-    const pulse = pulseOptions
-      ? (pulseOptions.minAlpha ?? 0.82)
-        + ((pulseOptions.maxAlpha ?? 1) - (pulseOptions.minAlpha ?? 0.82))
-          * ((Math.sin((Date.now() / (pulseOptions.periodMs ?? 690)) * Math.PI * 2) + 1) / 2)
-      : 1;
-    const glow = visualizer.glow === false ? 0 : (visualizer.glow ?? 14);
-
-    ctx.save();
-    ctx.strokeStyle = visualizer.color || '#fff4a8';
-    ctx.lineWidth = visualizer.lineWidth || Math.max(3, Math.min(symbolWidth, symbolHeight) * 0.075);
-    ctx.lineCap = visualizer.lineCap || 'round';
-    ctx.lineJoin = visualizer.lineJoin || 'round';
-    if (visualizer.miterLimit != null) ctx.miterLimit = visualizer.miterLimit;
-    ctx.setLineDash(visualizer.lineDash || []);
-    ctx.lineDashOffset = visualizer.lineDashOffset ?? 0;
-    ctx.globalAlpha = (visualizer.alpha ?? 1) * pulse;
-    ctx.shadowColor = visualizer.glowColor || ctx.strokeStyle;
-    ctx.shadowBlur = glow;
-    ctx.beginPath();
-
-    const paths = buildClusterOutlinePaths(cluster.winningPositions, layout);
-    buildRoundedClusterOutlineCommands(paths, visualizer).forEach(commands => {
-      commands.forEach(command => {
-        if (command.type === 'move') ctx.moveTo(command.x, command.y);
-        else if (command.type === 'line') ctx.lineTo(command.x, command.y);
-        else ctx.bezierCurveTo(command.cp1x, command.cp1y, command.cp2x, command.cp2y, command.x, command.y);
-      });
-    });
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  drawLineTag(ctx, num, x, y, color) {
-    this.drawTag(ctx, num, x, y, color);
-  }
-
   // The amount line's text at a given moment - a plain "+$total" for an ordinary cluster win
   // (p.breakdownHoldMs is 0 - no tileMultiplier at all, e.g. base game, or the config turned
   // the breakdown off), or - when a free-spins mode enriched this win with
@@ -995,13 +892,16 @@ export class SlotRenderer {
 
     this.drawGridBorders(ctx, layout, engine.config.rowsCount, engine.config.reelsCount, theme);
     if (!theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
-    this.drawWinLine(ctx, { state: engine.state, currentClusterWins: animator?.currentClusterWins, currentClusterIndex: animator?.currentClusterIndex }, layout, engine.config.paylines, engine.config.reelsCount);
-    if (engine.config.clusterVisualizer) {
-      this.drawClusterOutline(ctx, {
-        currentClusterWins: animator?.currentClusterWins,
-        currentClusterIndex: animator?.currentClusterIndex,
-      }, layout, engine.config.clusterVisualizer === true ? {} : engine.config.clusterVisualizer);
-    }
+    const cascadeVisualizer = engine.config.clusterVisualizer === true ? {} : (engine.config.clusterVisualizer || {});
+    this.clusterOutlineRenderer.render(ctx, {
+      currentClusterWins: animator?.currentClusterWins,
+      currentClusterIndex: animator?.currentClusterIndex,
+      layout,
+      paylines: engine.config.paylines,
+      reelsCount: engine.config.reelsCount,
+      visualizer: cascadeVisualizer,
+      drawClusterOutline: !!engine.config.clusterVisualizer,
+    });
     engine.particleSystem?.render(ctx);
     if (animator?.activePopups) {
       const now = Date.now();

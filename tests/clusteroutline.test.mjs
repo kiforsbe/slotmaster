@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildClusterOutlinePaths, buildRoundedClusterOutlineCommands } from '../core/rendering/ClusterOutline.js';
+import { buildClusterOutlinePaths, buildRoundedClusterOutlineCommands } from '../core/math/ClusterOutline.js';
 
 const layout = { reelsX: 0, reelsY: 0, symbolWidth: 10, symbolHeight: 10 };
 const k = (x, y) => `${x},${y}`;

@@ -381,6 +381,14 @@ async function initGame() {
     winEvaluator,
     scatterSymbol: 'gold',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
+    clusterVisualizer: {
+      color: '#fff0a6', alpha: 1, lineWidth: 4,
+      lineCap: 'round', lineJoin: 'round', lineDash: [], cornerRadius: 10,
+      roundConcaveCorners: true,
+      glowColor: '#fffc54', glow: 10,
+      pulse: { minAlpha: 0.82, maxAlpha: 1, periodMs: 690 },
+    },
+    clearCellHighlight: false,
     assetManifest: GAME_ASSET_MANIFEST,
     betAmount: BET_AMOUNT,
     onStateChange: (state) => updateSlotStateUI({ engine, state, refs: { spin: btnSpin, ticker: gameTicker }, onUpdate: updateUI, messages: {
