@@ -100,6 +100,18 @@ import { measureSimulationTrials } from '../simulation/TrialMeasurement.js';
  * @param {number} [options.triggerRateTolerancePct=0.15] - Acceptable +/- band around that.
  * @param {number} [options.trialSpins=800000] - Base spins simulated per candidate.
  * @param {number} [options.trialsPerPoint=3] - Independent trials averaged per candidate (reduces rare-event noise).
+ * @param {number|null} [options.searchTrialSpins=null] - Optional cheaper Phase 2 exploration
+ * budget. Null uses `trialSpins`; when lower, use `finalValidation` to promote finalists back to
+ * the full budget before returning a result.
+ * @param {number|null} [options.searchTrialsPerPoint=null] - Optional Phase 2 exploration trial
+ * count, analogous to `searchTrialSpins`.
+ * @param {boolean} [options.finalValidation=false] - Re-measure and rank the strongest distinct
+ * Phase 2 candidates on fresh, full-fidelity common random-number trials before returning one.
+ * @param {number|null} [options.finalValidationSpins=null] - Holdout spins per finalist trial;
+ * null uses `trialSpins`.
+ * @param {number|null} [options.finalValidationTrials=null] - Holdout trials per finalist;
+ * null uses at least three trials.
+ * @param {number} [options.finalistCount=4] - Maximum distinct reel strips to validate.
  * @param {number} [options.maxIterations=150] - Nelder-Mead iterations for the one joint
  *   Phase 2 search (each iteration is cheap - usually one measure() call).
  * @param {number} [options.orderingPenaltyWeight=0.5] - Weight of the soft ordering-violation
@@ -408,6 +420,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     triggerRateTolerancePct = 0.15,
     trialSpins = 800000,
     trialsPerPoint = 3,
+    // Optional cheaper Phase 2 exploration budget. Phase 1's trigger search remains at the full
+    // measurement budget; Phase 2 can rank candidates on common random numbers cheaply, then
+    // finalValidation promotes the strongest distinct strips to the full holdout budget.
+    searchTrialSpins = null,
+    searchTrialsPerPoint = null,
     maxIterations = 150,
     orderingPenaltyWeight = 0.5,
     limitPenaltyWeight = 0.5,
@@ -464,6 +481,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     stallWidenFactor = 1.5,
     maxStallRestarts = 4,
     earlyAcceptErrorPct = 0.01,
+    // Search measurements are deliberately cheap enough to explore. Finalists are remeasured on
+    // fresh seeds before one can be reported as the tune's answer, avoiding winner's luck from a
+    // stochastic optimizer selecting the best-looking training draw.
+    // Kept opt-in at the library boundary for backwards-compatible batch use. The developer
+    // panel explicitly enables it, so shipped interactive tuning always validates its answer.
+    finalValidation = false,
+    finalValidationSpins = null,
+    finalValidationTrials = null,
+    finalistCount = 4,
     freeSpinsCount,
     freeSpinsAwardTable,
     retriggerFreeSpinsAwardTable,
@@ -491,13 +517,14 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     reelsCount, rowsCount, reelLength, reelSeeds, betPerLine, linesCount,
     targetRtp, rtpTolerancePct, maxRtpStdError,
     targetTriggerRatePct, triggerRateTolerancePct,
-    trialSpins, trialsPerPoint, maxIterations,
+    trialSpins, trialsPerPoint, searchTrialSpins, searchTrialsPerPoint, maxIterations,
     orderingPenaltyWeight, limitPenaltyWeight, uniformityPenaltyWeight, stdErrorPenaltyWeight,
     triggerRatePenaltyWeight, maxTriggerRefineSteps, spacingPenaltyWeight, orderingBiasByReel,
     penaltyNormalization, targetVolatility, volatilityTolerance, volatilityPenaltyWeight,
     reelCoupling, maxReelDeviation,
     initialStepSize, searchAlgorithm, bestAcceptanceZ, searchSeed,
     stallWindowIterations, stallWidenFactor, maxStallRestarts, earlyAcceptErrorPct,
+    finalValidation, finalValidationSpins, finalValidationTrials, finalistCount,
     initialWeightStrategy, freeSpinsCount, hasExpandingWild, solvePayoutScale,
     rotateSeedPerGeneration, measureHeadroom, skipValidation,
     measureSensitivity, sensitivitySpins, sensitivityAt, tuneStructural,
@@ -506,6 +533,25 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   const orderingBiasFor = (r) => (orderingBiasByReel && orderingBiasByReel[r] != null) ? orderingBiasByReel[r] : -1;
 
   const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve, 0));
+  // Phase 0 points are independent. A pool-backed runTrial can therefore use the same cores as
+  // candidate trials instead of measuring one one-trial sensitivity point while every other
+  // worker sits idle. In-process simulation stays deliberately serial because it cannot yield
+  // CPU work to another JS thread.
+  const diagnosticConcurrency = runTrial
+    ? Math.max(1, Math.min(8, ((typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4) - 1))
+    : 1;
+  async function mapMeasurements(items, mapper, concurrency = diagnosticConcurrency) {
+    const results = new Array(items.length);
+    let next = 0;
+    const worker = async () => {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await mapper(items[index], index);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, worker));
+    return results;
+  }
 
   if (reelFrequencyTables.length !== reelsCount) {
     throw new Error(`tuneFrequencies requires reelFrequencyTables to be an array of length reelsCount (${reelsCount})`);
@@ -513,6 +559,24 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
 
   const baseReelTables = reelFrequencyTables.map(rt => JSON.parse(JSON.stringify(rt)));
   const triggerSymbols = Object.keys(paytable).filter(s => paytable[s].triggerFreeSpins === true);
+  const phase2TrialSpins = Math.max(1, Math.floor(searchTrialSpins ?? trialSpins));
+  const phase2TrialsPerPoint = Math.max(1, Math.floor(searchTrialsPerPoint ?? trialsPerPoint));
+  const phase2UsesReducedMeasurement = phase2TrialSpins < trialSpins || phase2TrialsPerPoint < trialsPerPoint;
+  // Existing library callers receive the same player-experience reporting as before. The faster
+  // validated flow can omit shape while exploring because its selected finalist is remeasured
+  // with shape collection on for the final player report.
+  const collectSearchRoundStats = !finalValidation || (targetVolatility != null && volatilityPenaltyWeight > 0);
+  const measurementCache = new Map();
+  const measurementCacheLimit = 256;
+  const measurementCacheStats = { hits: 0, misses: 0 };
+  const paytableIds = new WeakMap();
+  let nextPaytableId = 1;
+
+  const stripSignatureOf = (reelStrips) => reelStrips.map(strip => strip.join('\u001f')).join('\u001e');
+  const paytableIdOf = (table) => {
+    if (!paytableIds.has(table)) paytableIds.set(table, nextPaytableId++);
+    return paytableIds.get(table);
+  };
 
   // First thing out, before validation and before a single spin - a caller that exports anything
   // mid-run needs these from the start, not once the run resolves.
@@ -620,10 +684,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // measures many points cheaply (fewer spins, one trial each) because it ranks knobs by leverage
   // rather than converging any one of them - and reports its own measured noise floor so that
   // cheapness stays visible. Omitted everywhere else, i.e. unchanged behavior.
-  async function measure(reelTables, rngSeed, lengthOverride, paytableOverride, spinsOverride, trialsOverride) {
+  async function measure(
+    reelTables, rngSeed, lengthOverride, paytableOverride, spinsOverride, trialsOverride,
+    { reelStrips: providedReelStrips = null, collectRoundStats = false } = {},
+  ) {
     const spins = spinsOverride ?? trialSpins;
     const trials = trialsOverride ?? trialsPerPoint;
-    const reelStrips = buildReelStrips(reelTables, lengthOverride);
+    const reelStrips = providedReelStrips ?? buildReelStrips(reelTables, lengthOverride);
     // A cascade game's `winEvaluator` is typically a closure over its own paytable - e.g.
     // `(grid) => checkClusterWins(grid, PAYTABLE, ...)` - so swapping `config.paytable` alone has
     // no effect on it and the run silently measures the ORIGINAL payouts. That is not a
@@ -634,12 +701,31 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const evaluatorForRun = (paytableOverride && winEvaluatorFactory)
       ? winEvaluatorFactory(paytableOverride)
       : winEvaluator;
+    const paytableForRun = paytableOverride ?? paytable;
     const config = {
-      reelsCount, rowsCount, paytable: paytableOverride ?? paytable, reelStrips, paylines, winEvaluator: evaluatorForRun, wildSymbol, scatterSymbol,
+      reelsCount, rowsCount, paytable: paytableForRun, reelStrips, paylines, winEvaluator: evaluatorForRun, wildSymbol, scatterSymbol,
       freeSpinsCount, freeSpinsAwardTable, retriggerFreeSpinsAwardTable, hasExpandingWild,
       mechanic, freeSpinsMode,
     };
-    return measureSimulationTrials({
+    // Integer reel strips are the actual outcome space. Multiple log-space points can project to
+    // the same strip (especially on a rounding plateau or a clamped refinement boundary), so
+    // cache the expensive simulation by strip/seed/sample contract while still scoring each
+    // point's continuous penalties independently.
+    const cacheable = rngSeed != null;
+    const cacheKey = cacheable
+      ? `${paytableIdOf(paytableForRun)}|${rngSeed}|${spins}|${trials}|${collectRoundStats ? 1 : 0}|${stripSignatureOf(reelStrips)}`
+      : null;
+    if (cacheKey && measurementCache.has(cacheKey)) {
+      measurementCacheStats.hits++;
+      const cached = measurementCache.get(cacheKey);
+      // Map insertion order gives the cache a bounded least-recently-used policy without a
+      // second data structure.
+      measurementCache.delete(cacheKey);
+      measurementCache.set(cacheKey, cached);
+      return cached;
+    }
+    if (cacheKey) measurementCacheStats.misses++;
+    const pending = measureSimulationTrials({
       config,
       spins,
       trials,
@@ -647,7 +733,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       betPerLine,
       linesCount,
       runTrial,
+      collectRoundStats,
     });
+    if (!cacheKey) return pending;
+    measurementCache.set(cacheKey, pending);
+    while (measurementCache.size > measurementCacheLimit) measurementCache.delete(measurementCache.keys().next().value);
+    pending.catch(() => {
+      if (measurementCache.get(cacheKey) === pending) measurementCache.delete(cacheKey);
+    });
+    return pending;
   }
 
   // ---- Early preview: report Phase 2's chosen starting point immediately, before Phase 1 runs ----
@@ -880,10 +974,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // different seeds, reported as twice the sample standard deviation. Without it a 1pp
     // difference between two ladder points reads exactly like a 100pp one, only smaller - and the
     // whole purpose here is to stop a developer chasing a parameter that did nothing.
-    const noiseSamples = [];
-    for (let i = 0; i < 3; i++) {
-      noiseSamples.push((await sweepMeasure(sweepBase, searchSeed + 880011 + i * 7919)).rtp);
-    }
+    const noiseSamples = await mapMeasurements([0, 1, 2], async (i) =>
+      (await sweepMeasure(sweepBase, searchSeed + 880011 + i * 7919)).rtp,
+    );
     const noiseMean = noiseSamples.reduce((a, b) => a + b, 0) / noiseSamples.length;
     const noiseSd = Math.sqrt(noiseSamples.reduce((s, v) => s + (v - noiseMean) ** 2, 0) / (noiseSamples.length - 1));
     const noiseFloorPct = 2 * noiseSd;
@@ -891,21 +984,25 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const ladders = buildLadders(sweepBase, { reelLength });
     const ladderResults = [];
     for (const { knob, current, values } of ladders) {
-      const ladder = [];
-      for (const value of values) {
-        if (signal?.aborted) break;
-        // Each knob reaches the measurement by its own route: the reel-arrangement knobs through
-        // `defaults`, reel length through the strip builder, payout scale through the paytable.
+      // Points within one knob's ladder are independent. Measure them concurrently, then add and
+      // report them in configured-value order so the summary and progress contract stay stable.
+      const points = await mapMeasurements(values, async (value) => {
+        if (signal?.aborted) return null;
         const tables = ['stackChance', 'maxStack', 'minStack', 'minGap'].includes(knob)
           ? withStructuralDefaults(sweepBase, { [knob]: value })
           : sweepBase;
         const lengthOverride = knob === 'reelLength' ? value : undefined;
         const paytableOverride = knob === 'payoutScale' ? scalePaytable(paytable, value) : undefined;
         const m = await sweepMeasure(tables, searchSeed + 880100, lengthOverride, paytableOverride);
-        ladder.push({ value, rtp: m.rtp, triggerRate: m.triggerRate });
+        return { value, rtp: m.rtp, triggerRate: m.triggerRate };
+      });
+      const ladder = [];
+      for (const point of points) {
+        if (!point) continue;
+        ladder.push(point);
         if (onProgress) {
           await onProgress('sensitivity', ladder.length, null,
-            { event: 'point', knob, value, current, rtp: m.rtp, triggerRate: m.triggerRate, of: values.length }, null);
+            { event: 'point', knob, value: point.value, current, rtp: point.rtp, triggerRate: point.triggerRate, of: values.length }, null);
         }
         await yieldToEventLoop();
       }
@@ -948,6 +1045,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       knobs: opts.knobs ?? null,
       respectDesignIntent: opts.respectDesignIntent ?? true,
       maxMeasurements: opts.maxMeasurements ?? 8,
+      concurrency: diagnosticConcurrency,
       signal,
       // Every trial differs from the sweep baseline ONLY in the structural defaults under test -
       // this is the call site withStructuralDefaults' own comment always anticipated.
@@ -1479,7 +1577,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     // position by which a run exceeds maxStack. Both are raw counts, so `spacingPenaltyWeight`
     // alone sets their scale against the RTP error term.
 
-    function spacingPenaltyOf(reelTables) {
+    function spacingPenaltyOf(reelTables, strips = buildReelStrips(reelTables)) {
       let total = 0;
       // Violations as a fraction of the runs that COULD have violated. This is the term the raw
       // scale hurt worst: measured on Candy Frenzy the shipped tables carry 301 violations, so at
@@ -1489,7 +1587,6 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       let violatingRuns = 0;
       let totalRuns = 0;
       const violations = [];
-      const strips = buildReelStrips(reelTables);
       strips.forEach((strip, r) => {
         const n = strip.length;
         const reelTable = reelTables[r];
@@ -1537,6 +1634,77 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     const baseNmSeed = searchSeed + 700000;
 
     let rtpMin = Infinity, rtpMax = -Infinity;
+    const finalistArchive = new Map();
+    const finalistLimit = Math.max(1, Math.floor(finalistCount));
+
+    function rememberFinalist(candidate) {
+      if (!finalValidation) return;
+      const previous = finalistArchive.get(candidate.stripSignature);
+      if (previous && previous.loss <= candidate.loss) return;
+      finalistArchive.set(candidate.stripSignature, candidate);
+      while (finalistArchive.size > finalistLimit) {
+        const worst = [...finalistArchive.entries()]
+          .reduce((a, b) => a[1].loss >= b[1].loss ? a : b);
+        finalistArchive.delete(worst[0]);
+      }
+    }
+
+    // Search and final holdout measurements use the same deterministic penalty calculation. The
+    // only difference is the seed/sample contract, never a second approximation of the loss.
+    function scoreCandidate(reelTables, reelStrips, measured, { trackSearch = false } = {}) {
+      const { total: orderPenalty, normalized: orderNorm, violations: orderingViolations } = orderingPenaltyOf(reelTables);
+      const { total: boundsPenalty, normalized: boundsNorm, violations: limitViolations } = limitPenaltyOf(reelTables);
+      const { total: uniformityPenalty, normalized: uniformityNorm } = uniformityPenaltyOf(reelTables);
+      const { total: spacingPenalty, normalized: spacingNorm, violations: spacingViolations } = spacingPenaltyWeight > 0
+        ? spacingPenaltyOf(reelTables, reelStrips)
+        : { total: 0, normalized: 0, violations: [] };
+      const norm = penaltyNormalization === 'normalized';
+      const sigma = measured.roundStats?.volatilityIndex ?? null;
+      const volatilityPenalty = (volatilityBand && sigma != null)
+        ? Math.max(0, sigma - volatilityBand.max, volatilityBand.min - sigma)
+        : 0;
+      const error = Math.abs(measured.rtp - targetRtp);
+      const triggerPenalty = Math.max(0, Math.abs(measured.triggerRate - targetTriggerRatePct) - triggerRateTolerancePct);
+      const candidate = {
+        loss: error
+          + orderingPenaltyWeight * (norm ? orderNorm : orderPenalty)
+          + limitPenaltyWeight * (norm ? boundsNorm : boundsPenalty)
+          + uniformityPenaltyWeight * (norm ? uniformityNorm : uniformityPenalty)
+          + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0)
+          + triggerRatePenaltyWeight * triggerPenalty
+          + volatilityPenaltyWeight * volatilityPenalty
+          + spacingPenaltyWeight * (norm ? spacingNorm : spacingPenalty),
+        triggerRatePenalty: triggerPenalty,
+        volatilityPenalty,
+        spacingPenalty,
+        spacingPenaltyNormalized: spacingNorm,
+        spacingViolations,
+        rtp: measured.rtp,
+        triggerRate: measured.triggerRate,
+        trialRtpMin: measured.trialRtpMin,
+        trialRtpMax: measured.trialRtpMax,
+        trialRtpStdDev: measured.trialRtpStdDev,
+        trialRtpStdError: measured.trialRtpStdError,
+        roundStats: measured.roundStats ?? null,
+        error,
+        orderingPenalty: orderPenalty,
+        orderingPenaltyNormalized: orderNorm,
+        limitPenalty: boundsPenalty,
+        limitPenaltyNormalized: boundsNorm,
+        uniformityPenalty,
+        uniformityPenaltyNormalized: uniformityNorm,
+        orderingViolations,
+        limitViolations,
+        trial: reelTables,
+        stripSignature: stripSignatureOf(reelStrips),
+      };
+      if (trackSearch) {
+        if (measured.rtp < rtpMin) rtpMin = measured.rtp;
+        if (measured.rtp > rtpMax) rtpMax = measured.rtp;
+        rememberFinalist(candidate);
+      }
+      return candidate;
+    }
 
     // `generation` is supplied by cmaes (nelderMead leaves it undefined). When
     // `rotateSeedPerGeneration` is on, it shifts the measurement seed so every generation sees a
@@ -1556,73 +1724,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     function makeEvaluate(nmSeed) {
       return async function evaluate(x, generation) {
         const reelTables = projectPoint(x);
+        const reelStrips = buildReelStrips(reelTables);
         const seedForThisPoint = (rotateSeedPerGeneration && generation != null)
           ? nmSeed + generation * 65537
           : nmSeed;
-        const measured = await measure(reelTables, seedForThisPoint);
-        const { total: orderPenalty, normalized: orderNorm, violations: orderingViolations } = orderingPenaltyOf(reelTables);
-        const { total: boundsPenalty, normalized: boundsNorm, violations: limitViolations } = limitPenaltyOf(reelTables);
-        const { total: uniformityPenalty, normalized: uniformityNorm } = uniformityPenaltyOf(reelTables);
-        // Skipped entirely at weight 0 - this regenerates every reel strip, which is cheap
-        // beside a Monte Carlo run but pointless when it cannot affect `loss`.
-        const { total: spacingPenalty, normalized: spacingNorm, violations: spacingViolations } = spacingPenaltyWeight > 0
-          ? spacingPenaltyOf(reelTables)
-          : { total: 0, normalized: 0, violations: [] };
-        // Which denomination the LOSS is built from. Both are always reported either way, so a
-        // weight tuned in one mode can be translated into the other instead of guessed at.
-        const norm = penaltyNormalization === 'normalized';
-        // How far this candidate's volatility sits OUTSIDE its target band, in sigma. Zero
-        // anywhere inside, exactly like the trigger-rate term - a band rather than a point target,
-        // so it never competes with RTP over a volatility that was already acceptable.
-        const sigma = measured.roundStats?.volatilityIndex ?? null;
-        const volatilityPenalty = (volatilityBand && sigma != null)
-          ? Math.max(0, sigma - volatilityBand.max, volatilityBand.min - sigma)
-          : 0;
-        const error = Math.abs(measured.rtp - targetRtp);
-        if (measured.rtp < rtpMin) rtpMin = measured.rtp;
-        if (measured.rtp > rtpMax) rtpMax = measured.rtp;
-        // How far this candidate's trigger rate sits OUTSIDE the target band (zero anywhere
-        // inside it) - a band, not a point target, so this never fights the RTP term over
-        // trigger-rate differences that were already acceptable.
-        const triggerPenalty = Math.max(0, Math.abs(measured.triggerRate - targetTriggerRatePct) - triggerRateTolerancePct);
-        return {
-          loss: error
-            + orderingPenaltyWeight * (norm ? orderNorm : orderPenalty)
-            + limitPenaltyWeight * (norm ? boundsNorm : boundsPenalty)
-            + uniformityPenaltyWeight * (norm ? uniformityNorm : uniformityPenalty)
-            // Already in RTP percentage points, so normalization leaves them alone - the whole
-            // point is to bring the others onto THIS scale, not to invent a third one.
-            + stdErrorPenaltyWeight * (measured.trialRtpStdError ?? 0)
-            + triggerRatePenaltyWeight * triggerPenalty
-            // Already in sigma, which is a bet-multiple - dimensionally the same kind of quantity
-            // as the RTP error term, so it needs no normalization either.
-            + volatilityPenaltyWeight * volatilityPenalty
-            + spacingPenaltyWeight * (norm ? spacingNorm : spacingPenalty),
-          triggerRatePenalty: triggerPenalty,
-          volatilityPenalty,
-          spacingPenalty,
-          spacingPenaltyNormalized: spacingNorm,
-          spacingViolations,
-          rtp: measured.rtp,
-          triggerRate: measured.triggerRate,
-          trialRtpMin: measured.trialRtpMin,
-          trialRtpMax: measured.trialRtpMax,
-          trialRtpStdDev: measured.trialRtpStdDev,
-          trialRtpStdError: measured.trialRtpStdError,
-          // The shape of this candidate's payout, not just its average. Carried on every candidate
-          // so the winning one can be described without re-simulating it.
-          roundStats: measured.roundStats ?? null,
-          error,
-          orderingPenalty: orderPenalty,
-          orderingPenaltyNormalized: orderNorm,
-          limitPenalty: boundsPenalty,
-          limitPenaltyNormalized: boundsNorm,
-          uniformityPenalty,
-          uniformityPenaltyNormalized: uniformityNorm,
-          orderingViolations,
-          limitViolations,
-          trial: reelTables,
-        };
+        const measured = await measure(reelTables, seedForThisPoint, undefined, undefined, phase2TrialSpins, phase2TrialsPerPoint, {
+          reelStrips,
+          collectRoundStats: collectSearchRoundStats,
+        });
+        return scoreCandidate(reelTables, reelStrips, measured, { trackSearch: true });
       };
     }
 
@@ -1659,11 +1769,14 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     //
     // `iterationOffset` keeps the 'shape' progress events numbered continuously across both
     // stages, so a caller's log reads as one search rather than two restarting from zero.
-    async function runSearchStage({ dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0, stageTag = null, precomputedBaseline = null }) {
+    async function runSearchStage({
+      dims: sDims, bounds: sBounds, startPoint, iterationBudget, iterationOffset = 0,
+      stageTag = null, precomputedBaseline = null, stageInitialStepSize = initialStepSize,
+    }) {
     stageDims = sDims;
     stageBounds = sBounds;
     let point = startPoint;
-    let stepSize = initialStepSize;
+    let stepSize = stageInitialStepSize;
     let restarts = 0;
     let iterationsUsed = 0;
     let best = null; // best-ever vertex across all rounds, by RTP error
@@ -1786,7 +1899,11 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         uniformity: improved(bestUniformityPenalty, prevBestUniformity),
       };
 
-      const fullyResolved = best.error <= earlyAcceptErrorPct && bestOrderingPenalty <= 0 && bestLimitPenalty <= 0 && reliable(best);
+      // A reduced exploration sample is intentionally only a ranking signal. Let it use the
+      // normal stall logic, but never let an optimistic low-fidelity draw end the search through
+      // the exact-hit fast path; only the independent full-fidelity holdout may certify that.
+      const fullyResolved = !phase2UsesReducedMeasurement
+        && best.error <= earlyAcceptErrorPct && best.orderingPenalty <= 0 && best.limitPenalty <= 0 && reliable(best);
       if (fullyResolved) break;
 
       // Checked before the stall/restart branch below, not folded into it - a user-requested
@@ -1911,7 +2028,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       return {
         reelFrequencyTables: baseReelTables,
         rtp: null, triggerRatePct: null, scaledPaytable: null,
-        diagnostics: { validation, structuralHeadroom, sensitivity, structuralRecommendation, lossPreview, reelFeasibility, diagnoseOnly: true },
+        diagnostics: {
+          validation, structuralHeadroom, sensitivity, structuralRecommendation, lossPreview, reelFeasibility, diagnoseOnly: true,
+          performance: { measurementCache: { hits: measurementCacheStats.hits, misses: measurementCacheStats.misses, entries: measurementCache.size } },
+        },
       };
     }
 
@@ -1946,23 +2066,42 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         maxX: x + Math.log(1 + maxReelDeviation),
       }));
       const remaining = maxIterations - stageA.iterationsUsed;
+      // Refinement is valuable only while the shared mix leaves an ACTIVE objective unresolved.
+      // Do not spend a high-dimensional second-stage budget simply because one was reserved when
+      // the linked result already satisfies every objective the caller asked to optimize.
+      const refinementHasActiveWork = stageA.best.error > rtpTolerancePct
+        || (orderingPenaltyWeight > 0 && stageA.best.orderingPenalty > 0)
+        || (limitPenaltyWeight > 0 && stageA.best.limitPenalty > 0)
+        || (uniformityPenaltyWeight > 0 && stageA.best.uniformityPenalty > 0)
+        || (spacingPenaltyWeight > 0 && stageA.best.spacingPenalty > 0)
+        || (triggerRatePenaltyWeight > 0 && stageA.best.triggerRatePenalty > 0)
+        || (stdErrorPenaltyWeight > 0 && (stageA.best.trialRtpStdError ?? 0) > 0)
+        || (volatilityPenaltyWeight > 0 && stageA.best.volatilityPenalty > 0);
+      // The generic 0.5 log-space step is wider than a +/-25% refinement box. Starting CMA-ES
+      // there makes much of its first population clamp to the boundary, creating duplicate strips
+      // and teaching covariance adaptation about an artificial plateau. Scale the step to the
+      // narrowest permitted dimension instead.
+      const narrowestRefineSpan = Math.min(...refineBounds.map(b => b.maxX - b.minX));
+      const refineInitialStepSize = Math.min(initialStepSize, Math.max(0.005, narrowestRefineSpan * 0.25));
       let stageB = null;
-      if (remaining > 0 && !stageA.userStopped) {
+      if (remaining > 0 && !stageA.userStopped && maxReelDeviation > 0 && refinementHasActiveWork) {
         await announceStage('refine', {
           event: 'start', dimensions: dims.length, comparedTo: activeDims.length, iterationBudget: remaining,
-          maxReelDeviation,
+          maxReelDeviation, initialStepSize: refineInitialStepSize,
           strategy: `one weight per (symbol, reel), each held within +/-${(maxReelDeviation * 100).toFixed(0)}% of the shared value`,
           why: 'a deliberate per-reel tilt is a real design choice, so refinement can express one - the bound is what stops it re-inventing the spread the linked stage just removed',
         });
         stageB = await runSearchStage({
           dims, bounds: refineBounds, startPoint: refineStart,
           iterationBudget: remaining, iterationOffset: stageA.iterationsUsed,
-          stageTag: 'refine',
+          stageTag: 'refine', stageInitialStepSize: refineInitialStepSize,
         });
       } else {
         await announceStage('refine', {
           event: 'skipped',
           why: stageA.userStopped ? 'the run was stopped before refinement could start'
+            : maxReelDeviation <= 0 ? 'per-reel deviation is set to 0, so refinement has no legal move'
+            : !refinementHasActiveWork ? 'the shared answer already satisfies every active objective, so no high-dimensional refinement budget was spent'
             : 'the linked stage used the whole iteration budget - raise Max Iterations to leave room for a refinement pass',
         });
       }
@@ -2052,14 +2191,57 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       bestOrderingPenalty, bestLimitPenalty, bestUniformityPenalty,
     } = stage;
 
-    currentReelTables = best.trial;
+    // Optimizers are allowed to explore on a fixed/rotated training sample. Before returning a
+    // result, rank the strongest distinct reel strips on one fresh common holdout sample. This
+    // removes the winner's curse from choosing whichever generation happened to get the kindest
+    // draw, while preserving fair candidate-to-candidate comparisons.
+    let selectedBest = best;
+    let finalValidationInfo = null;
+    if (finalValidation && !userStopped) {
+      const finalists = [...finalistArchive.values()];
+      if (!finalists.some(candidate => candidate.stripSignature === best.stripSignature)) finalists.push(best);
+      finalists.sort((a, b) => a.loss - b.loss);
+      const validationSpins = Math.max(1, Math.floor(finalValidationSpins ?? trialSpins));
+      const validationTrials = Math.max(1, Math.floor(finalValidationTrials ?? Math.max(trialsPerPoint, 3)));
+      const validationSeed = searchSeed + 1900003;
+      const validated = await Promise.all(finalists.slice(0, finalistLimit).map(async (candidate) => {
+        const reelStrips = buildReelStrips(candidate.trial);
+        const measured = await measure(
+          candidate.trial, validationSeed, undefined, undefined, validationSpins, validationTrials,
+          { reelStrips, collectRoundStats: true },
+        );
+        return {
+          candidate: scoreCandidate(candidate.trial, reelStrips, measured),
+          trainingLoss: candidate.loss,
+        };
+      }));
+      validated.sort((a, b) => a.candidate.loss - b.candidate.loss || a.candidate.error - b.candidate.error);
+      const winner = validated[0];
+      selectedBest = winner.candidate;
+      finalValidationInfo = {
+        enabled: true,
+        seed: validationSeed,
+        spinsPerTrial: validationSpins,
+        trialsPerCandidate: validationTrials,
+        finalistsConsidered: validated.length,
+        selectedTrainingLoss: winner.trainingLoss,
+        selectedHoldoutLoss: winner.candidate.loss,
+        selectedHoldoutRtp: winner.candidate.rtp,
+        selectedHoldoutStdError: winner.candidate.trialRtpStdError,
+      };
+    }
+
+    currentReelTables = selectedBest.trial;
     const reason = (() => {
       // Takes priority over every other classification, even one that would otherwise read as
       // 'converged' - the search was stopped by explicit request, not by its own criteria, and
       // that's the more honest thing to report regardless of how close the result happens to be.
       if (userStopped) return 'stopped';
-      const rtpOk = best.error <= rtpTolerancePct && reliable(best);
-      const violationsOk = bestOrderingPenalty <= 0 && bestLimitPenalty <= 0;
+      // The status must describe the candidate being returned, not independent minima observed
+      // elsewhere in the search. A low-RTP-error point and a zero-ordering point are not one
+      // valid answer when they are different reel tables.
+      const rtpOk = selectedBest.error <= rtpTolerancePct && reliable(selectedBest);
+      const violationsOk = selectedBest.orderingPenalty <= 0 && selectedBest.limitPenalty <= 0;
       if (rtpOk && violationsOk) return 'converged';
       if (rtpOk) return 'converged-with-violations';
       if (stalledOut) return 'stalled';
@@ -2067,7 +2249,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     })();
 
     rtpPhaseResult = {
-      ...best,
+      ...selectedBest,
       iterations: iterationsUsed,
       restarts,
       reason,
@@ -2077,9 +2259,15 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       // which one produced this result rather than leaving it to be inferred from the tables.
       coupling,
       rtpRange: { min: rtpMin, max: rtpMax },
-      orderingPenaltyRemaining: bestOrderingPenalty,
-      limitPenaltyRemaining: bestLimitPenalty,
-      uniformityPenaltyRemaining: bestUniformityPenalty,
+      orderingPenaltyRemaining: selectedBest.orderingPenalty,
+      limitPenaltyRemaining: selectedBest.limitPenalty,
+      uniformityPenaltyRemaining: selectedBest.uniformityPenalty,
+      searchMinima: {
+        orderingPenalty: bestOrderingPenalty,
+        limitPenalty: bestLimitPenalty,
+        uniformityPenalty: bestUniformityPenalty,
+      },
+      finalValidation: finalValidationInfo,
       stillImproving,
       fixedSymbols,
     };
@@ -2092,7 +2280,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
     return {
       reelFrequencyTables: baseReelTables,
       rtp: null, triggerRatePct: null, scaledPaytable: null,
-      diagnostics: { validation, structuralHeadroom, sensitivity, structuralRecommendation, lossPreview, reelFeasibility, diagnoseOnly: true },
+      diagnostics: {
+        validation, structuralHeadroom, sensitivity, structuralRecommendation, lossPreview, reelFeasibility, diagnoseOnly: true,
+        performance: { measurementCache: { hits: measurementCacheStats.hits, misses: measurementCacheStats.misses, entries: measurementCache.size } },
+      },
     };
   }
 
@@ -2103,7 +2294,9 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         trialRtpMin: rtpPhaseResult.trialRtpMin, trialRtpMax: rtpPhaseResult.trialRtpMax,
         trialRtpStdDev: rtpPhaseResult.trialRtpStdDev, trialRtpStdError: rtpPhaseResult.trialRtpStdError,
       }
-    : await measure(finalReelTables);
+    // A no-dim tune has no finalist holdout to supply its round-shape report, so collect it on
+    // this one final baseline measurement. Normal tuned results already carry holdout stats.
+    : await measure(finalReelTables, searchSeed + 1900003, undefined, undefined, undefined, undefined, { collectRoundStats: true });
 
   // ---- Payout-value solve ----
   // The one RTP lever that needs no search at all. RTP is EXACTLY proportional to a global scale
@@ -2193,6 +2386,17 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
       payoutScale: payoutScale
         ? { scale: payoutScale.scale, rtpBeforeScaling: payoutScale.rtpBeforeScaling, verifiedRtp: payoutScale.verifiedRtp, verifiedStdError: payoutScale.verifiedStdError, verified: payoutScale.verified, verificationNote: payoutScale.verificationNote }
         : null,
+      performance: {
+        // Kept as diagnostics rather than a console-only benchmark: a cache that never hits is
+        // evidence that strip rounding is not a real workload for this game, while a high hit
+        // rate identifies exactly where a smaller reel lattice or bound-clamped search is saving
+        // simulations.
+        measurementCache: {
+          hits: measurementCacheStats.hits,
+          misses: measurementCacheStats.misses,
+          entries: measurementCache.size,
+        },
+      },
       // Symbols whose own spacing constraints CANNOT be satisfied at this reel length, checked
       // against the untuned baseline before any search runs. Empty is the healthy case. A
       // non-empty entry means generateReel silently gave up spacing that symbol out (it enforces
@@ -2322,6 +2526,13 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         // Always 0 when spacingPenaltyWeight is 0 (the penalty isn't computed at all then).
         spacingPenaltyRemaining: rtpPhaseResult.spacingPenalty ?? 0,
         spacingViolations: rtpPhaseResult.spacingViolations ?? [],
+        // Search minima are historical progress signals; `*Remaining` above always belongs to
+        // the returned finalist. Keeping the two separate makes it impossible for a report to
+        // imply that different candidates' best properties describe one configuration.
+        searchMinima: rtpPhaseResult.searchMinima,
+        // Present for a completed default run: final ranking happened on fresh common seeds,
+        // separate from the stochastic samples used to navigate the search.
+        finalValidation: rtpPhaseResult.finalValidation,
         stillImproving: rtpPhaseResult.stillImproving,
         fixedSymbols: rtpPhaseResult.fixedSymbols,
       } : null,

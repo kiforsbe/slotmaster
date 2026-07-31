@@ -39,10 +39,17 @@ export async function measureSimulationTrials({
   linesCount,
   rngSeed = null,
   runTrial = null,
+  collectRoundStats = true,
 }) {
   assertPositiveInteger(spins, 'spins');
   assertPositiveInteger(trials, 'trials');
-  const measurementConfig = { ...config, collectDetailedWins: false, collectWinDistribution: false, logSpins: false };
+  const measurementConfig = {
+    ...config,
+    collectDetailedWins: false,
+    collectWinDistribution: false,
+    collectRoundStats,
+    logSpins: false,
+  };
   const seeds = Array.from({ length: trials }, (_, index) => rngSeed == null ? null : rngSeed + index * TRIAL_SEED_STRIDE);
   const trialResults = runTrial
     ? await Promise.all(seeds.map(seed => runTrial(measurementConfig, spins, betPerLine, linesCount, seed)))

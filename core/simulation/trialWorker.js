@@ -35,9 +35,9 @@ self.onmessage = (event) => {
     const results = simulateSpins({ ...simConfig, winEvaluator, mechanic, freeSpinsMode }, numSpins, betPerLine, linesCount, rng);
     self.postMessage({
       taskId,
-      // roundStats joins the three numbers measure() has always needed. It is a handful of scalars
-      // plus at most 61 histogram buckets, so it crosses postMessage for far less than the full
-      // result would (winDistribution/detailedWins/spinLog stay discarded here, as before).
+      // Round shape crosses the boundary only for a volatility/final-report measurement. Ordinary
+      // RTP-only candidate evaluations deliberately leave it null to avoid creating and cloning
+      // histogram data that cannot affect their objective.
       result: {
         rtpRaw: results.rtpRaw,
         freeSpinsTriggered: results.freeSpinsTriggered,

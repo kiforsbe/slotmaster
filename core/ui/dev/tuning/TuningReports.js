@@ -545,6 +545,10 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     ['uniformity', p.uniformityPenaltyWeight], ['stdError', p.stdErrorPenaltyWeight],
     ['triggerRate', p.triggerRatePenaltyWeight], ['spacing', p.spacingPenaltyWeight],
   ].filter(([, v]) => v != null).map(([k, v]) => `${k} ${v}`).join(', ');
+  const explorationSpins = p.searchTrialSpins ?? p.trialSpins;
+  const explorationTrials = p.searchTrialsPerPoint ?? p.trialsPerPoint;
+  const holdoutSpins = p.finalValidationSpins ?? p.trialSpins;
+  const holdoutTrials = p.finalValidationTrials ?? Math.max(p.trialsPerPoint ?? 0, 3);
 
   // An entry pulled out of the accepted-best log is NOT the run's final answer, and pasting it as
   // though it were is how a config with a known problem gets shipped believing it was the winner.
@@ -575,6 +579,9 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     `//   target RTP ${p.targetRtp}% +/-${p.rtpTolerancePct}   target trigger ${num(p.targetTriggerRatePct)}%`
       + ` (1 in ${Math.round(pctToSpinsPerTrigger(p.targetTriggerRatePct) ?? 0)}) +/-${p.triggerRateTolerancePct}`,
     `//   ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`,
+    (p.searchTrialSpins != null || p.searchTrialsPerPoint != null || p.finalValidation)
+      ? `//   exploration: ${explorationSpins?.toLocaleString()} spins x ${explorationTrials} trials   holdout: ${p.finalValidation ? `${holdoutSpins?.toLocaleString()} spins x ${holdoutTrials} trials across ${p.finalistCount ?? 4} finalists` : 'off'}`
+      : null,
     `//   initial weights: ${p.initialWeightStrategy}   max RTP std error ${p.maxRtpStdError}`,
     // Coupling changes what the result MEANS, not just how it was found: the same frequencies
     // reached with one shared weight per symbol and with one per (symbol, reel) came out of

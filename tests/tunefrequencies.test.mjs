@@ -580,6 +580,33 @@ test('tuneFrequencies diagnostics.rtpPhase.trialRtpStdDev/trialRtpStdError are c
   assert.equal(single.diagnostics.rtpPhase.trialRtpStdError, 0, 'expected 0 (not NaN) std error with only one trial per point');
 });
 
+test('finalValidation re-ranks finalists on fresh deterministic holdout trials', async () => {
+  const seeds = new Set();
+  const spinBudgets = new Set();
+  const result = await tuneFrequencies(PAYTABLE, REEL_TABLES, {
+    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
+    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
+    targetRtp: 96, trialSpins: 100, trialsPerPoint: 1, searchTrialSpins: 25, searchTrialsPerPoint: 1,
+    maxIterations: 2, measureHeadroom: false,
+    finalValidation: true, finalValidationSpins: 200, finalValidationTrials: 2, finalistCount: 2,
+    searchSeed: 31,
+    runTrial: async (_config, spins, _bet, _lines, seed) => {
+      seeds.add(seed);
+      spinBudgets.add(spins);
+      return { rtpRaw: 0.96, freeSpinsTriggered: 0, baseSpins: spins, roundStats: null };
+    },
+  });
+  const validation = result.diagnostics.rtpPhase.finalValidation;
+  assert.equal(validation.enabled, true);
+  assert.equal(validation.spinsPerTrial, 200);
+  assert.equal(validation.trialsPerCandidate, 2);
+  assert.ok(validation.finalistsConsidered >= 1 && validation.finalistsConsidered <= 2);
+  assert.ok(seeds.has(validation.seed), 'fresh holdout seed must be dispatched to the simulator');
+  assert.notEqual(validation.seed, 31 + 700000, 'holdout must not reuse the primary search seed');
+  assert.ok(spinBudgets.has(25), 'Phase 2 must use the lower exploration budget');
+  assert.ok(spinBudgets.has(200), 'finalists must be promoted to the configured holdout budget');
+});
+
 test('tuneFrequencies options.maxRtpStdError refuses to call an unreliable candidate "converged" even though its average RTP hit target', async () => {
   // A synthetic runTrial that alternates between two very different RTPs whose AVERAGE lands
   // almost exactly on target (96%) - without a std-error gate, this would report 'converged' on
@@ -784,7 +811,7 @@ test('tuneFrequencies gives up early and stays deterministic on a genuinely infe
   assert.equal(result.diagnostics.rtpPhase.restarts, result2.diagnostics.rtpPhase.restarts);
 });
 
-test('tuneFrequencies stops early once already essentially resolved (reason: converged)', async () => {
+test('tuneFrequencies stops early once RTP is resolved while preserving the returned candidate\'s constraint status', async () => {
   // REEL_TABLES is fruitmachine's own live, hand-edited game data (its reel-level `defaults`
   // can carry a minFrequency/maxFrequency someone is actively tuning against in-game, e.g. a
   // maxFrequency far below bar's real baseline frequency there) - this test only cares about
@@ -808,7 +835,11 @@ test('tuneFrequencies stops early once already essentially resolved (reason: con
     earlyAcceptErrorPct: 3, orderingBiasByReel: [0, 0, 0],
   });
   const rp = result.diagnostics.rtpPhase;
-  assert.equal(rp.reason, 'converged', `expected 'converged', got '${rp.reason}' (error=${rp.error})`);
+  // The current best still carries a soft frequency-limit crossing. It must not be labelled
+  // fully converged merely because a DIFFERENT explored candidate happened to have no limit
+  // violation - convergence now describes the returned reel tables only.
+  assert.equal(rp.reason, 'converged-with-violations',
+    `expected the returned candidate's own constraint status, got '${rp.reason}' (error=${rp.error}, limit=${rp.limitPenaltyRemaining})`);
   assert.ok(rp.iterationsRun < rp.iterationsBudget,
     `expected to stop early, used ${rp.iterationsRun} of ${rp.iterationsBudget}`);
 });

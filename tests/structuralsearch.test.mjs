@@ -63,6 +63,23 @@ test('the number of simulations is capped regardless of how large the grid is', 
   assert.ok(calls <= 3, `expected at most 3 measurements, made ${calls}`);
 });
 
+test('independent initial grid measurements use the requested bounded concurrency', async () => {
+  let inFlight = 0;
+  let peakInFlight = 0;
+  await structuralSearch({
+    ladders: ladders(), baselineRtp: 100, targetRtp: 96, maxMeasurements: 3, refine: false, concurrency: 3,
+    measure: async () => {
+      inFlight++;
+      peakInFlight = Math.max(peakInFlight, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 15));
+      inFlight--;
+      return { rtp: 96 };
+    },
+  });
+  assert.ok(peakInFlight > 1, `expected concurrent initial measurements, peak was ${peakInFlight}`);
+  assert.ok(peakInFlight <= 3, `concurrency cap must be respected, peak was ${peakInFlight}`);
+});
+
 test('respectDesignIntent picks the recommendation closest to what the developer already chose', async () => {
   // Many combinations land on target. Picking by RTP error alone hands back whichever noisy cell
   // happened to measure best - often a wholesale redesign when a small tweak would do. "Closest to

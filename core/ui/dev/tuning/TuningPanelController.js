@@ -229,7 +229,13 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
     triggerRateTolerancePct: parseFloat(inputs.triggerRateTolerancePct.value) || 0.15,
     searchSeed: Number.isFinite(parseInt(inputs.searchSeed.value, 10)) ? parseInt(inputs.searchSeed.value, 10) : 12345,
     trialSpins: parseInt(inputs.trialSpins.value, 10) || 300000,
-    trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 2,
+    trialsPerPoint: parseInt(inputs.trialsPerPoint.value, 10) || 3,
+    // CMA-ES/Nelder-Mead only need a stable relative ranking while exploring. The panel spends a
+    // quarter of the displayed candidate budget on that search, then independently validates its
+    // finalists at the full budget below. This cuts the dominant simulation work substantially
+    // without presenting the low-fidelity result as the answer.
+    searchTrialSpins: Math.max(10000, Math.round((parseInt(inputs.trialSpins.value, 10) || 300000) / 4)),
+    searchTrialsPerPoint: 1,
     // Number.isFinite (not `|| 1`) so an explicit 0 - "no measurement uncertainty at all
     // tolerated" - isn't silently overridden by the fallback the way `0 || 1` would.
     maxRtpStdError: Number.isFinite(parseFloat(inputs.maxRtpStdError.value)) ? parseFloat(inputs.maxRtpStdError.value) : 1,
@@ -242,6 +248,10 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
     spacingPenaltyWeight: parseFloat(inputs.spacingPenaltyWeight.value) || 0,
     initialWeightStrategy: inputs.initialWeightStrategy.value,
     searchAlgorithm: inputs.searchAlgorithm.value,
+    // The interactive tool must never present the optimizer's luckiest training draw as a
+    // finished tune. Library callers can opt out for batch/backwards-compatible use, but panel
+    // results are always ranked on fresh holdout trials.
+    finalValidation: true,
     reelCoupling: inputs.reelCoupling.value,
     // Which denomination the weights above are in. The panel defaults to normalized (the library
     // to raw), because the named levels in the shape section are only meaningful against
@@ -1030,6 +1040,13 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
         ? `Done. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%`
         : `⚠ Did NOT converge. Final RTP=${rtp.toFixed(2)}%${varianceText}  trigger=${triggerRatePct.toFixed(3)}%  (this is the closest attempt found, not a successful tune)`
     );
+    const finalValidation = diagnostics.rtpPhase?.finalValidation;
+    if (finalValidation?.enabled) {
+      appendLog(
+        `✓ Finalist holdout: re-ranked ${finalValidation.finalistsConsidered} reel set${finalValidation.finalistsConsidered === 1 ? '' : 's'} on ${finalValidation.trialsPerCandidate} fresh trial${finalValidation.trialsPerCandidate === 1 ? '' : 's'} × ${finalValidation.spinsPerTrial.toLocaleString()} spins.`,
+        '#7fd97f',
+      );
+    }
     console.log('Frequency tuner diagnostics:', diagnostics);
 
     // Colored inline with the headline number itself (green/low-contrast when trustworthy, red

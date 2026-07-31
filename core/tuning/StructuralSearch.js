@@ -121,7 +121,7 @@ function distanceFromCurrent(cell, ladders) {
 export async function structuralSearch({
   ladders, baselineRtp, targetRtp, rtpTolerancePct = 1.5, noiseFloorPct = 0,
   knobs = null, respectDesignIntent = true, maxMeasurements = 8, refine = true,
-  measure, onPoint = null, signal = null,
+  measure, onPoint = null, signal = null, concurrency = 1,
 }) {
   // The band this search can actually resolve. When the sweep's own noise floor is wider than the
   // RTP tolerance - on Candy Frenzy, measured, ±17.89pp against a ±1.5pp tolerance - then "landed
@@ -161,17 +161,32 @@ export async function structuralSearch({
     .sort((a, b) => Math.abs(a.predictedRtp - targetRtp) - Math.abs(b.predictedRtp - targetRtp));
 
   const measured = [];
-  const runCell = async (cell, predictedRtp) => {
+  const measureCell = async (cell, predictedRtp) => {
     const m = await measure(cell);
-    const point = { knobs: cell, predictedRtp, rtp: m.rtp, error: Math.abs(m.rtp - targetRtp) };
+    return { knobs: cell, predictedRtp, rtp: m.rtp, error: Math.abs(m.rtp - targetRtp) };
+  };
+  const recordPoint = async (point) => {
     measured.push(point);
     if (onPoint) await onPoint(point);
     return point;
   };
 
-  for (const { cell, predictedRtp } of grid.slice(0, maxMeasurements)) {
-    if (signal?.aborted) break;
-    await runCell(cell, predictedRtp);
+  // Grid points have no dependency on one another. Run a bounded batch in parallel, then record
+  // in prediction rank order so diagnostics remain deterministic and readable.
+  const initialCells = grid.slice(0, maxMeasurements);
+  const initialResults = new Array(initialCells.length);
+  let nextInitial = 0;
+  const workerCount = Math.min(Math.max(1, Math.floor(concurrency)), initialCells.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextInitial < initialCells.length) {
+      const index = nextInitial++;
+      if (signal?.aborted) continue;
+      const { cell, predictedRtp } = initialCells[index];
+      initialResults[index] = await measureCell(cell, predictedRtp);
+    }
+  }));
+  for (const point of initialResults) {
+    if (point) await recordPoint(point);
   }
 
   if (measured.length === 0) {
@@ -212,7 +227,7 @@ export async function structuralSearch({
         if (signal?.aborted) break;
         const cell = { ...best.knobs, [knob]: value };
         if (!isCoherent(cell, currentOf)) continue;
-        const point = await runCell(cell, predictRtp(cell, ladders, baselineRtp));
+        const point = await recordPoint(await measureCell(cell, predictRtp(cell, ladders, baselineRtp)));
         if (point.error < best.error) best = point;
       }
     }

@@ -60,6 +60,8 @@ test('formatReelFrequencyTablesForCopy emits REEL_LENGTH and the settings needed
       searchSeed: 12345, reelSeeds: [101, 202, 303], reelLength: 750, reelsCount: 3, rowsCount: 3,
       targetRtp: 96, rtpTolerancePct: 1.5, targetTriggerRatePct: 0.6, triggerRateTolerancePct: 0.15,
       trialSpins: 300000, trialsPerPoint: 2, searchAlgorithm: 'cmaes', maxIterations: 150,
+      searchTrialSpins: 75000, searchTrialsPerPoint: 1,
+      finalValidation: true, finalValidationSpins: 300000, finalValidationTrials: 3, finalistCount: 4,
       initialWeightStrategy: 'provided', maxRtpStdError: 1,
       orderingPenaltyWeight: 0.5, limitPenaltyWeight: 0.5, uniformityPenaltyWeight: 0,
       stdErrorPenaltyWeight: 0, triggerRatePenaltyWeight: 2, spacingPenaltyWeight: 0.25,
@@ -71,6 +73,8 @@ test('formatReelFrequencyTablesForCopy emits REEL_LENGTH and the settings needed
   assert.match(output, /RTP 96\.02%/);
   assert.match(output, /trigger 0\.583%/);
   assert.match(output, /cmaes, max 150 iterations/);
+  assert.match(output, /exploration: 75\s000 spins x 1 trials/);
+  assert.match(output, /holdout: 300\s000 spins x 3 trials across 4 finalists/);
   assert.match(output, /triggerRate 2/, 'loss weights must be recorded - they change what the result even means');
   assert.match(output, /spacing 0\.25/);
   // The tables themselves must still follow the header.

@@ -93,11 +93,12 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
   simConfig.totalBet = betPerLine * linesCount;
 
   const mechanic = simConfig.mechanic || LineMechanic;
-  // Candidate measurements need totals and the bounded round histogram, not one entry per
-  // individual win. Keeping this opt-out preserves the detailed simulation-panel result by
-  // default while avoiding substantial object churn during millions of tuning spins.
+  // Candidate measurements need totals, and only some need the bounded round histogram. Keeping
+  // the two opt-outs independent preserves the detailed simulation-panel result by default while
+  // avoiding needless per-round bookkeeping during millions of RTP-only tuning spins.
   const collectWinDistribution = simConfig.collectWinDistribution !== false;
   const collectDetailedWins = simConfig.collectDetailedWins !== false;
+  const collectRoundStats = simConfig.collectRoundStats !== false;
 
   // Get configuration values with defaults
   const freeSpinsCount = simConfig.freeSpinsCount || 10;
@@ -149,8 +150,9 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
       results.winDistribution[spinWin] = (results.winDistribution[spinWin] || 0) + 1;
     }
     // Every spin's win joins the round currently open - free spins included, which is the whole
-    // point: the bonus they pay belongs to the paid spin that bought it.
-    roundWin += spinWin;
+    // point: the bonus they pay belongs to the paid spin that bought it. RTP-only tuning does not
+    // need this round-shape data, so avoid touching its accumulator on the hot path.
+    if (collectRoundStats) roundWin += spinWin;
     if (collectDetailedWins) detailedWins.forEach(w => results.detailedWins.push(w));
     if (logSpins && logEntry) results.spinLog.push(logEntry);
 
@@ -159,8 +161,9 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
 
   // The round currently being accumulated. Reset by the base-spin loop, added to by every spin.
   let roundWin = 0;
-  const roundAcc = createRoundAccumulator();
+  const roundAcc = collectRoundStats ? createRoundAccumulator() : null;
   const closeRound = () => {
+    if (!roundAcc) return;
     const multiple = simConfig.totalBet > 0 ? roundWin / simConfig.totalBet : 0;
     recordRound(roundAcc, multiple);
   };
@@ -217,7 +220,7 @@ export function simulateSpins(config, numBaseSpins = 100000, betPerLine = 1, lin
     // The SHAPE of the payout, per round rather than per spin - see createRoundAccumulator.
     // Always produced: it costs a handful of counters and a fixed 61-bucket histogram, which is
     // cheap enough that making it optional would only add a way to not have the answer.
-    roundStats: summarizeRoundStats(roundAcc),
+    roundStats: roundAcc ? summarizeRoundStats(roundAcc) : null,
   };
 }
 

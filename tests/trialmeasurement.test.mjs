@@ -49,3 +49,22 @@ test('measureSimulationTrials validates the requested sample shape before schedu
     /trials must be a positive integer/,
   );
 });
+
+test('measureSimulationTrials can omit round-shape collection for RTP-only tuning candidates', async () => {
+  let seenConfig = null;
+  const result = await measureSimulationTrials({
+    config: CONFIG,
+    spins: 100,
+    trials: 1,
+    betPerLine: 1,
+    linesCount: 1,
+    rngSeed: 17,
+    collectRoundStats: false,
+    runTrial: async (config, spins) => {
+      seenConfig = config;
+      return { rtpRaw: 0.96, freeSpinsTriggered: 0, baseSpins: spins, roundStats: null };
+    },
+  });
+  assert.equal(seenConfig.collectRoundStats, false);
+  assert.equal(result.roundStats, null);
+});
