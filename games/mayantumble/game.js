@@ -13,7 +13,7 @@ import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
 import { runSimulationAndRender } from '../../core/ui/dev/SimulationPanel.js';
-import { openTuningPanel } from '../../core/ui/dev/TuningPanel.js';
+import { openTuningPanel } from '../../core/ui/dev/tuning/TuningPanelView.js';
 
 export const REELS_COUNT = 5;
 export const ROWS_COUNT = 3;

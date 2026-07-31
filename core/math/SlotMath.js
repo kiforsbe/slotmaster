@@ -454,7 +454,7 @@ export function generateTargetGrid(reelStrips, rowsCount, rng) {
  *   defaults to `reelWeights` itself so a caller passing one flat combined table (frequency +
  *   triggerFreeSpins together) keeps working unchanged. A per-reel weights table (which
  *   carries neither) needs the real canonical paytable passed here explicitly instead.
- * @returns {string[]} The built reel strip (symbol names, length ~targetLength).
+ * @returns {string[]} The built reel strip (symbol names, length exactly `targetLength`).
  */
 export function generateReel(reelWeights, targetLength, seed, exclude=[], defaultTriggerMinGap=3, paytable=reelWeights) {
   const symbolsTable = reelWeights.symbols || reelWeights;
@@ -662,7 +662,37 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
   // consumes any draws before the shuffle.
   const rng = createSeededRng(seed);
 
-  // Step 3: Build a pre-shuffle array. A symbol with minStack > 1 is represented as one
+  // Step 3: Convert proportional weights to an EXACT stop allocation. Rounding every symbol
+  // separately made the strip drift by one or more stops (e.g. a requested 500 could become
+  // 499 or 501), which changes both reel geometry and RTP. Largest-remainder allocation keeps
+  // the nearest possible integer proportions while making the counts sum to targetLength.
+  const allocationTarget = Math.max(0, Math.round(targetLength));
+  const allocation = {};
+  const fractions = [];
+  let allocated = 0;
+  let symbolIndex = 0;
+  for (const symbol in weights) {
+    const exact = (weights[symbol] / totalWeight) * allocationTarget;
+    // Preserve the existing guarantee that every positive-weight symbol appears at least once
+    // whenever the requested strip has enough stops to represent every symbol.
+    const floor = allocationTarget >= Object.keys(weights).length ? Math.max(1, Math.floor(exact)) : Math.floor(exact);
+    allocation[symbol] = floor;
+    allocated += floor;
+    fractions.push({ symbol, remainder: exact - Math.floor(exact), index: symbolIndex++ });
+  }
+  fractions.sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let i = 0; allocated < allocationTarget; i++, allocated++) {
+    allocation[fractions[i % fractions.length].symbol]++;
+  }
+  // This only occurs when targetLength is smaller than the number of positive symbols. Trim
+  // the least-deserving allocations deterministically instead of returning the wrong length.
+  for (let i = fractions.length - 1; allocated > allocationTarget && i >= 0; i--) {
+    const symbol = fractions[i].symbol;
+    if (allocation[symbol] > 0) { allocation[symbol]--; allocated--; }
+    if (i === 0 && allocated > allocationTarget) i = fractions.length;
+  }
+
+  // Step 4: Build a pre-shuffle array. A symbol with minStack > 1 is represented as one
   // placeholder per *cluster*, not one per occurrence - so the shuffle, minGap, and (for
   // clustered symbols) maxStack passes below all treat a whole cluster as a single atomic
   // unit, entirely unmodified from how they already work for a plain single-occurrence
@@ -673,7 +703,7 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
   const preShuffle = [];
   const clusterSizesBySymbol = {}; // symbol -> this symbol's assigned cluster sizes, consumed in order at expansion time
   for (const symbol in weights) {
-    const count = Math.max(1, Math.round((weights[symbol] / totalWeight) * targetLength));
+    const count = allocation[symbol];
     const minStack = resolveMinStack(symbol);
     if (minStack > 1) {
       const cap = resolveMaxStack(symbol); // repurposed as this symbol's per-cluster size cap once clustered
@@ -688,10 +718,10 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
     }
   }
 
-  // Step 4: Shuffle with seed
+  // Step 5: Shuffle with seed
   _shuffle(preShuffle, rng);
 
-  // Step 5: Apply each present symbol's own minGap/maxStack - resolved as symbol override ->
+  // Step 6: Apply each present symbol's own minGap/maxStack - resolved as symbol override ->
   // reel defaults -> built-in fallback. minGap passes run first (the coarser, whole-strip
   // constraint), then maxStack cleans up runs in the result, so a minGap swap can't undo a
   // maxStack fix. For a clustered symbol (minStack > 1), maxStack no longer means "run length
@@ -713,7 +743,7 @@ export function generateReel(reelWeights, targetLength, seed, exclude=[], defaul
     }
   }
 
-  // Step 6: Expand cluster placeholders into their real, full-length runs. A non-clustered
+  // Step 7: Expand cluster placeholders into their real, full-length runs. A non-clustered
   // symbol's entries pass through 1:1, unchanged - so the final reel is exactly what today's
   // code would have produced whenever no symbol on this reel uses minStack > 1.
   const reel = [];

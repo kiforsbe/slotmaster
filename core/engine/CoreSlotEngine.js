@@ -5,7 +5,7 @@
 import { computeGridLayout } from '../rendering/GridLayout.js';
 import { audio } from '../audio/SlotAudio.js';
 import { createSeededRng } from '../math/SlotMath.js';
-import { simulateSpins } from '../SpinSimulator.js';
+import { simulateSpins } from '../simulation/SpinSimulator.js';
 import { AssetLoader } from '../assets/AssetLoader.js';
 
 export class CoreSlotEngine {

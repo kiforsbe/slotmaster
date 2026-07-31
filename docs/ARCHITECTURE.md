@@ -27,13 +27,13 @@ flowchart TB
     FreeSpinsModes["core/engine/FreeSpinsModes.js<br/>pluggable free-spins payout modes, cascade only"]
     SlotAudio["core/audio/SlotAudio.js<br/>synthesized sound effects"]
 
-    SpinSimulator["core/SpinSimulator.js<br/>headless sim + auto-tune, mechanic-agnostic"]
-    TuningSearch["Tuner support - search side, pure<br/>TuningValidation · StructuralSensitivity<br/>StructuralSearch · TuningUnits"]
-    TuningReport["Tuner support - reporting side, pure<br/>PlayerExperience · TuneLog · TuningUnits"]
-    WorkerPool["core/SimulationWorkerPool.js<br/>+ simulationTrialWorker.js"]
-    MechanicRegistry["core/mechanicRegistry.js<br/>name -> mechanic/evaluator/mode"]
+    SpinSimulator["core/simulation/<br/>SpinSimulator · RoundStatistics · TrialMeasurement"]
+    TuningSearch["core/tuning/<br/>FrequencyTuner · Optimizers · Payouts<br/>Validation · StructuralSensitivity · StructuralSearch · Units"]
+    TuningReport["core/tuning/<br/>PlayerExperience · TuneLog"]
+    WorkerPool["core/simulation/<br/>SimulationWorkerPool + trialWorker"]
+    MechanicRegistry["core/simulation/workerMechanicRegistry.js<br/>name -> mechanic/evaluator/mode"]
     SimulationPanel["core/ui/dev/SimulationPanel.js<br/>RUN SIMULATION UI"]
-    TuningPanel["core/ui/dev/TuningPanel.js<br/>TUNE FREQUENCIES UI"]
+    TuningPanel["core/ui/dev/tuning/<br/>view · controller · reports · live view · run service"]
 
     SpinLog["core/logging/SpinLog.js<br/>per-spin log entries + CSV"]
     SpinLogPanel["core/ui/dev/SpinLogPanel.js<br/>SPIN LOG UI"]
@@ -502,12 +502,19 @@ cluster, just without the animation frames. Its own `defaultPayoutOf` ranks by t
 `config.winEvaluator` is a closure the game supplies, so a future line-win-based cascade game
 reuses this mechanic unmodified, just with its own evaluator/`payoutOf`.
 
-## `core/SpinSimulator.js` — headless simulation and auto-tuning
+## `core/simulation/` and `core/tuning/` — headless simulation and auto-tuning
 
-Also pure/side-effect-free (no DOM). Mechanic-agnostic: how a spin actually resolves is entirely
-delegated to `config.mechanic` (see above) — this file only owns what's common to every
+Both packages are pure/side-effect-free (no DOM). `core/simulation/SpinSimulator.js` is
+mechanic-agnostic: how a spin actually resolves is entirely delegated to `config.mechanic` (see
+above) — it only owns what's common to every
 mechanic: the base-spin loop, free-spins triggering/retriggering/award-table lookups, the
 global free-spins safety cap, and result aggregation (RTP, win distribution, spin log).
+
+`core/tuning/FrequencyTuner.js` orchestrates the search and imports optimizer, payout,
+validation, structural and trial-measurement dependencies explicitly. Candidate trials use
+`TrialMeasurement.js`, which assigns deterministic independent seeds, computes uncertainty from
+trial means, and skips per-win result collections. Root-level legacy modules are compatibility
+facades for existing imports only.
 
 - **`simulateSpins(config, numBaseSpins, betPerLine, linesCount, rng)`** — runs
   `numBaseSpins` spins (plus any triggered free-spin rounds) via `config.mechanic.resolveSpin`

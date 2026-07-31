@@ -83,23 +83,15 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
   evaluator. Knows nothing about clusters or paylines itself: the win evaluator is a closure the
   game supplies (`ClusterMath.js`'s for Candy Frenzy, a payline one for Mayan Tumble), and the
   playfield's own look is a per-game `playfield` config passed to `CoreSlotEngine`.
-- **`core/SpinSimulator.js`** — runs many simulated spins to measure RTP/trigger rate, and
-  `tuneFrequencies`, which automatically adjusts a game's reel frequencies to hit a target RTP.
+- **`core/simulation/`** — headless spin execution, bounded round statistics, deterministic trial
+  measurement, and the Worker pool. `core/SpinSimulator.js` remains a compatibility facade.
+- **`core/tuning/`** — the frequency-tuning pipeline, numerical optimizers, validation,
+  structural search, player-experience analysis and tune logging. `FrequencyTuner.js` owns
+  `tuneFrequencies`; root-level legacy paths are compatibility facades.
 - **`core/ui/dev/SimulationPanel.js`** — the in-browser RUN SIMULATION UI (a debug panel included in
   each game's `index.html`).
-- **`core/ui/dev/TuningPanel.js`** — the separate TUNE FREQUENCIES UI and formatter that turns a tuned
-  result back into pasteable `FREQUENCY_REELn` source.
-- **Tuner support modules**, all pure and separately tested — `core/TuningValidation.js` (static
-  config checks that refuse to tune on arithmetic errors), `core/TuningUnits.js` (converting
-  between what a developer asks for and what the search optimizes: spins-per-trigger ↔ percent,
-  volatility bands ↔ sigma, intent ↔ penalty weight), `core/StructuralSensitivity.js` and
-  `core/StructuralSearch.js` (which structural knob actually moves RTP, and what to set it to),
-  `core/PlayerExperience.js` (what a tuned result feels like to play), and `core/TuneLog.js`
-  (every config that became the best, exportable as JSON or as pasteable source).
-- **`core/SimulationWorkerPool.js`** / **`core/simulationTrialWorker.js`** /
-  **`core/mechanicRegistry.js`** — the Worker pool tuning trials are dispatched to, one trial per
-  message, and the registry that resolves a mechanic/evaluator/free-spins-mode back from the name
-  it crossed `postMessage` as (a function cannot cross directly).
+- **`core/ui/dev/tuning/`** — separate panel view, controller, live view, report formatting and
+  Worker-backed run service; `core/ui/dev/TuningPanel.js` is a compatibility facade.
 - **`core/logging/SpinLog.js`** — pure per-spin log entry building and CSV serialization, shared by
   both `SpinSimulator.js` (a batch run) and `core/engine/SpinLogRecorder.js` (live play, plugged
   into `CoreSlotEngine`) so the two can't drift apart on what a logged spin looks like. See

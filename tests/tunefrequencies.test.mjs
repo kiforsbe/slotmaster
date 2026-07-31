@@ -635,7 +635,14 @@ test('tuneFrequencies leaves a symbol untouched on a reel where its own entry se
 test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limitPenaltyWeight)', async () => {
   const cap = FREQUENCY_REEL1.symbols.bar.frequency / 2;
   const cappedTables = [
-    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, maxFrequency: cap } } },
+    // Isolate this test to bar's explicitly requested cap. The live fixture's reel defaults
+    // cap EVERY value symbol below their combined fixed budget, which is infeasible by design
+    // and cannot demonstrate whether one soft constraint is respected.
+    {
+      ...FREQUENCY_REEL1,
+      defaults: {},
+      symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, maxFrequency: cap } },
+    },
     FREQUENCY_REEL2,
     FREQUENCY_REEL3,
   ];
@@ -652,8 +659,14 @@ test('tuneFrequencies respects a soft max frequency limit on a reel symbol (limi
 
 test('tuneFrequencies applies a reel-level default maxFrequency to a symbol without its own override', async () => {
   const cap = FREQUENCY_REEL1.symbols.bar.frequency / 2;
+  const symbolsWithExplicitRoom = Object.fromEntries(Object.entries(FREQUENCY_REEL1.symbols).map(([symbol, entry]) => [
+    symbol,
+    // Leave bar to inherit the reel default. The other value symbols explicitly opt out so
+    // the default is feasible and this checks inheritance rather than an impossible all-symbol cap.
+    symbol === 'bar' ? { ...entry } : { ...entry, maxFrequency: 100 },
+  ]));
   const cappedByDefault = [
-    { ...FREQUENCY_REEL1, defaults: { ...FREQUENCY_REEL1.defaults, maxFrequency: cap } },
+    { ...FREQUENCY_REEL1, defaults: { ...FREQUENCY_REEL1.defaults, maxFrequency: cap }, symbols: symbolsWithExplicitRoom },
     FREQUENCY_REEL2,
     FREQUENCY_REEL3,
   ];
@@ -798,29 +811,23 @@ test('tuneFrequencies stops early once already essentially resolved (reason: con
 });
 
 test('tuneFrequencies reports converged-with-violations when RTP is reachable but an ordering conflict is not', async () => {
-  const conflictedTables = [
-    { ...FREQUENCY_REEL1, symbols: { ...FREQUENCY_REEL1.symbols, bar: { ...FREQUENCY_REEL1.symbols.bar, minFrequency: FREQUENCY_REEL1.symbols.cherries.frequency * 5 } } },
-    FREQUENCY_REEL2,
-    FREQUENCY_REEL3,
-  ];
-  const result = await tuneFrequencies(PAYTABLE, conflictedTables, {
-    reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
-    reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
-    // maxIterations: 120, not 60 - the forced conflict needs more than a single 60-iteration
-    // budget for the ordering front to actually plateau (verified via a throwaway script); at
-    // 60 it's still gradually improving, which is correctly NOT what 'stillImproving.ordering
-    // === false' should assert against.
-    targetRtp: 96, rtpTolerancePct: 3, trialSpins: 8000, trialsPerPoint: 1, maxIterations: 120,
-    limitPenaltyWeight: 20, orderingPenaltyWeight: 0.5, stallWindowIterations: 8, maxStallRestarts: 3,
-    // This fixture is deliberately unsatisfiable, which is the point of the test - but Phase 0a
-    // validation now (correctly) refuses to start on it. `bar`'s forced minFrequency of 56.3 sits
-    // above the maxFrequency of 10 it inherits from FREQUENCY_REEL1's defaults, so the limit
-    // penalty can never reach zero. That is a genuine contradiction the fixture's author did not
-    // intend - they wanted an ORDERING conflict - and it is worth knowing it is also a bounds
-    // conflict, since an unsatisfiable limit penalty is a plausible reason this test has never
-    // reached its expected 'converged-with-violations'. Left as-is rather than repaired here:
-    // this test was already failing before Phase 0a existed and fixing it is its own piece of work.
-    skipValidation: true,
+  // Actual payouts are deliberately equal, so every one-reel spin returns exactly 1x and RTP is
+  // 100% for every possible frequency split. `payoutOf` supplies a design-only ordering where
+  // high is preferred rarer, while high's feasible minimum of 18/20 forces the opposite. This
+  // isolates the verdict from Fruit Machine's current (and intentionally changing) RTP balance.
+  const flatPaytable = { high: { payout: [1] }, low: { payout: [1] } };
+  const conflictedTables = [{
+    symbols: {
+      high: { frequency: 18, minFrequency: 18 },
+      low: { frequency: 2 },
+    },
+  }];
+  const result = await tuneFrequencies(flatPaytable, conflictedTables, {
+    reelsCount: 1, rowsCount: 1, paylines: [[0]], reelSeeds: [23],
+    betPerLine: 1, linesCount: 1, reelLength: 100,
+    targetRtp: 100, rtpTolerancePct: 0.001, trialSpins: 100, trialsPerPoint: 1, maxIterations: 50,
+    limitPenaltyWeight: 20, orderingPenaltyWeight: 0.5, stallWindowIterations: 5, maxStallRestarts: 2,
+    payoutOf: (_paytable, symbol) => symbol === 'high' ? 2 : 1,
   });
   const rp = result.diagnostics.rtpPhase;
   assert.equal(rp.reason, 'converged-with-violations', `expected 'converged-with-violations', got '${rp.reason}' (error=${rp.error}, orderingPenaltyRemaining=${rp.orderingPenaltyRemaining})`);
@@ -1617,20 +1624,25 @@ test('tuneFrequencies with searchAlgorithm: "cmaes" never returns a result with 
 
 test('tuneFrequencies with searchAlgorithm: "cmaes" never regresses (by loss) when continuing from a previous result', async () => {
   // Simulates the panel's CONTINUE TUNING FROM THIS RESULT button: feed one run's own output
-  // back in as the next run's starting reelFrequencyTables. The second run's loss must never
-  // be worse than the first run's own final loss - continuing should only ever hold steady or
-  // improve, never silently regress. Compared on `loss`, not `error` - see the previous test's
-  // own comment for why.
+  // back in as the next run's starting reelFrequencyTables. CMA-ES deliberately rotates the
+  // measurement seed every generation, so a prior run's final loss and the continued run's
+  // starting loss are different Monte-Carlo draws and must not be compared as a precision
+  // claim. The actual invariant is that the continued run never returns worse than its OWN
+  // measured starting point, under the same base seed. Compared on `loss`, not `error` - see
+  // the previous test's own comment for why.
   const sharedOpts = {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paylines: PAYLINES, winEvaluator: checkWildLineWins,
     reelSeeds: REEL_SEEDS, betPerLine: BET_PER_LINE, linesCount: LINES_COUNT, reelLength: REEL_LENGTH,
     targetRtp: 96, trialSpins: 3000, trialsPerPoint: 1, searchAlgorithm: 'cmaes', searchSeed: 55,
   };
   const first = await tuneFrequencies(PAYTABLE, REEL_TABLES, { ...sharedOpts, maxIterations: 10 });
+  const continuedBaseline = await tuneFrequencies(PAYTABLE, first.reelFrequencyTables, {
+    ...sharedOpts, maxIterations: 0, initialStepSize: 0,
+  });
   const continued = await tuneFrequencies(PAYTABLE, first.reelFrequencyTables, { ...sharedOpts, maxIterations: 10 });
   assert.ok(
-    continued.diagnostics.rtpPhase.loss <= first.diagnostics.rtpPhase.loss + 1e-9,
-    `expected continuing (loss=${continued.diagnostics.rtpPhase.loss}) to be no worse than the first run's own result (loss=${first.diagnostics.rtpPhase.loss})`
+    continued.diagnostics.rtpPhase.loss <= continuedBaseline.diagnostics.rtpPhase.loss + 1e-9,
+    `expected continuing (loss=${continued.diagnostics.rtpPhase.loss}) to be no worse than its measured starting point (loss=${continuedBaseline.diagnostics.rtpPhase.loss})`
   );
 });
 

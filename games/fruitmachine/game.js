@@ -7,7 +7,7 @@ import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
 import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWildLineWins } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender } from '../../core/ui/dev/SimulationPanel.js';
-import { openTuningPanel } from '../../core/ui/dev/TuningPanel.js';
+import { openTuningPanel } from '../../core/ui/dev/tuning/TuningPanelView.js';
 import { openSpinLogPanel } from '../../core/ui/dev/SpinLogPanel.js';
 import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { ensureDeveloperPanels } from '../../core/ui/DeveloperPanels.js';
