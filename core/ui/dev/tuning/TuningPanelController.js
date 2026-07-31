@@ -218,6 +218,9 @@ export async function startTuning({ paytable, reelFrequencyTables, tuneConfig, t
     // mechanicRegistry.js's own doc).
     mechanic: tuneConfig.mechanic,
     freeSpinsMode: tuneConfig.freeSpinsMode,
+    linesPerPop: tuneConfig.linesPerPop,
+    popsToRush: tuneConfig.popsToRush,
+    maxCascadeSteps: tuneConfig.maxCascadeSteps,
     minClusterSize: tuneConfig.minClusterSize,
     scatterTriggerCount: tuneConfig.scatterTriggerCount,
     reelLength: parseInt(inputs.reelLength.value, 10) || tuneConfig.reelLength,

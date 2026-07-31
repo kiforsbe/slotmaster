@@ -1,14 +1,17 @@
-// Deterministic Pop Rush preparation. Every variant works on a newly filled board before its
-// first evaluation; ordinary no-refill cascades then take over unchanged.
+// Deterministic Lemon Pop board effects. Charge effects happen inside a base no-refill cascade;
+// full Pop Rush variants prepare the one bonus respin after all three charges have been filled.
+import { applyNoRefillCascade } from './CascadeMath.js';
 
 const keyOf = ([col, row]) => `${col},${row}`;
 
 export const POP_RUSH_VARIANTS = ['pop-rush', 'citrus-cross', 'flavor-remix', 'soda-storm'];
+export const POP_FEATURES = ['wild-splash', 'flavor-shift', 'bubble-burst'];
 
 function cloneState(grid, wildMultipliers) {
   return {
     grid: grid.map(column => column.slice()),
-    wildMultipliers: wildMultipliers.map(column => column.slice()),
+    wildMultipliers: wildMultipliers?.map(column => column.slice())
+      || grid.map(column => new Array(column.length).fill(1)),
   };
 }
 
@@ -63,6 +66,30 @@ function setWild(state, [col, row], wildSymbol, multiplier = 1) {
   state.wildMultipliers[col][row] = Math.max(state.wildMultipliers[col][row] ?? 1, multiplier);
 }
 
+function shuffled(items, rng) {
+  const result = items.slice();
+  for (let index = result.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(rng() * (index + 1));
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+  return result;
+}
+
+function everyPosition(grid) {
+  return grid.flatMap((column, col) => column.map((_, row) => [col, row]));
+}
+
+function naturalSymbols(paytable, wildSymbol) {
+  return Object.keys(paytable).filter(symbol => symbol !== wildSymbol && paytable[symbol]?.linePayout);
+}
+
+function applyWildSplash(state, wildSymbol, rng) {
+  const count = 1 + Math.floor(rng() * 2);
+  const positions = shuffled(everyPosition(state.grid), rng).slice(0, count);
+  const next = applyNoRefillCascade(state.grid, [], positions.map(position => ({ position, symbol: wildSymbol })), state.wildMultipliers);
+  return { ...next, feature: 'wild-splash', affectedPositions: positions };
+}
+
 function pickCandidates(candidates, count, rng) {
   const picked = [];
   const usedCells = new Set();
@@ -114,6 +141,55 @@ function sodaStormPositions(grid, paytable, wildSymbol) {
     });
   }
   return [...selected, ...fallbackPositions(grid, 5 - selected.length, new Set(selected.map(keyOf)))];
+}
+
+/**
+ * Apply a small effect when one Pop charge fills. Effects use the spin RNG, so a replay,
+ * simulation worker, and live spin always make the same board changes. A wild placed into an
+ * empty cell is passed through gravity immediately; all effects can therefore create another
+ * ordinary straight-line cascade without ever refilling the board.
+ */
+export function applyPopFeature({ grid, wildMultipliers, paytable, wildSymbol, feature, rng }) {
+  const state = cloneState(grid, wildMultipliers);
+  const allPositions = everyPosition(state.grid);
+
+  if (feature === 'wild-splash') {
+    return applyWildSplash(state, wildSymbol, rng);
+  }
+
+  if (feature === 'flavor-shift') {
+    const candidates = allPositions.filter(([col, row]) => {
+      const symbol = state.grid[col][row];
+      return symbol != null && symbol !== wildSymbol;
+    });
+    const position = shuffled(candidates, rng)[0];
+    // A nearly empty board can contain only persistent wilds. Keep the Pop meaningful by
+    // substituting the always-applicable splash effect instead of displaying a no-op.
+    if (!position) return applyWildSplash(state, wildSymbol, rng);
+    const [col, row] = position;
+    const currentSymbol = state.grid[col][row];
+    const target = shuffled(naturalSymbols(paytable, wildSymbol).filter(symbol => symbol !== currentSymbol), rng)[0];
+    state.grid[col][row] = target || currentSymbol;
+    state.wildMultipliers[col][row] = 1;
+    return { ...state, feature, affectedPositions: [position], transformedSymbol: target || currentSymbol };
+  }
+
+  // Bubble Burst removes two matching pairs when possible. Removing a small, predictable
+  // amount is intentionally gentler than clearing a whole symbol family on a sparse board.
+  const bySymbol = new Map();
+  allPositions.forEach(position => {
+    const symbol = state.grid[position[0]][position[1]];
+    if (symbol != null && symbol !== wildSymbol) {
+      const positions = bySymbol.get(symbol) || [];
+      positions.push(position);
+      bySymbol.set(symbol, positions);
+    }
+  });
+  const selectedSymbols = shuffled([...bySymbol.keys()], rng).slice(0, 2);
+  const positions = selectedSymbols.flatMap(symbol => shuffled(bySymbol.get(symbol), rng).slice(0, 2));
+  if (!positions.length) return applyWildSplash(state, wildSymbol, rng);
+  const next = applyNoRefillCascade(state.grid, positions, [], state.wildMultipliers);
+  return { ...next, feature: 'bubble-burst', affectedPositions: positions, removedSymbols: selectedSymbols };
 }
 
 /** Apply one of the four Pop Rush variants to an initial 5x5 board. */

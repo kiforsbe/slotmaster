@@ -8,7 +8,7 @@ import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
 import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel } from '../../core/math/SlotMath.js';
 import { checkStraightLineWins } from '../../core/math/StraightLineMath.js';
-import { POP_RUSH_VARIANTS } from '../../core/math/LemonPopFeatures.js';
+import { POP_FEATURES, POP_RUSH_VARIANTS } from '../../core/math/LemonPopFeatures.js';
 import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { ensureDeveloperPanels } from '../../core/ui/DeveloperPanels.js';
 import { openSpinLogPanel } from '../../core/ui/dev/SpinLogPanel.js';
@@ -24,10 +24,11 @@ export const BET_AMOUNT = 1;
 export const BET_STEP = 0.25;
 export const BET_MAX = 50;
 export const WILD_SYMBOL = 'lemonpop';
-export const POP_RUSH_CASCADE_COUNT = 4;
-// Calibrated over the complete no-refill + Pop Rush sequence for the seven-symbol reel set.
-// All ladders scale together, preserving hierarchy and feature logic while targeting 96% RTP.
-export const PAYOUT_SCALE = 0.7489;
+export const LINES_PER_POP = 5;
+export const POPS_TO_RUSH = 3;
+// Calibrated over the complete three-Pop progression + Pop Rush sequence for the seven-symbol
+// reel set. All ladders scale together, preserving hierarchy and feature logic at 96% RTP.
+export const PAYOUT_SCALE = 1.62074;
 const ladder = values => values.map(value => value * PAYOUT_SCALE);
 
 // Premiums may combine with each other and wild cans, paying half of the strongest natural
@@ -82,10 +83,16 @@ function symbolIconHtml(symbol, assets, size = 34) {
 }
 
 function updatePopRushMeter() {
-  const completed = engine?.spinSequence
-    ?.slice(0, (engine.stepIndex ?? -1) + 1)
-    .filter(step => step.presentationPhase === 'base' && step.clusterWins?.length).length || 0;
-  refs.meterDots?.forEach((dot, index) => dot.classList.toggle('filled', index < Math.min(POP_RUSH_CASCADE_COUNT, completed)));
+  const step = engine?.spinSequence?.[engine?.stepIndex ?? -1];
+  const progress = step?.popProgress || { totalLines: 0, linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH };
+  const linesPerPop = progress.linesPerPop || LINES_PER_POP;
+  refs.popCharges?.forEach((charge, index) => {
+    const chargeLines = Math.max(0, Math.min(linesPerPop, progress.totalLines - (index * linesPerPop)));
+    charge.style.setProperty('--charge-fill', `${(chargeLines / linesPerPop) * 100}%`);
+    charge.classList.toggle('charging', chargeLines > 0 && chargeLines < linesPerPop);
+    charge.classList.toggle('filled', chargeLines === linesPerPop);
+    charge.querySelector('b').textContent = `${chargeLines}/${linesPerPop}`;
+  });
 }
 
 function updateUI() {
@@ -97,6 +104,13 @@ function updateUI() {
 
 function setPresentationPhase(phase, step) {
   document.body.classList.toggle('pop-rush-active', phase === 'pop-rush');
+  const latestFeature = step?.popFeatures?.at(-1);
+  if (phase === 'base' && latestFeature) {
+    refs.featureLabel.textContent = `POP ${latestFeature.popIndex}: ${prettyPopFeature(latestFeature.feature)}`;
+    refs.featurePanel.classList.add('active');
+  } else {
+    refs.featurePanel.classList.remove('active');
+  }
   if (phase === 'pop-rush' && step?.popRushVariant) {
     refs.rushLabel.textContent = `${prettyVariant(step.popRushVariant)} — FREE POP RUSH`;
     refs.rushPanel.classList.add('active');
@@ -110,6 +124,10 @@ function prettyVariant(variant) {
   return ({ 'pop-rush': 'POP RUSH', 'citrus-cross': 'CITRUS CROSS', 'flavor-remix': 'FLAVOR REMIX', 'soda-storm': 'SODA STORM' })[variant] || variant;
 }
 
+function prettyPopFeature(feature) {
+  return ({ 'wild-splash': 'WILD SPLASH', 'flavor-shift': 'FLAVOR SHIFT', 'bubble-burst': 'BUBBLE BURST' })[feature] || feature;
+}
+
 function openPaytable() { refs.paytableModal.classList.add('active'); }
 function closePaytable() { refs.paytableModal.classList.remove('active'); }
 
@@ -121,7 +139,8 @@ async function initGame() {
     balance: document.getElementById('display-balance'), bet: document.getElementById('bet-value'),
     ticker: document.getElementById('game-ticker'), paytableModal: document.getElementById('modal-paytable'),
     paytableClose: document.getElementById('btn-paytable-ok'), rushPanel: document.getElementById('pop-rush-panel'),
-    rushLabel: document.getElementById('pop-rush-label'), meterDots: [...document.querySelectorAll('.pop-rush-meter i')],
+    rushLabel: document.getElementById('pop-rush-label'), featurePanel: document.getElementById('pop-feature-panel'),
+    featureLabel: document.getElementById('pop-feature-label'), popCharges: [...document.querySelectorAll('.pop-charge')],
     tune: document.getElementById('btn-tune'), sim: document.getElementById('btn-sim'), spinlog: document.getElementById('btn-spinlog'),
   };
   const developerPanels = ensureDeveloperPanels();
@@ -133,7 +152,7 @@ async function initGame() {
     renderer, particleSystem, audioController: new AudioController(),
     spinLogRecorder: new SpinLogRecorder({ betAmount: BET_AMOUNT, scatterSymbol: null }),
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paytable: PAYTABLE, reelStrips: REEL_STRIPS, winEvaluator,
-    betAmount: BET_AMOUNT, wildSymbol: WILD_SYMBOL, popRushCascadeCount: POP_RUSH_CASCADE_COUNT,
+    betAmount: BET_AMOUNT, wildSymbol: WILD_SYMBOL, linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH,
     cascadeWinClearMode: 'all-at-once', cascadeWinPreviewDurationMs: 420,
     clearCellHighlight: false, straightLineVisualizer: { horizontalColor: '#fff052', verticalColor: '#7eefff', glow: 20 },
     playfield: PLAYFIELD, assetManifest: GAME_ASSET_MANIFEST,
@@ -146,6 +165,10 @@ async function initGame() {
     } }),
   });
   await engine.init();
+  ['lemonwedge', 'gumdrop', 'heart'].forEach((symbol, index) => {
+    const icon = refs.popCharges[index]?.querySelector('.pop-charge-icon');
+    if (icon) icon.innerHTML = symbolIconHtml(symbol, engine.assets, 30);
+  });
   bindCommonSlotControls({ getEngine: () => engine, onUpdate: updateUI, betStep: BET_STEP, betMax: BET_MAX, linesMax: 1 });
   observeSlotViewport();
   refs.paytable.addEventListener('click', openPaytable);
@@ -168,11 +191,17 @@ async function initGame() {
       winEvaluatorName: 'checkStraightLineWins',
       winEvaluatorFactory: pt => (grid, multipliers) => checkStraightLineWins(grid, pt, { wildSymbol: WILD_SYMBOL, wildMultipliers: multipliers }),
       minClusterSize: 3, reelCoupling: 'independent', targetRtp: 96,
+      linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH,
     },
   }));
   renderStraightLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, assets: engine.assets,
     wildSymbol: WILD_SYMBOL, renderSymbol: symbol => symbolIconHtml(symbol, engine.assets),
-    featureNames: ['Four paid-spin cascades award one free Pop Rush respin.', ...POP_RUSH_VARIANTS.map(prettyVariant)],
+    featureNames: [
+      'Every five winning lines fills one Pop and triggers a random Pop effect.',
+      'Fill all three Pops to award one free Pop Rush respin.',
+      `Pop effects: ${POP_FEATURES.map(prettyPopFeature).join(', ')}.`,
+      ...POP_RUSH_VARIANTS.map(prettyVariant),
+    ],
   });
   updateUI();
 }

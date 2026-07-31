@@ -136,6 +136,11 @@ export function applyNoRefillCascade(grid, clearedPositions, spawnedSymbols = []
 export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvaluator, {
   maxCascadeSteps = 25,
   initialTransform = null,
+  initialStepData = null,
+  // Optional game-specific hook that runs after a winning grid has cleared, spawned its
+  // persistent symbols, and fallen. It can adjust that next board (for example, a Lemon Pop
+  // charge effect) and attach data that describes the NEXT displayed cascade step.
+  afterWin = null,
 } = {}) {
   const rng = createSeededRng(seed);
   const reelsCount = strips.length;
@@ -153,6 +158,7 @@ export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvalu
 
   const cascadeSteps = [];
   let totalPayoutMultiplier = 0;
+  let currentStepData = initialStepData;
   for (let stepIndex = 0; stepIndex <= maxCascadeSteps; stepIndex++) {
     const result = winEvaluator(currentGrid, currentWildMultipliers);
     const hasWin = result.totalPayoutMultiplier > 0;
@@ -162,6 +168,7 @@ export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvalu
       fallOffsets: currentFallOffsets,
       clusterWins: hasWin ? result.clusterWins : [],
       payout: hasWin ? result.totalPayoutMultiplier : 0,
+      ...(currentStepData || {}),
     });
     if (!hasWin) break;
     totalPayoutMultiplier += result.totalPayoutMultiplier;
@@ -171,10 +178,20 @@ export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvalu
       symbol: result.wildSymbol || 'lemonpop',
       multiplier: 1,
     }));
-    const next = applyNoRefillCascade(currentGrid, clearedPositions, spawnedSymbols, currentWildMultipliers);
+    let next = applyNoRefillCascade(currentGrid, clearedPositions, spawnedSymbols, currentWildMultipliers);
+    const afterWinResult = afterWin?.({
+      grid: next.grid,
+      wildMultipliers: next.wildMultipliers,
+      fallOffsets: next.fallOffsets,
+      result,
+      stepIndex,
+      rng,
+    });
+    if (afterWinResult) next = { ...next, ...afterWinResult };
     currentGrid = next.grid;
     currentWildMultipliers = next.wildMultipliers;
     currentFallOffsets = next.fallOffsets;
+    currentStepData = next.stepData || null;
   }
   return { cascadeSteps, totalPayoutMultiplier, finalGrid: currentGrid, wildMultipliers: currentWildMultipliers, scatterWin: null };
 }

@@ -26,11 +26,21 @@ header { display: flex; align-items: center; justify-content: space-between; bac
 .game-viewport { position: relative; min-height: 0; background: #240b25; }
 #game-canvas { display: block; }
 .game-ticker { position: absolute; z-index: 6; top: 9px; left: 50%; transform: translateX(-50%); color: #fff; font-size: clamp(10px, 1.5vw, 14px); font-weight: 800; letter-spacing: .12em; text-shadow: 0 2px 4px #251020; }
-.pop-rush-meter { position: absolute; z-index: 6; left: 12px; bottom: 10px; display: flex; align-items: center; gap: 5px; color: #fff9ae; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-shadow: 0 2px 3px #24101f; }
-.pop-rush-meter i { width: 12px; height: 12px; border: 2px solid #ecff61; border-radius: 50%; background: rgba(49,11,44,.62); box-shadow: 0 0 5px rgba(0,0,0,.6); }
-.pop-rush-meter i.filled { background: #ecff61; box-shadow: 0 0 10px #ecff61; }
-.pop-rush-panel { position: absolute; z-index: 7; top: 42px; left: 50%; transform: translate(-50%, -10px) scale(.94); padding: 7px 15px; border: 1px solid #fff16d; border-radius: 999px; background: rgba(71, 14, 67, .84); color: #fff16d; font-size: clamp(11px, 1.8vw, 17px); letter-spacing: .08em; opacity: 0; pointer-events: none; transition: .25s ease; white-space: nowrap; }
-.pop-rush-panel.active { transform: translate(-50%, 0) scale(1); opacity: 1; box-shadow: 0 0 20px rgba(255,241,109,.45); }
+.pop-rush-meter { position: absolute; z-index: 6; top: 38px; left: 12px; display: flex; align-items: center; gap: 12px; color: #fff9ae; font-size: 20px; font-weight: 900; letter-spacing: .08em; text-shadow: 0 2px 3px #24101f; }
+.pop-rush-meter-title { margin-right: 1px; }
+.pop-charge { --charge-fill: 0%; position: relative; display: grid; width: 68px; height: 68px; place-items: center; overflow: hidden; border: 4px solid #ecff61; border-radius: 50%; background: conic-gradient(#ecff61 var(--charge-fill), rgba(49,11,44,.72) 0); box-shadow: 0 0 10px rgba(0,0,0,.6); transition: transform .22s ease, filter .22s ease, box-shadow .22s ease; }
+.pop-charge::before { position: absolute; inset: 6px; border-radius: inherit; background: rgba(62,13,55,.9); content: ''; }
+.pop-charge-icon { position: relative; z-index: 1; display: grid; width: 44px; height: 44px; place-items: center; filter: drop-shadow(0 2px 2px #280a24); }
+.pop-charge-icon .paytable-icon { transform: scale(.72); }
+.pop-charge b { position: absolute; z-index: 2; right: -4px; bottom: -2px; min-width: 34px; padding: 2px 4px; border-radius: 10px; background: #40103a; color: #fff; font-size: 16px; line-height: 1.1; letter-spacing: 0; text-align: center; }
+.pop-charge.charging { transform: translateY(-1px); filter: brightness(1.1); }
+.pop-charge.filled { box-shadow: 0 0 12px #ecff61, 0 0 20px rgba(236,255,97,.45); }
+.pop-charge.filled::before { background: rgba(91,40,68,.58); }
+.pop-charge.filled b { background: #ecff61; color: #42123f; }
+.pop-rush-panel, .pop-feature-panel { position: absolute; z-index: 7; top: 42px; left: 50%; transform: translate(-50%, -10px) scale(.94); padding: 7px 15px; border: 1px solid #fff16d; border-radius: 999px; background: rgba(71, 14, 67, .84); color: #fff16d; font-size: clamp(11px, 1.8vw, 17px); letter-spacing: .08em; opacity: 0; pointer-events: none; transition: .25s ease; white-space: nowrap; }
+.pop-feature-panel { border-color: #8ef8ff; background: rgba(24, 55, 80, .88); color: #d7fbff; }
+.pop-rush-panel.active, .pop-feature-panel.active { transform: translate(-50%, 0) scale(1); opacity: 1; box-shadow: 0 0 20px rgba(255,241,109,.45); }
+.pop-feature-panel.active { box-shadow: 0 0 20px rgba(142,248,255,.42); }
 body.pop-rush-active .game-viewport { box-shadow: inset 0 0 40px rgba(236,255,97,.24); }
 .dashboard { border-top: 1px solid rgba(232,255,80,.35); background: linear-gradient(0deg, #2b0a2a, #53184a); }
 .bet-container { display: flex; flex-direction: column; gap: 3px; }
@@ -64,9 +74,9 @@ body.pop-rush-active .game-viewport { box-shadow: inset 0 0 40px rgba(236,255,97
 .stat-value { margin-top: 4px; color: var(--gold); font-size: 18px; font-weight: 800; }
 .btn-sim-btn { border-color: var(--pink) !important; color: #ffc2e7 !important; }
 @media (max-width: 620px) {
-  .pop-rush-meter { left: 8px; bottom: 7px; }
-  .pop-rush-meter span { display: none; }
-  .pop-rush-panel { top: 34px; }
+  .pop-rush-meter { top: 38px; left: 8px; gap: 6px; }
+  .pop-rush-meter-title { display: none; }
+  .pop-rush-panel { top: 118px; }
   /* The dev toolbar remains an intentional floating tool, but no longer covers the title/header. */
   .developer-tools { top: 64px !important; }
 }

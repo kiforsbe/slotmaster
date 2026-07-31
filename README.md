@@ -14,7 +14,7 @@ open `index.html` (via a local server, see below) and play.
 | Bar Fruits | <img src="games/barfruits/screenshot.png" width="160"> | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
 | Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
 | Mayan Tumble | <img src="games/mayantumble/screenshot.png" width="160"> | 5x3, 10 lines, cascading | Gold scatter → free spins with growing multiplier tiles, cascading wins | [games/mayantumble](games/mayantumble/README.md) |
-| Lemon Pop | <img src="games/lemonpop/screenshot.png" width="160"> | 5x5, horizontal/vertical 3–5 runs, no refill | Four winning cascades → one free Pop Rush respin | [games/lemonpop](games/lemonpop/README.md) |
+| Lemon Pop | <img src="games/lemonpop/screenshot.png" width="160"> | 5x5, horizontal/vertical 3–5 runs, no refill | Three Pops (five winning lines each) → one free Pop Rush respin | [games/lemonpop](games/lemonpop/README.md) |
 
 All six games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug tooling (SPIN LOG,
 RUN SIMULATION, TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic

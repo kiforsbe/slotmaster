@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyNoRefillCascade } from '../core/math/CascadeMath.js';
-import { applyPopRushVariant, POP_RUSH_VARIANTS } from '../core/math/LemonPopFeatures.js';
+import { applyPopFeature, applyPopRushVariant, POP_FEATURES, POP_RUSH_VARIANTS } from '../core/math/LemonPopFeatures.js';
 import { checkStraightLineWins } from '../core/math/StraightLineMath.js';
 import { LemonPopSpinMechanic } from '../core/engine/mechanics/LemonPopSpinMechanic.js';
 import { resolveMechanic, resolveWinEvaluator } from '../core/simulation/workerMechanicRegistry.js';
@@ -103,12 +103,34 @@ test('each seeded Pop Rush variant applies deterministically and Citrus Cross cr
   assert.ok(storm.grid.flat().filter(symbol => symbol === WILD_SYMBOL).length >= 5);
 });
 
-test('one paid spin triggers no more than one seeded Pop Rush and workers rebuild the same mechanic/evaluator', () => {
+test('each Pop charge effect is seeded, makes a bounded board change, and preserves no-refill gravity', () => {
+  const base = gridFromRows([
+    [null, null, null, null, null], ['lemonice', 'pinkpop', 'pinkfizz', 'gumdrop', 'heart'], ['lemonwedge', 'gumdrop', 'heart', 'lemoncandy', 'lemonice'], ['pinkpop', 'pinkfizz', 'lemonwedge', 'gumdrop', 'heart'], ['lemoncandy', 'lemonice', 'pinkpop', 'pinkfizz', 'lemonwedge'],
+  ]);
+  const mults = Array.from({ length: 5 }, () => Array(5).fill(1));
+  POP_FEATURES.forEach(feature => {
+    const first = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature, rng: createSeededRng(51) });
+    const again = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature, rng: createSeededRng(51) });
+    assert.deepEqual(first, again, `${feature} must be seeded and repeatable`);
+    assert.equal(first.feature, feature);
+    // No-refill gravity always leaves any empty cells above the landed symbols in a column.
+    first.grid.forEach(column => {
+      const firstSymbol = column.findIndex(symbol => symbol != null);
+      if (firstSymbol >= 0) assert.ok(column.slice(0, firstSymbol).every(symbol => symbol == null));
+    });
+  });
+  const splash = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature: 'wild-splash', rng: createSeededRng(1) });
+  assert.ok(splash.grid.flat().filter(symbol => symbol === WILD_SYMBOL).length >= 1);
+  const burst = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature: 'bubble-burst', rng: createSeededRng(2) });
+  assert.ok(burst.grid.flat().filter(symbol => symbol != null).length < base.flat().filter(symbol => symbol != null).length);
+});
+
+test('three five-line Pops trigger one seeded Rush and workers rebuild the same mechanic/evaluator', () => {
   const makeEvaluator = () => {
     let calls = 0;
     return () => {
       calls += 1;
-      if (calls <= 4) return {
+      if (calls <= 15) return {
       clusterWins: [{ kind: 'straight-line', orientation: 'horizontal', symbol: 'lemon', count: 3, payout: 1, winningPositions: [[0, 0], [1, 0], [2, 0]], wildSpawnPosition: [1, 0] }],
       totalPayoutMultiplier: 1, wildSymbol: WILD_SYMBOL,
       };
@@ -116,10 +138,12 @@ test('one paid spin triggers no more than one seeded Pop Rush and workers rebuil
     };
   };
   const args = { reelStrips: Array.from({ length: 5 }, () => ['lemon', 'mint']), rowsCount: 5, seed: 9,
-    config: { paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, popRushCascadeCount: 4, betAmount: 1 } };
+    config: { paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, linesPerPop: 5, popsToRush: 3, betAmount: 1 } };
   const result = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
   const replay = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
   assert.equal(result.triggeredPopRush, true);
+  assert.deepEqual(result.popProgress, { totalLines: 15, linesPerPop: 5, popsToRush: 3, completedPops: 3, linesInCurrentPop: 0 });
+  assert.equal(result.steps.flatMap(step => step.popFeatures || []).length, 3);
   assert.ok(result.steps.some(step => step.presentationPhase === 'pop-rush'));
   assert.equal(result.popRushVariant, replay.popRushVariant);
   assert.equal(resolveMechanic('lemonPopCascade'), LemonPopSpinMechanic);

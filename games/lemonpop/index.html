@@ -20,9 +20,13 @@
 
     <section class="game-viewport" aria-label="Lemon Pop game board">
       <div id="game-ticker" class="game-ticker">READY TO POP</div>
-      <div class="pop-rush-meter" aria-label="Pop Rush progress: four cascades trigger a free respin">
-        <span>POP RUSH</span><i></i><i></i><i></i><i></i>
+      <div class="pop-rush-meter" aria-label="Fill five winning lines per Pop. Three Pops unlock a free Pop Rush respin." aria-live="polite">
+        <span class="pop-rush-meter-title">POP RUSH</span>
+        <div class="pop-charge" data-pop="1"><span class="pop-charge-icon" aria-hidden="true"></span><b>0/5</b></div>
+        <div class="pop-charge" data-pop="2"><span class="pop-charge-icon" aria-hidden="true"></span><b>0/5</b></div>
+        <div class="pop-charge" data-pop="3"><span class="pop-charge-icon" aria-hidden="true"></span><b>0/5</b></div>
       </div>
+      <div id="pop-feature-panel" class="pop-feature-panel" aria-live="polite"><b id="pop-feature-label">POP EFFECT</b></div>
       <div id="pop-rush-panel" class="pop-rush-panel" aria-live="polite"><b id="pop-rush-label">POP RUSH</b></div>
       <canvas id="game-canvas"></canvas>
     </section>
