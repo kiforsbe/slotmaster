@@ -45,16 +45,21 @@ test('cluster outline traces only the exterior edges of the active cluster', () 
   assert.equal(ctx.calls.at(-1), 'stroke');
 });
 
-test('cluster outline ignores payline cascade wins', () => {
+test('configured cluster outline also renders for payline cascade wins', () => {
   const ctx = outlineContext();
   new ClusterOutlineRenderer().render(ctx, {
     currentClusterWins: [{ lineIndex: 0, winningPositions: [[0, 0], [1, 0]] }],
     currentClusterIndex: 0,
     layout,
+    paylines: [[0, 0]],
+    reelsCount: 2,
     drawClusterOutline: true,
+    visualizer: { pulse: false },
   });
 
-  assert.deepEqual(ctx.calls, []);
+  assert.ok(ctx.calls.filter(call => call === 'stroke').length >= 2, 'expected both the active payline and cell outline');
+  const lines = ctx.calls.filter(call => Array.isArray(call) && call[0] === 'line');
+  assert.equal(lines.length, 9, 'the payline adds three segments and the outline still traces six exterior edges');
 });
 
 test('payline cascade wins use clusterVisualizer styling for their active path', () => {

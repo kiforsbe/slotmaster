@@ -33,6 +33,11 @@ export class ClusterOutlineRenderer {
 
     if (win.lineIndex != null) {
       this.drawPaylinePath(ctx, win, layout, paylines, reelsCount, visualizer);
+      // A cascade payline win still has a concrete set of winning cells. Keep the active
+      // payline as the game's primary explanation, but let clusterVisualizer add its configured
+      // perimeter around those cells too. This is what makes the same visualizer useful for
+      // Mayan Tumble-style line wins as well as Candy Frenzy-style connected clusters.
+      if (drawClusterOutline) this.drawClusterOutline(ctx, win, layout, visualizer);
     } else if (drawClusterOutline) {
       this.drawClusterOutline(ctx, win, layout, visualizer);
     }
