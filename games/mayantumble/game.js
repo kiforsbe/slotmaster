@@ -6,14 +6,14 @@ import { ParticleSystem } from '../../core/rendering/ParticleSystem.js';
 import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
 import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWins } from '../../core/math/SlotMath.js';
-import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
+import { openSpinLogPanel } from '../../core/ui/dev/SpinLogPanel.js';
 import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { ensureDeveloperPanels } from '../../core/ui/DeveloperPanels.js';
 import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
-import { runSimulationAndRender } from '../../core/SimulationPanel.js';
-import { openTuningPanel } from '../../core/TuningPanel.js';
+import { runSimulationAndRender } from '../../core/ui/dev/SimulationPanel.js';
+import { openTuningPanel } from '../../core/ui/dev/TuningPanel.js';
 
 export const REELS_COUNT = 5;
 export const ROWS_COUNT = 3;

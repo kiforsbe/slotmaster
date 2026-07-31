@@ -1,7 +1,7 @@
 // Simulation-results developer panel. This module owns the simulation run and its detailed
 // win breakdown; it never constructs or mutates the tuning UI.
-import { exportSpinLogCsv } from './SpinLog.js';
-import { showDeveloperPanel } from './ui/DeveloperPanels.js';
+import { exportSpinLogCsv } from '../../logging/SpinLog.js';
+import { showDeveloperPanel } from '../DeveloperPanels.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 

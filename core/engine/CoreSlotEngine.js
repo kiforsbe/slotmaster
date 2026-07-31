@@ -198,7 +198,7 @@ export class CoreSlotEngine {
   }
 
   // Read-only view onto the plugged-in SpinLogRecorder's own buffer, matching
-  // SlotEngine.js's/CascadeEngine.js's own `engine.spinLog` property - core/SpinLogPanel.js
+  // SlotEngine.js's/CascadeEngine.js's own `engine.spinLog` property - ui/dev/SpinLogPanel.js
   // (and a game's own DOM wiring) read this directly, with no idea a SpinLogRecorder component
   // exists underneath. Empty, not undefined, when no recorder is configured (a game that never
   // wires SPIN LOG can still safely read engine.spinLog.length).

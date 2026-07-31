@@ -1,13 +1,13 @@
 // Frequency-tuning developer panel. This module owns tuning controls, diagnostics, live progress,
 // and the copyable result. The underlying search remains pure in core/SpinSimulator.js.
-import { resolveFrequencyBounds } from './math/SlotMath.js';
-import { exportSpinLogCsv } from './SpinLog.js';
-import { tuneFrequencies } from './SpinSimulator.js';
-import { createSimulationWorkerPool } from './SimulationWorkerPool.js';
-import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent, volatilityBandToSigma } from './TuningUnits.js';
-import { describePlayerExperience } from './PlayerExperience.js';
-import { createTuneLogEntry, describeTuneEntryQuality, tuneLogToJson, exportTuneLogJson } from './TuneLog.js';
-import { showDeveloperPanel } from './ui/DeveloperPanels.js';
+import { resolveFrequencyBounds } from '../../math/SlotMath.js';
+import { exportSpinLogCsv } from '../../logging/SpinLog.js';
+import { tuneFrequencies } from '../../SpinSimulator.js';
+import { createSimulationWorkerPool } from '../../SimulationWorkerPool.js';
+import { spinsPerTriggerToPct, pctToSpinsPerTrigger, INTENT_LEVELS, intentToWeight, weightToIntent, volatilityBandToSigma } from '../../TuningUnits.js';
+import { describePlayerExperience } from '../../PlayerExperience.js';
+import { createTuneLogEntry, describeTuneEntryQuality, tuneLogToJson, exportTuneLogJson } from '../../TuneLog.js';
+import { showDeveloperPanel } from '../DeveloperPanels.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));

@@ -1,4 +1,4 @@
-import { downloadTextFile } from './FileIO.js';
+import { downloadTextFile } from '../io/FileIO.js';
 
 // Shared per-spin log entry construction, used by both core/SpinSimulator.js (a batch of
 // synchronous simulated spins) and core/engine/SpinLogRecorder.js (real, animated interactive
@@ -69,7 +69,7 @@ export function createSpinLogEntry({
 /**
  * Builds one spin-log entry for a cascading cluster-pays spin (Candy Frenzy) - same
  * top-level shape as createSpinLogEntry (spinIndex/timestamp/seed/phase/totalBet/totalWin/
- * scatter fields) so SpinLogPanel.js's existing table/CSV export work unchanged, plus a
+ * scatter fields) so ui/dev/SpinLogPanel.js's existing table/CSV export work unchanged, plus a
  * clusterWins breakdown across every cascade step instead of lineWins.
  * @param {Object} args
  * @param {number} args.spinIndex
@@ -139,7 +139,7 @@ export function applyExpandingWinToSpinLogEntry(entry, { expandingSymbol, expand
 
 // --- CSV serialization ---
 // A spin-log entry (see createSpinLogEntry above) is plain data, so turning it into CSV lives
-// here too rather than in a DOM-facing panel module - core/SpinLogPanel.js only renders it.
+// here too rather than in a DOM-facing panel module - ui/dev/SpinLogPanel.js only renders it.
 
 // A CSV field is quoted (with internal quotes doubled) only when it actually needs it - comma,
 // quote, or newline - so the common case (plain numbers and symbol names) stays readable

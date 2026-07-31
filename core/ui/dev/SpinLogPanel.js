@@ -1,8 +1,8 @@
-// Dev-tooling UI panel for viewing SlotEngine's live per-spin log in-game (see core/SpinLog.js
-// for the shared entry shape/CSV export, and core/SimulationPanel.js/core/TuningPanel.js for the
+// Dev-tooling UI panel for viewing SlotEngine's live per-spin log in-game (see core/logging/SpinLog.js
+// for the shared entry shape/CSV export, and ui/dev/SimulationPanel.js/ui/dev/TuningPanel.js for the
 // sibling developer panels).
-import { summarizeSpinWins, exportSpinLogCsv } from './SpinLog.js';
-import { showDeveloperPanel } from './ui/DeveloperPanels.js';
+import { summarizeSpinWins, exportSpinLogCsv } from '../../logging/SpinLog.js';
+import { showDeveloperPanel } from '../DeveloperPanels.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 

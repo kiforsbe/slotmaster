@@ -1,6 +1,6 @@
 /**
  * A log of every configuration that became the new best during a tune - the tuning counterpart to
- * core/SpinLog.js, exporting JSON rather than CSV because what is being recorded is a CONFIG, not
+ * core/logging/SpinLog.js, exporting JSON rather than CSV because what is being recorded is a CONFIG, not
  * a flat row of numbers.
  *
  * The problem it solves: a search reports one final answer, and the dozen candidates it accepted
@@ -17,7 +17,7 @@
  * Pure - no DOM, no simulation. The panel renders it; core/SpinSimulator.js never knows it exists.
  */
 
-import { downloadTextFile } from './FileIO.js';
+import { downloadTextFile } from './io/FileIO.js';
 import { pctToSpinsPerTrigger, sigmaToVolatilityBand } from './TuningUnits.js';
 
 /**

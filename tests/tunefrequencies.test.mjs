@@ -926,7 +926,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   // This exists because adding 'headroom' broke the tuning panel at runtime: it fell through to
   // generic candidate-rendering code that read `best.result`, and the TypeError aborted the whole
   // tune. A new phase emitting null `best` must be added here consciously - which is the prompt to
-  // give core/SimulationPanel.js's progress handler a matching early return.
+  // give ui/dev/SimulationPanel.js's progress handler a matching early return.
   const KNOWN_NULL_BEST_PHASES = new Set([
     'initial', 'headroom', 'feasibility', 'restart', 'busy', 'scatter-complete', 'coupling-stage',
     'validation', 'sensitivity', 'structural', 'loss-preview', 'input-parameters',
@@ -954,7 +954,7 @@ test('every onProgress phase emitting a null `best` is a known informational pha
   });
   assert.ok(seenDiagnosisPhases.has('structural'), 'the diagnosis pass must actually reach Phase 0d');
   assert.deepEqual([...offenders], [],
-    'these phases emitted a null `best` without being declared informational - add them here AND give SimulationPanel.js\'s progress handler an early return for them');
+    'these phases emitted a null `best` without being declared informational - add them here AND give ui/dev/SimulationPanel.js\'s progress handler an early return for them');
 });
 
 // ---- Phase 2: seed rotation and anchor gating ----

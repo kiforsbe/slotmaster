@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   formatReelFrequencyTablesForCopy, renderDiagnosisHtml,
   formatScaledPaytableForCopy, renderPayoutScaleHtml, renderLossBudgetHtml, describePenaltyStateNow, renderTargetChipsHtml, renderPlayerExperienceHtml, renderTuneLogHtml,
-} from '../core/TuningPanel.js';
+} from '../core/ui/dev/TuningPanel.js';
 import { scalePaytable } from '../core/SpinSimulator.js';
 
 test('formatReelFrequencyTablesForCopy preserves distinct small frequencies instead of collapsing them', () => {
@@ -289,7 +289,7 @@ test('renderDiagnosisHtml surfaces a broken payoutScale measurement instead of h
 
 // ---- Task 1.8: the payout-scale solve reaching the panel ----------------------------------
 // Until this landed there were ZERO references to solvePayoutScale/payoutScale/scaledPaytable
-// anywhere in SimulationPanel.js: the one EXACT RTP lever the tuner has was unreachable from the
+// anywhere in ui/dev/SimulationPanel.js: the one EXACT RTP lever the tuner has was unreachable from the
 // UI, while the diagnosis panel above it printed "scale every payout by 0.6922 (exact)" as its
 // top recommendation. These cover the two halves of closing that - the emitted code and the
 // rendered result.

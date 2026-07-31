@@ -5,7 +5,7 @@
 // line-pay game keeps working unchanged without ever passing it explicitly. See
 // core/CascadeSpinMechanic.js for the cluster-pays sibling.
 import { generateTargetGrid, checkExpandingWins, checkWins, createSeededRng } from '../../math/SlotMath.js';
-import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../../SpinLog.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../../logging/SpinLog.js';
 
 export const LineMechanic = {
   name: 'line',

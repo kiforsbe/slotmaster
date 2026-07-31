@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createSpinLogEntry, applyExpandingWinToSpinLogEntry, summarizeSpinWins, createCascadeSpinLogEntry } from '../core/SpinLog.js';
+import { createSpinLogEntry, applyExpandingWinToSpinLogEntry, summarizeSpinWins, createCascadeSpinLogEntry } from '../core/logging/SpinLog.js';
 
 test('createSpinLogEntry reports zeroed win fields for a losing spin', () => {
   const entry = createSpinLogEntry({

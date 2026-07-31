@@ -8,7 +8,7 @@
 // unmodified, just with its own evaluator/payoutOf. See core/LineMechanic.js for the line-pay
 // sibling (the default mechanic).
 import { resolveCascadeSequence } from '../../math/CascadeMath.js';
-import { createCascadeSpinLogEntry } from '../../SpinLog.js';
+import { createCascadeSpinLogEntry } from '../../logging/SpinLog.js';
 import { createFlatMultiplierMode } from '../FreeSpinsModes.js';
 
 export const CascadeSpinMechanic = {

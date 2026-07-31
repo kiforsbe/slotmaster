@@ -85,9 +85,9 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
   playfield's own look is a per-game `playfield` config passed to `CoreSlotEngine`.
 - **`core/SpinSimulator.js`** — runs many simulated spins to measure RTP/trigger rate, and
   `tuneFrequencies`, which automatically adjusts a game's reel frequencies to hit a target RTP.
-- **`core/SimulationPanel.js`** — the in-browser RUN SIMULATION UI (a debug panel included in
+- **`core/ui/dev/SimulationPanel.js`** — the in-browser RUN SIMULATION UI (a debug panel included in
   each game's `index.html`).
-- **`core/TuningPanel.js`** — the separate TUNE FREQUENCIES UI and formatter that turns a tuned
+- **`core/ui/dev/TuningPanel.js`** — the separate TUNE FREQUENCIES UI and formatter that turns a tuned
   result back into pasteable `FREQUENCY_REELn` source.
 - **Tuner support modules**, all pure and separately tested — `core/TuningValidation.js` (static
   config checks that refuse to tune on arithmetic errors), `core/TuningUnits.js` (converting
@@ -100,11 +100,11 @@ Release notes live in [CHANGELOG.md](CHANGELOG.md).
   **`core/mechanicRegistry.js`** — the Worker pool tuning trials are dispatched to, one trial per
   message, and the registry that resolves a mechanic/evaluator/free-spins-mode back from the name
   it crossed `postMessage` as (a function cannot cross directly).
-- **`core/SpinLog.js`** — pure per-spin log entry building and CSV serialization, shared by
+- **`core/logging/SpinLog.js`** — pure per-spin log entry building and CSV serialization, shared by
   both `SpinSimulator.js` (a batch run) and `core/engine/SpinLogRecorder.js` (live play, plugged
   into `CoreSlotEngine`) so the two can't drift apart on what a logged spin looks like. See
   "Spin logging" below.
-- **`core/SpinLogPanel.js`** / **`core/FileIO.js`** — the in-browser SPIN LOG viewer (reads
+- **`core/ui/dev/SpinLogPanel.js`** / **`core/io/FileIO.js`** — the in-browser SPIN LOG viewer (reads
   `engine.spinLog`) and a small generic "download this text as a file" helper it uses for
   CSV export.
 - **`core/audio/SlotAudio.js`** — synthesized sound effects, played via `core/engine/
@@ -193,7 +193,7 @@ to write it explicitly, only a symbol that wants to override that default.
 `tuneFrequencies` (`core/SpinSimulator.js`) always defaults to `-1` for every reel unless
 `orderingBiasByReel` is passed explicitly — i.e. "a higher-paying symbol should not be more
 frequent than a lower-paying one," same as before this option existed. The TUNE FREQUENCIES
-panel (`core/TuningPanel.js`) pre-selects a different value per reel in its UI dropdowns
+panel (`core/ui/dev/TuningPanel.js`) pre-selects a different value per reel in its UI dropdowns
 only (early reels default to `1`, middle reels to `-1`, late reels to `0`) as a starting point
 for a "near miss" feel — premium symbols showing up often on the reels a player sees land, but
 rarely on the ones that would complete the line. That's a UI convenience, not a change to
@@ -233,18 +233,18 @@ name a winner when the measurement noise floor is wider than the tolerance).
 
 Every real spin (base and free, live in the browser) is recorded to `engine.spinLog` — one
 entry per spin, each with its own seed, timestamp, bet, and a breakdown of every
-scatter/line/expanding win it produced (`core/SpinLog.js`'s `createSpinLogEntry`). Click a
+scatter/line/expanding win it produced (`core/logging/SpinLog.js`'s `createSpinLogEntry`). Click a
 game's **SPIN LOG** button to open a live-refreshing table of recent spins with an **EXPORT
-CSV** button (`core/SpinLogPanel.js`), for pulling a session's data into Excel/Sheets.
+CSV** button (`core/ui/dev/SpinLogPanel.js`), for pulling a session's data into Excel/Sheets.
 
 RUN SIMULATION can log the same way: pass `logSpins: true` to `simulateSpins`/
 `engine.runSimulation` and every simulated spin lands in `results.spinLog` too — the RUN
 SIMULATION panel does this automatically, seeding each run (shown next to its results) so it
 can be reproduced, with its own "EXPORT SPIN LOG (CSV)" button. Both paths share the same
-`core/SpinLog.js` entry shape and CSV format (`exportSpinLogCsv`), so a batch run's export and
+`core/logging/SpinLog.js` entry shape and CSV format (`exportSpinLogCsv`), so a batch run's export and
 a live session's export are interchangeable in a spreadsheet. The win-breakdown cell uses a
 compact, regex-friendly format — `TYPE:symbol:count:amount[:flags]` per win, joined by `|`
-(e.g. `S:book:3:20|L4:ace:3:5:W`) — see `summarizeSpinWins`'s own doc in `core/SpinLog.js` for
+(e.g. `S:book:3:20|L4:ace:3:5:W`) — see `summarizeSpinWins`'s own doc in `core/logging/SpinLog.js` for
 the exact grammar.
 
 ## License

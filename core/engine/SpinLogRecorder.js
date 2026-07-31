@@ -1,8 +1,8 @@
 // Replaces the duplicated `_pushSpinLogEntry` methods in SlotEngine.js/CascadeEngine.js with one
 // component both a line-pay and cascade CoreSlotEngine plug in. Builds entries from
-// core/SpinLog.js's existing pure functions - this class only owns the bounded buffer and the
+// core/logging/SpinLog.js's existing pure functions - this class only owns the bounded buffer and the
 // choice of which SpinLog builder a given sequence shape needs.
-import { createSpinLogEntry, createCascadeSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../SpinLog.js';
+import { createSpinLogEntry, createCascadeSpinLogEntry, applyExpandingWinToSpinLogEntry } from '../logging/SpinLog.js';
 
 const DEFAULT_MAX_ENTRIES = 20000;
 

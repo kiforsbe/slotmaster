@@ -46,7 +46,7 @@ import { volatilityBandToSigma, sigmaToVolatilityBand } from './TuningUnits.js';
  *   and a breakdown of every scatter/line/expanding/cluster win that spin produced. Off by
  *   default since it holds one object per spin in memory for the whole run (relevant at the
  *   default 1,000,000+ spin counts); turn it on for a dev-tooling export (see
- *   SimulationPanel.js's "EXPORT SPIN LOG" button), not for routine RTP measurement.
+ *   ui/dev/SimulationPanel.js's "EXPORT SPIN LOG" button), not for routine RTP measurement.
  * @param {boolean} [config.hasExpandingWild=false] - LineMechanic-only: whether free spins here
  *   include a Book-of-Dead-style expanding-wild bonus (a random non-scatter symbol picked fresh
  *   each free-spins session, expanding to fill any reel it lands on - see checkExpandingWins).
@@ -1644,7 +1644,7 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
   // number while individual trials still swing wildly - one lucky trialsPerPoint sample can
   // report a "converged" RTP that's really just noise, not a reliable measurement of what the
   // frequencies actually pay out over a much larger run. Surfacing the per-trial spread (not
-  // just the mean) is what lets a caller (see SimulationPanel.js's live log/summary) tell "this
+  // just the mean) is what lets a caller (see ui/dev/SimulationPanel.js's live log/summary) tell "this
   // number is trustworthy" apart from "this number got lucky" - trialsPerPoint: 1 collapses
   // trialRtpMin/trialRtpMax to the same single value, which correctly signals "no repeat
   // measurement was taken, so no variance information is available."

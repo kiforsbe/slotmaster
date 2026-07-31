@@ -32,12 +32,12 @@ flowchart TB
     TuningReport["Tuner support - reporting side, pure<br/>PlayerExperience · TuneLog · TuningUnits"]
     WorkerPool["core/SimulationWorkerPool.js<br/>+ simulationTrialWorker.js"]
     MechanicRegistry["core/mechanicRegistry.js<br/>name -> mechanic/evaluator/mode"]
-    SimulationPanel["core/SimulationPanel.js<br/>RUN SIMULATION UI"]
-    TuningPanel["core/TuningPanel.js<br/>TUNE FREQUENCIES UI"]
+    SimulationPanel["core/ui/dev/SimulationPanel.js<br/>RUN SIMULATION UI"]
+    TuningPanel["core/ui/dev/TuningPanel.js<br/>TUNE FREQUENCIES UI"]
 
-    SpinLog["core/SpinLog.js<br/>per-spin log entries + CSV"]
-    SpinLogPanel["core/SpinLogPanel.js<br/>SPIN LOG UI"]
-    FileIO["core/FileIO.js<br/>file-download helper"]
+    SpinLog["core/logging/SpinLog.js<br/>per-spin log entries + CSV"]
+    SpinLogPanel["core/ui/dev/SpinLogPanel.js<br/>SPIN LOG UI"]
+    FileIO["core/io/FileIO.js<br/>file-download helper"]
 
     Game -- "constructs, passes components via config" --> CoreSlotEngine
     Game -. "config.mechanic" .-> LineMechanic
@@ -398,7 +398,7 @@ that isn't a spin-lifecycle event this component's hooks cover.
 **`SpinLogRecorder`** (`config.spinLogRecorder`) — `record({ sequence, scatterWin, seed,
 timestamp, phase, chargedBet })`, called once per spin from `_finishSpin()`. Detects a line-pay
 vs. cascade sequence shape (`'clusterWins' in sequence[0]`) and builds the entry through the
-matching `core/SpinLog.js` builder, replacing the duplicated `_pushSpinLogEntry` methods
+matching `core/logging/SpinLog.js` builder, replacing the duplicated `_pushSpinLogEntry` methods
 `SlotEngine.js`/`CascadeEngine.js` used to each maintain separately. Bounded to `maxEntries`
 (default 20000) so a long autoplay session doesn't grow `engine.spinLog` unbounded.
 
@@ -518,7 +518,7 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   `betPerLine` (no per-line betting concept - see `CascadeSpinMechanic`'s own doc). Several
   config fields are opt-in, off by default so existing callers see no behavior change:
   `hasExpandingWild` (`LineMechanic`-only), `freeSpinsMode` (`CascadeSpinMechanic`-only), and
-  `logSpins` (populate `results.spinLog`, one entry per simulated spin, via `core/SpinLog.js` —
+  `logSpins` (populate `results.spinLog`, one entry per simulated spin, via `core/logging/SpinLog.js` —
   see "Spin logging" below).
 - **`tuneFrequencies(paytable, reelFrequencyTables, options)`** — the RUN SIMULATION/TUNE
   FREQUENCIES panel's auto-balancer, likewise mechanic-agnostic via `options.mechanic`/
@@ -537,7 +537,7 @@ global free-spins safety cap, and result aggregation (RTP, win distribution, spi
   may just be a lucky sample rather than a trustworthy measurement — a real risk for a
   high-variance mechanic (e.g. a cascade bonus whose multiplier can stack repeatedly, as Candy
   Frenzy's does) where `trialSpins`/`trialsPerPoint` weren't large enough to average out rare
-  huge wins. `core/SimulationPanel.js`'s tuning panel always surfaces this spread alongside the
+  huge wins. `core/ui/dev/SimulationPanel.js`'s tuning panel always surfaces this spread alongside the
   RTP figure, and shows a dedicated warning banner whenever the candidate's standard error
   exceeds `options.maxRtpStdError` (which also gates whether `tuneFrequencies` itself considers
   that result `'converged'` at all — see `maxRtpStdError`'s own doc).
@@ -689,7 +689,7 @@ classifier is far easier to test when it takes numbers and returns a value.
   what was asked for, its own error bar, the payout shape, what it violated, and a deep-copied
   snapshot of the frequencies themselves.
 
-## `core/SimulationPanel.js` — browser UI for simulation results
+## `core/ui/dev/SimulationPanel.js` — browser UI for simulation results
 
 The DOM/rendering glue between a game's RUN SIMULATION button and the engine's simulation method.
 A game never talks to the simulator directly for its UI — it calls this module instead:
@@ -700,7 +700,7 @@ A game never talks to the simulator directly for its UI — it calls this module
   bucket's header/column wording for a non-line-pay mechanic (e.g. Candy Frenzy passes
   `CascadeSpinMechanic.statsLabels` — "Cluster Wins"/"Cluster Size" instead of "Normal
   Wins"/"Hits"); omitted, it defaults to the line-pay wording.
-## `core/TuningPanel.js` — browser UI for frequency tuning
+## `core/ui/dev/TuningPanel.js` — browser UI for frequency tuning
 
 Tuning controls, diagnostics, worker-backed progress, tuning history, and copyable results live in
 this module. It never mutates a game's live reel tables; applying a result remains an explicit
@@ -727,11 +727,11 @@ source change.
   assert on the tuner's UI wording and numbers under `node --test` with no DOM at all — the
   panel's own reasoning is testable, not just the math beneath it.
 
-## `core/SpinLog.js` / `core/SpinLogPanel.js` / `core/FileIO.js` — spin logging
+## `core/logging/SpinLog.js` / `core/ui/dev/SpinLogPanel.js` / `core/io/FileIO.js` — spin logging
 
 Both `core/engine/SpinLogRecorder.js` (live spins, plugged into `CoreSlotEngine`) and
 `SpinSimulator.js` (a batch run, opt-in via `config.logSpins`) build their per-spin log entries
-through the same pure functions in `core/SpinLog.js`, so the two can't drift apart on field
+through the same pure functions in `core/logging/SpinLog.js`, so the two can't drift apart on field
 names or payout math:
 
 - **`createSpinLogEntry({ spinIndex, phase, betPerLine, linesCount, chargedBet,
@@ -749,11 +749,11 @@ names or payout math:
   filenamePrefix })`** — the compact `TYPE:symbol:count:amount[:flags]` win-summary format (see
   its own doc for the exact grammar and a ready-made parsing regex) and the CSV builder +
   download trigger used by both the RUN SIMULATION panel's export button and
-  `SpinLogPanel.js`'s.
-- **`core/SpinLogPanel.js`'s `openSpinLogPanel({ engine, domRefs })`** — the SPIN LOG dev
+  `core/ui/dev/SpinLogPanel.js`'s.
+- **`core/ui/dev/SpinLogPanel.js`'s `openSpinLogPanel({ engine, domRefs })`** — the SPIN LOG dev
   button's panel: a live-refreshing table of `engine.spinLog`'s most recent entries plus an
   export button. Renders into its own developer panel created by `DeveloperPanels.js`.
-- **`core/FileIO.js`'s `downloadTextFile(filename, text, mimeType)`** — generic
+- **`core/io/FileIO.js`'s `downloadTextFile(filename, text, mimeType)`** — generic
   browser-download utility `exportSpinLogCsv` is built on; not spin-log-specific.
 
 ## `core/audio/SlotAudio.js` — synthesized sound effects
@@ -829,8 +829,8 @@ cascade it is also `paylines`/`wildSymbol`.
    never resizes, loads assets, or renders anything.
 6. Wire the rest of the page's DOM controls (spin/auto/turbo/mute/bet/lines buttons) to the
    engine's public methods, the RUN SIMULATION button to `runSimulationAndRender` from
-   `SimulationPanel.js`, the TUNE FREQUENCIES button to `openTuningPanel` from
-   `TuningPanel.js`, and the SPIN LOG button to `openSpinLogPanel` from `SpinLogPanel.js`.
+   `core/ui/dev/SimulationPanel.js`, the TUNE FREQUENCIES button to `openTuningPanel` from
+   `core/ui/dev/TuningPanel.js`, and the SPIN LOG button to `openSpinLogPanel` from `core/ui/dev/SpinLogPanel.js`.
 
 ### 2. `index.html` — the DOM contract `game.js` expects
 
