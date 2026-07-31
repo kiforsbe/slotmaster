@@ -11,6 +11,7 @@
 // theme renders exactly as it did before this extraction, and a cascade game passing its own
 // theme renders exactly as CascadeEngine.js did.
 import { drawSpriteSymbol } from './SpriteDrawer.js';
+import { SpriteAnimation } from '../assets/AssetLoader.js';
 import { resolveAnimatedValue } from '../animation/AnimatedValue.js';
 
 // How far outside the grid a payline's numbered tag sits - matches both engines' own
@@ -177,8 +178,8 @@ export class SlotRenderer {
     }
   }
 
-  drawSymbol(ctx, spritesheet, symbolsConfig, name, x, y, width, height, blurSpeed = 0) {
-    drawSpriteSymbol(ctx, spritesheet, symbolsConfig[name], x, y, width, height, blurSpeed);
+  drawSymbol(ctx, asset, symbolsConfig, name, x, y, width, height, blurSpeed = 0) {
+    drawSpriteSymbol(ctx, asset, symbolsConfig[name], x, y, width, height, blurSpeed);
   }
 
   // Book-of-Dead-style expanding-wild reveal overlay - extracted from SlotEngine.js's
@@ -186,7 +187,7 @@ export class SlotRenderer {
   // staggered per ReelScrollAnimator.playExpandingReveal's own start-time schedule); each
   // column grows outward from its center row while fading in a neon aura, then draws the
   // expanding symbol scaled up across all three rows once far enough along.
-  drawExpandingAnimation(ctx, layout, spritesheet, symbolsConfig, expandingSymbol, expansionReelsToAnimate, expansionReelStartTimes) {
+  drawExpandingAnimation(ctx, layout, asset, symbolsConfig, expandingSymbol, expansionReelsToAnimate, expansionReelStartTimes) {
     const tile = symbolsConfig[expandingSymbol];
     if (!tile) return;
 
@@ -231,7 +232,7 @@ export class SlotRenderer {
           ctx.scale(scale, scale);
 
           ctx.drawImage(
-            spritesheet,
+            asset.image || asset,
             tile.x, tile.y, tile.w, tile.h,
             -symbolWidth / 2, -symbolHeight / 2,
             symbolWidth, symbolHeight,
@@ -248,7 +249,7 @@ export class SlotRenderer {
   // Extracted from SlotEngine.js's renderReelsSymbols - draws each reel's rolling symbol window
   // (see ReelScrollAnimator, which owns the `reels` array's physics/state) at its current
   // scroll offset, with motion blur while spinning fast.
-  drawReelsSymbols(ctx, spritesheet, symbolsConfig, layout, reelsCount, reels) {
+  drawReelsSymbols(ctx, asset, symbolsConfig, layout, reelsCount, reels) {
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
     for (let col = 0; col < reelsCount; col++) {
       const reel = reels[col];
@@ -258,7 +259,7 @@ export class SlotRenderer {
         const symbol = reel.symbols[s];
         const cy = reelsY + ((s - 1) * symbolHeight) + reel.offsetY;
         const isSpinningFast = reel.state === 'spinning' && reel.speed > 30;
-        this.drawSymbol(ctx, spritesheet, symbolsConfig, symbol, cx, cy, symbolWidth, symbolHeight, isSpinningFast ? reel.speed : 0);
+        this.drawSymbol(ctx, asset, symbolsConfig, symbol, cx, cy, symbolWidth, symbolHeight, isSpinningFast ? reel.speed : 0);
       }
     }
   }
@@ -534,8 +535,8 @@ export class SlotRenderer {
   // _renderClearGlow/_applyClearTransform. `gridState` bundles the per-cell animation info the
   // original methods read off `this`: { grid, cellOffsets, currentClearVariants (Map keyed
   // "col,row"), cellBounceStartTime, clearProgress (0..1 or null), bounceDuration, now }.
-  drawGridSymbols(ctx, spritesheet, symbolsConfig, layout, reelsCount, rowsCount, gridState) {
-    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now } = gridState;
+  drawGridSymbols(ctx, asset, symbolsConfig, layout, reelsCount, rowsCount, gridState) {
+    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect } = gridState;
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
 
     for (let col = 0; col < reelsCount; col++) {
@@ -556,12 +557,16 @@ export class SlotRenderer {
 
         ctx.save();
         if (clearInfo) {
-          this._applyClearTransform(ctx, clearInfo, clearProgress, cx, cy, layout);
+          this._applyClearTransform(ctx, clearInfo, clearProgress, cx, cy, layout, clearEffect);
         } else if (isBouncing) {
           this._applyLandingBounce(ctx, bounceElapsed / bounceDuration, cx, cy, layout);
         }
-        drawSpriteSymbol(ctx, spritesheet, tile, cx, cy, symbolWidth, symbolHeight, 0);
+        drawSpriteSymbol(ctx, asset, tile, cx, cy, symbolWidth, symbolHeight, 0);
         ctx.restore();
+
+        if (clearInfo && clearEffect?.spriteAsset?.image && clearEffect.animation) {
+          this._drawClearSpriteEffect(ctx, clearEffect, cx, cy, layout, clearProgress);
+        }
       }
     }
   }
@@ -594,11 +599,19 @@ export class SlotRenderer {
     ctx.restore();
   }
 
-  _applyClearTransform(ctx, clearInfo, progress, cx, cy, layout) {
+  _applyClearTransform(ctx, clearInfo, progress, cx, cy, layout, clearEffect = null) {
     const centerX = cx + layout.symbolWidth / 2;
     const centerY = cy + layout.symbolHeight / 2;
-    ctx.globalAlpha = Math.max(0, 1 - progress);
+    const shrinkFade = clearEffect?.shrinkFade;
+    ctx.globalAlpha = shrinkFade ? Math.pow(Math.max(0, 1 - progress), shrinkFade.fadePower ?? 1.5) : Math.max(0, 1 - progress);
     ctx.translate(centerX, centerY);
+
+    if (shrinkFade) {
+      const scale = Math.max(shrinkFade.minimumScale ?? 0, 1 - progress * (1 - (shrinkFade.minimumScale ?? 0)));
+      ctx.scale(scale, scale);
+      ctx.translate(-centerX, -centerY);
+      return;
+    }
 
     switch (clearInfo.variant) {
       case 'stretch': {
@@ -629,10 +642,40 @@ export class SlotRenderer {
     ctx.translate(-centerX, -centerY);
   }
 
+  _drawClearSpriteEffect(ctx, clearEffect, cx, cy, layout, progress) {
+    const descriptor = typeof clearEffect.animation === 'string'
+      ? clearEffect.spriteAsset.animations?.[clearEffect.animation]
+      : clearEffect.animation;
+    if (!descriptor) return;
+    const animation = descriptor instanceof SpriteAnimation
+      ? descriptor.play(clearEffect.startTime)
+      : new SpriteAnimation(descriptor).play(clearEffect.startTime);
+    const effectProgress = Math.min(1, progress * (clearEffect.progressMultiplier ?? 1.35));
+    const scale = (clearEffect.startScale ?? 0.55)
+      + ((clearEffect.endScale ?? 1.25) - (clearEffect.startScale ?? 0.55)) * effectProgress;
+    const width = layout.symbolWidth * scale;
+    const height = layout.symbolHeight * scale;
+    const alpha = Math.min(1, progress * (clearEffect.fadeInMultiplier ?? 8))
+      * Math.max(0, 1 - progress * (clearEffect.fadeOutMultiplier ?? 0.25));
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawSpriteSymbol(
+      ctx,
+      clearEffect.spriteAsset,
+      animation,
+      cx + (layout.symbolWidth - width) / 2,
+      cy + (layout.symbolHeight - height) / 2,
+      width,
+      height,
+    );
+    ctx.restore();
+  }
+
   // The previous spin's leftover grid, falling out the bottom one reel at a time. Positive
   // offsets move a symbol DOWN from its original row (opposite sign convention from
   // drawGridSymbols' cellOffsets, which move a symbol up into place).
-  drawOutgoingGridSymbols(ctx, spritesheet, symbolsConfig, layout, reelsCount, rowsCount, outgoingGrid, outgoingOffsets) {
+  drawOutgoingGridSymbols(ctx, asset, symbolsConfig, layout, reelsCount, rowsCount, outgoingGrid, outgoingOffsets) {
     if (!outgoingGrid) return;
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
     for (let col = 0; col < reelsCount; col++) {
@@ -644,7 +687,7 @@ export class SlotRenderer {
         const cx = reelsX + col * symbolWidth;
         const cy = reelsY + (row + offsetRows) * symbolHeight;
         const tile = symbolsConfig[symbol];
-        drawSpriteSymbol(ctx, spritesheet, tile, cx, cy, symbolWidth, symbolHeight, 0);
+        drawSpriteSymbol(ctx, asset, tile, cx, cy, symbolWidth, symbolHeight, 0);
       }
     }
   }
@@ -817,11 +860,11 @@ export class SlotRenderer {
     this.drawPlayfieldBackground(ctx, layout, theme.background);
     this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
     if (engine.animator?.reels) {
-      this.drawReelsSymbols(ctx, symbols?.image, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.animator.reels);
+      this.drawReelsSymbols(ctx, symbols, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.animator.reels);
     }
     if (engine.state === 'expanding' && engine.animator?.expansionReelsToAnimate) {
       this.drawExpandingAnimation(
-        ctx, layout, symbols?.image, symbols?.tiles || {}, engine.config.expandingSymbol,
+        ctx, layout, symbols, symbols?.tiles || {}, engine.config.expandingSymbol,
         engine.animator.expansionReelsToAnimate, engine.animator.expansionReelStartTimes,
       );
     }
@@ -867,7 +910,7 @@ export class SlotRenderer {
     if (overlayBehind && engine.inFreeSpins) mode.renderOverlay(engine.freeSpinsModeState, engine);
 
     if (animator?.outgoingGrid) {
-      this.drawOutgoingGridSymbols(ctx, symbols?.image, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.config.rowsCount, animator.outgoingGrid, animator.outgoingOffsets);
+      this.drawOutgoingGridSymbols(ctx, symbols, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.config.rowsCount, animator.outgoingGrid, animator.outgoingOffsets);
     }
     if (animator?.grid) {
       const isClearing = animator.currentClearPositions && animator.currentClearPositions.length > 0;
@@ -875,12 +918,19 @@ export class SlotRenderer {
       const clearProgress = isClearing
         ? Math.min((Date.now() - animator._clearStartTime) / clearDuration, 1)
         : null;
-      this.drawGridSymbols(ctx, symbols?.image, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.config.rowsCount, {
+      this.drawGridSymbols(ctx, symbols, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.config.rowsCount, {
         grid: animator.grid,
         cellOffsets: animator.cellOffsets,
         currentClearVariants: animator.currentClearVariants,
         cellBounceStartTime: animator.cellBounceStartTime || Array.from({ length: engine.config.reelsCount }, () => new Array(engine.config.rowsCount).fill(-Infinity)),
         clearProgress,
+        clearEffect: engine.config.clearEffect
+          ? {
+            ...engine.config.clearEffect,
+            startTime: animator._clearStartTime,
+            spriteAsset: engine.assets[engine.config.clearEffect.asset],
+          }
+          : null,
         bounceDuration: engine.turboMode ? 140 : 260,
         now: Date.now(),
       });

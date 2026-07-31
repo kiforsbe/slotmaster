@@ -314,9 +314,12 @@ async function initGame() {
   const particleSystem = new ParticleSystem();
   engine = new CoreSlotEngine(canvas, {
     mechanic: CascadeSpinMechanic,
-    animator: new CascadeDropAnimator(renderer, particleSystem),
     renderer,
     particleSystem,
+    animator: new CascadeDropAnimator(renderer, particleSystem, {
+      normalClearDurationMs: 1730,
+      turboClearDurationMs: 900,
+    }),
     spinLogRecorder: new SpinLogRecorder({ betAmount: BET_AMOUNT, scatterSymbol: 'gold' }),
     audioController: new AudioController(),
 
@@ -329,6 +332,16 @@ async function initGame() {
     // then explode the union of their winning cells together before the next tumble.
     cascadeWinClearMode: 'all-at-once',
     cascadeWinPreviewDurationMs: 500,
+    clearEffect: {
+      asset: 'stoneExplode',
+      animation: 'stone_explode',
+      shrinkFade: { fadePower: 1.6, minimumScale: 0.08 },
+      startScale: 0.55,
+      endScale: 1.3,
+      progressMultiplier: 1.35,
+      fadeInMultiplier: 10,
+      fadeOutMultiplier: 0.3,
+    },
     // Stone and jungle rather than the engine's default candy pink-on-purple, which is Candy
     // Frenzy's look and was showing through under this game's art. No ruled cells: this is a
     // payline game, so a win is a path across the grid rather than a shape made of cells, and the

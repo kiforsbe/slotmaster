@@ -1,12 +1,14 @@
 // Sprite-atlas blit with optional motion blur, extracted from SlotEngine.drawSymbol() so
 // CascadeEngine can draw its own grid's symbols with identical visuals.
+import { SpriteAnimation, SpriteAnimationPlayback } from '../assets/AssetLoader.js';
 
 /**
  * Draws one sprite-atlas tile at a destination rect, optionally with a vertical
  * motion-blur stretch (used while a symbol is moving fast - reel spin, or a cascading fall).
  * @param {CanvasRenderingContext2D} ctx
- * @param {HTMLImageElement} spritesheet
- * @param {{x:number,y:number,w:number,h:number}|undefined} tile - this symbol's atlas rect;
+ * @param {{image:HTMLImageElement,type?:string,animations?:object}|HTMLImageElement} asset
+ *   loaded tilemap/sprite asset, or a legacy image
+ * @param {object|string|undefined} sprite - tile, animation, playback, or named animation;
  *   a no-op if undefined (matches SlotEngine.drawSymbol's own defensive `if (!tile) return`).
  * @param {number} x
  * @param {number} y
@@ -15,21 +17,20 @@
  * @param {number} [blurSpeed=0] - 0 draws crisp; > 0 draws a stretched, alpha-blended blur
  *   whose intensity scales with this value (SlotEngine passes reel speed here).
  */
-export function drawSpriteSymbol(ctx, spritesheet, tile, x, y, width, height, blurSpeed = 0) {
+export function drawSpriteSymbol(ctx, asset, sprite, x, y, width, height, blurSpeed = 0) {
+  if (!sprite) return;
+
+  const spritesheet = asset?.image || asset;
+  let tile = typeof sprite === 'string' ? asset?.animations?.[sprite] : sprite;
   if (!tile) return;
 
   // A tilemap entry is normalized as a one-frame animation. Sprite descriptors use the same
   // shape, so the renderer has one drawing contract for static tiles and animated sprites.
-  if (Array.isArray(tile.frames)) {
-    const frames = tile.frames;
-    const duration = tile.duration || frames.reduce((sum, frame) => sum + (frame.duration || 0), 0);
-    const elapsed = duration > 0 ? Date.now() % duration : 0;
-    let cursor = 0;
-    tile = frames[0];
-    for (const frame of frames) {
-      cursor += frame.duration || duration || 0;
-      if (elapsed < cursor) { tile = frame.tile || frame; break; }
-    }
+  if (tile instanceof SpriteAnimationPlayback || tile instanceof SpriteAnimation) tile = tile.frameAt();
+  else if (Array.isArray(tile.frames)) {
+    const animation = new SpriteAnimation(tile);
+    const playback = animation.play(tile.startTime);
+    tile = tile.progress != null ? playback.frameAtProgress(tile.progress) : playback.frameAt();
   }
 
   const destX = x;

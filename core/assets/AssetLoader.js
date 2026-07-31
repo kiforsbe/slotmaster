@@ -5,6 +5,54 @@
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg']);
 const AUDIO_EXTENSIONS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac']);
 
+export class SpriteAnimation {
+  constructor({ frames = [], loop = true } = {}) {
+    this.frames = frames;
+    this.loop = loop;
+    this.duration = frames.reduce((sum, frame) => sum + (frame.duration || 0), 0);
+  }
+
+  play(startTime = Date.now()) {
+    return new SpriteAnimationPlayback(this, startTime);
+  }
+
+  frameAt() {
+    if (!this.frames.length) return null;
+    return this.frames[0].tile || this.frames[0];
+  }
+
+  _frameAtElapsed(elapsed) {
+    let cursor = 0;
+    for (const frame of this.frames) {
+      cursor += frame.duration || 0;
+      if (elapsed < cursor) return frame.tile || frame;
+    }
+    return this.frames.at(-1).tile || this.frames.at(-1);
+  }
+}
+
+export class SpriteAnimationPlayback {
+  constructor(animation, startTime = Date.now()) {
+    this.animation = animation;
+    this.startTime = startTime;
+  }
+
+  frameAt(now = Date.now()) {
+    const { animation } = this;
+    if (!animation.duration) return animation.frameAt();
+    let elapsed = Math.max(0, now - this.startTime);
+    if (animation.loop) elapsed %= animation.duration;
+    else elapsed = Math.min(elapsed, animation.duration - 1);
+    return animation._frameAtElapsed(elapsed);
+  }
+
+  frameAtProgress(progress) {
+    const { animation } = this;
+    if (!animation.duration) return animation.frameAt();
+    return animation._frameAtElapsed(Math.min(1, Math.max(0, progress)) * animation.duration);
+  }
+}
+
 function extensionOf(url) {
   return String(url).split(/[?#]/)[0].split('.').pop().toLowerCase();
 }
@@ -75,7 +123,7 @@ function withSheetUrl(url, sheet) {
 export function asAnimation(tile) {
   if (!tile) return tile;
   if (Array.isArray(tile.frames)) return tile;
-  return { frames: [tile], loop: false, duration: 0 };
+  return new SpriteAnimation({ frames: [{ tile, duration: 0 }], loop: false });
 }
 
 export class AssetLoader {
@@ -110,10 +158,12 @@ export class AssetLoader {
       return { type: 'tilemap', url, sheetUrl, image: sheet, tiles, data };
     }
     const frames = Object.fromEntries(data.frames.map(frame => [frame.name, frame]));
-    const animations = Object.fromEntries((data.animations || []).map(animation => [animation.name, {
-      ...animation,
-      frames: animation.frames.map(frame => ({ ...frame, tile: frames[frame.frame] })),
-    }]));
+    const animations = Object.fromEntries((data.animations || []).map(animation => [animation.name,
+      new SpriteAnimation({
+        loop: animation.loop,
+        frames: animation.frames.map(frame => ({ ...frame, tile: frames[frame.frame] })),
+      }),
+    ]));
     return { type: 'sprite', url, sheetUrl, image: sheet, frames, animations, data };
   }
 

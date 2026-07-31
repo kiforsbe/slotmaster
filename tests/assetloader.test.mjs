@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AssetLoader, asAnimation } from '../core/assets/AssetLoader.js';
+import { AssetLoader, SpriteAnimation, SpriteAnimationPlayback, asAnimation } from '../core/assets/AssetLoader.js';
 import { drawSpriteSymbol } from '../core/rendering/SpriteDrawer.js';
 
 function fakeFetch(payload) {
@@ -45,8 +45,8 @@ test('tilemap descriptors become named one-frame animations and load their sheet
   });
   const asset = await loader.load('games/mayantumble/assets/mayan/mayan.tiles.json');
   assert.equal(asset.type, 'tilemap');
-  assert.equal(asset.tiles.gold.frames.length, 1);
-  assert.deepEqual(asset.tiles.gold.frames[0], { x: 1, y: 2, w: 3, h: 4, name: 'gold' });
+  assert.ok(asset.tiles.gold instanceof SpriteAnimation);
+  assert.deepEqual(asset.tiles.gold.frameAt(), { x: 1, y: 2, w: 3, h: 4, name: 'gold' });
   assert.match(asset.sheetUrl, /mayan\.png$/);
 });
 
@@ -83,4 +83,36 @@ test('renderer accepts a tile as a single-frame animation', () => {
   const ctx = { save() {}, restore() {}, drawImage(...args) { calls.push(args); } };
   drawSpriteSymbol(ctx, {}, asAnimation({ x: 4, y: 5, w: 6, h: 7 }), 1, 2, 8, 9);
   assert.deepEqual(calls[0].slice(1), [4, 5, 6, 7, 1, 2, 8, 9]);
+});
+
+test('renderer honors descriptor frame durations from an animation start time', () => {
+  const calls = [];
+  const ctx = { save() {}, restore() {}, drawImage(...args) { calls.push(args); } };
+  const originalNow = Date.now;
+  Date.now = () => 150;
+  try {
+    drawSpriteSymbol(ctx, {}, {
+      startTime: 0,
+      frames: [
+        { duration: 100, tile: { x: 1, y: 0, w: 8, h: 8 } },
+        { duration: 200, tile: { x: 9, y: 0, w: 8, h: 8 } },
+      ],
+    }, 0, 0, 8, 8);
+  } finally {
+    Date.now = originalNow;
+  }
+  assert.equal(calls[0][1], 9, '150ms should still be in the second 200ms frame');
+});
+
+test('sprite assets expose native playback instances with authored timing', () => {
+  const definition = new SpriteAnimation({ loop: false, frames: [
+    { duration: 100, tile: { name: 'first' } },
+    { duration: 200, tile: { name: 'last' } },
+  ] });
+  const playback = definition.play(0);
+  assert.ok(playback instanceof SpriteAnimationPlayback);
+  assert.equal(definition.startTime, undefined, 'the shared definition has no playback state');
+  assert.equal(playback.frameAt(50).name, 'first');
+  assert.equal(playback.frameAt(150).name, 'last');
+  assert.equal(playback.frameAt(999).name, 'last');
 });
