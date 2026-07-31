@@ -8,6 +8,7 @@ import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWins } from '../../core/math/SlotMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
@@ -532,6 +533,10 @@ function setupUIHandlers() {
 }
 
 function buildPaytableContent() {
+  renderLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, paylines: PAYLINES, reelsCount: REELS_COUNT, assets: engine?.assets, scatterTriggerCount: SCATTER_TRIGGER_COUNT, freeSpinsAward: FREE_SPINS_AWARD });
+}
+
+function legacyBuildPaytableContent() {
   const container = document.getElementById('paytable-grid-content');
   container.innerHTML = '';
 

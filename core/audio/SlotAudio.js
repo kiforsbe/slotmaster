@@ -14,7 +14,8 @@ class SlotAudio {
     this.masterBus = null; // all synthesized SFX connect here
     this.compressor = null; // masterBus + musicGain both feed this before destination, if enabled
     this.isMuted = false;
-    this.musicMuted = false;
+    // Music is opt-in globally; sound effects remain enabled by default.
+    this.musicMuted = true;
     this.globalVolume = 0.3; // Default master volume
     this.activeOscillators = [];
 

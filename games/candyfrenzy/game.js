@@ -9,6 +9,7 @@ import { generateReel } from '../../core/math/SlotMath.js';
 import { checkClusterWins } from '../../core/math/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { renderClusterPaytable } from '../../core/ui/PaytableRenderer.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
@@ -640,7 +641,7 @@ function setupUIHandlers() {
 // Returns '' when the theme has no tile for the symbol, so a missing sprite costs a name, not a row.
 function symbolIconHtml(symbol, gameAssets, size = 36) {
   const symbolAsset = gameAssets?.symbols?.tiles?.[symbol];
-  const tile = symbolAsset?.frames?.[0] || symbolAsset;
+  const tile = symbolAsset?.frameAt?.() || symbolAsset?.frames?.[0]?.tile || symbolAsset?.frames?.[0] || symbolAsset;
   if (!tile || !gameAssets.symbols.sheetUrl) return '';
   const scale = size / tile.w;
   return `<span class="paytable-icon" style="width: ${size}px; height: ${Math.round(tile.h * scale)}px;">`
@@ -659,6 +660,10 @@ function formatMultiplier(multiplier) {
 // seven separate lookups. Both axes are derived from PAYTABLE rather than hardcoded - a symbol
 // added or a breakpoint moved changes this table without anyone remembering to edit it.
 function buildPaytableContent(gameAssets) {
+  renderClusterPaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, scatterTriggerCount: SCATTER_TRIGGER_COUNT, freeSpinsAward: FREE_SPINS_AWARD, renderSymbol: (symbol) => symbolIconHtml(symbol, gameAssets) });
+}
+
+function legacyBuildPaytableContent(gameAssets) {
   const container = document.getElementById('paytable-grid-content');
   const topTierOf = (symbol) => PAYTABLE[symbol].clusterPayout.at(-1).multiplier;
 

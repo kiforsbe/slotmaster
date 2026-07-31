@@ -9,6 +9,7 @@ import { generateReel, checkWildLineWins } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
 import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
 // frequency tuner - a single source of truth so all three actually model the same reels
@@ -376,6 +377,10 @@ function setupUIHandlers() {
 
 // Renders the modal paytable descriptions and payline previews dynamically
 function buildPaytableContent() {
+  renderLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, paylines: PAYLINES, reelsCount: REELS_COUNT, assets: engine?.assets, paylinePreviewContainer: document.getElementById('paylines-preview') });
+}
+
+function legacyBuildPaytableContent() {
   const container = document.getElementById('paytable-grid-content');
   container.innerHTML = '';
 

@@ -49,7 +49,9 @@ function addMusicButton(getEngine) {
   button.id = 'btn-music';
   button.className = 'btn-icon';
   button.type = 'button';
-  button.textContent = '🎵 Music ON';
+  const initiallyMuted = getEngine()?.audio?.musicMuted ?? true;
+  button.textContent = initiallyMuted ? '🎵 Music OFF' : '🎵 Music ON';
+  button.classList.toggle('active', initiallyMuted);
   soundButton.insertAdjacentElement('afterend', button);
   button.addEventListener('click', () => {
     const audio = getEngine()?.audio;
