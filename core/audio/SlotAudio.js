@@ -149,7 +149,9 @@ class SlotAudio {
       this.activeOscillators = [];
       this.musicEl?.pause();
     } else {
-      if (!this.musicMuted) this.musicEl?.play().catch(() => {});
+      // Re-enable music through resume(), not a bare media play(): the element is routed via
+      // Web Audio and remains silent while its AudioContext is suspended.
+      if (!this.musicMuted) this.resume();
     }
   }
 
@@ -161,7 +163,9 @@ class SlotAudio {
   setMusicMute(mute) {
     this.musicMuted = mute;
     if (mute) this.musicEl?.pause();
-    else if (!this.isMuted) this.musicEl?.play().catch(() => {});
+    // This is called from the Music button's user gesture. resume() both satisfies browser
+    // autoplay rules and resumes the Web Audio graph before retrying the media element.
+    else if (!this.isMuted) this.resume();
   }
 
   toggleMusicMute() {

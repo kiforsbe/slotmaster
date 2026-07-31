@@ -152,7 +152,6 @@ async function initGame() {
     playfield: PLAYFIELD, assetManifest: GAME_ASSET_MANIFEST,
     viewportBackground: { type: 'image', image: './assets/backgrounds/lemonpop_backround_2.png' },
     popRushViewportBackground: { type: 'image', image: './assets/backgrounds/lemonpop_backround_1.png' },
-    music: { main: './assets/music/lemonpop_theme.mp3' },
     onPresentationPhaseChange: setPresentationPhase,
     onStateChange: state => updateSlotStateUI({ engine, state, refs: { spin: refs.spin, ticker: refs.ticker }, onUpdate: updateUI, messages: {
       spinning: 'SHAKE THE CAN…', stopping: 'STOPPING…', dropping_in: 'LEMONS LANDING…', falling: 'NO-REFILL CASCADE…',
