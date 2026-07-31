@@ -14,20 +14,26 @@ open `index.html` (via a local server, see below) and play.
 | Bar Fruits | <img src="games/barfruits/screenshot.png" width="160"> | 5x3, 10 lines | Star scatter → free spins, no expanding symbol | [games/barfruits](games/barfruits/README.md) |
 | Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
 | Mayan Tumble | <img src="games/mayantumble/screenshot.png" width="160"> | 5x3, 10 lines, cascading | Gold scatter → free spins with growing multiplier tiles, cascading wins | [games/mayantumble](games/mayantumble/README.md) |
+| Lemon Pop | <img src="games/lemonpop/screenshot.png" width="160"> | 5x5, horizontal/vertical 3–5 runs, no refill | Four winning cascades → one free Pop Rush respin | [games/lemonpop](games/lemonpop/README.md) |
 
-All five games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug tooling (SPIN LOG,
+All six games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug tooling (SPIN LOG,
 RUN SIMULATION, TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic
 actually runs is pluggable per game via a **mechanic** component, `core/engine/mechanics/
-LineMechanic.js` (the first three) or `core/engine/mechanics/CascadeSpinMechanic.js` (the two
-cascade games: `core/math/CascadeMath.js` + `core/engine/FreeSpinsModes.js` for its pluggable
-free-spins payout modes) - see `docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section
+LineMechanic.js` (the first three), `core/engine/mechanics/CascadeSpinMechanic.js` (Candy Frenzy
+and Mayan Tumble), or `core/engine/mechanics/LemonPopSpinMechanic.js` (Lemon Pop) - see
+`docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section
 for how they share one architecture instead of two. Each README covers only what's specific to
 that game.
 
-The two cascade games are the same engine and mechanic with different win evaluators, which is
+Candy Frenzy and Mayan Tumble share one cascade mechanic with different win evaluators, which is
 the point of the split: Candy Frenzy supplies `core/math/ClusterMath.js`'s cluster evaluator,
 Mayan Tumble supplies its own that maps `core/math/SlotMath.js`'s payline wins into the same
 shape. Nothing in `CoreSlotEngine`/`CascadeSpinMechanic` knows which it got.
+
+Lemon Pop adds a separate no-refill cascade mechanic, sharing the same engine, renderer, dev
+tools, and worker simulation recipe. Its pure straight-line rules live in
+`core/math/StraightLineMath.js`; persistent wild-cans and Pop Rush effects are represented in
+the cascade-step contract rather than as game-only visual state.
 
 ## Running it
 

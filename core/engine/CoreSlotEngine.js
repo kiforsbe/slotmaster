@@ -83,6 +83,7 @@ export class CoreSlotEngine {
     this.spinSequence = null;
     this.stepIndex = 0;
     this.grid = null;
+    this.presentationPhase = 'base';
     this.lastSpinSeed = null;
 
     this.turboMode = false;
@@ -370,6 +371,8 @@ export class CoreSlotEngine {
     console.log(`CoreSlotEngine: playing step ${index + 1}/${this.spinSequence.length}`);
     const step = this.spinSequence[index];
     this.grid = step.grid;
+    this.presentationPhase = step.presentationPhase || 'base';
+    this.config.onPresentationPhaseChange?.(this.presentationPhase, step);
     await new Promise((resolve) => this.animator.playEntrance(this, step, resolve));
     await this._advanceCascadeSteps(index);
   }
@@ -380,12 +383,18 @@ export class CoreSlotEngine {
     const step = this.spinSequence[index];
     this.stepIndex = index + 1;
     const nextStep = this.spinSequence[this.stepIndex];
+    this.presentationPhase = nextStep.presentationPhase || 'base';
+    this.config.onPresentationPhaseChange?.(this.presentationPhase, nextStep);
     await new Promise((resolve) => this.animator.playTransition(this, step, nextStep, resolve));
     this.grid = nextStep.grid;
     await this._advanceCascadeSteps(this.stepIndex);
   }
 
   _finishSpin() {
+    if (this.presentationPhase !== 'base') {
+      this.presentationPhase = 'base';
+      this.config.onPresentationPhaseChange?.('base', null);
+    }
     this._setState('evaluating');
     // Each step's payout is already an already-monetized dollar amount (see
     // LineMechanic.resolveLiveSpin/CascadeSpinMechanic.resolveLiveSpin's own docs) - summing

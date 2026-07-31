@@ -14,6 +14,7 @@ import { drawSpriteSymbol } from './SpriteDrawer.js';
 import { SpriteAnimation } from '../assets/AssetLoader.js';
 import { resolveAnimatedValue } from '../animation/AnimatedValue.js';
 import { ClusterOutlineRenderer } from './ClusterOutlineRenderer.js';
+import { StraightLineWinRenderer } from './StraightLineWinRenderer.js';
 
 // How far outside the grid a payline's numbered tag sits - matches both engines' own
 // LINE_TAG_OFFSET constant, so the line runs tag to tag either way.
@@ -44,8 +45,9 @@ const DEFAULT_THEME = {
 };
 
 export class SlotRenderer {
-  constructor({ clusterOutlineRenderer = new ClusterOutlineRenderer() } = {}) {
+  constructor({ clusterOutlineRenderer = new ClusterOutlineRenderer(), straightLineWinRenderer = new StraightLineWinRenderer() } = {}) {
     this.clusterOutlineRenderer = clusterOutlineRenderer;
+    this.straightLineWinRenderer = straightLineWinRenderer;
   }
 
   drawLoading(ctx, canvasWidth, canvasHeight, theme = {}) {
@@ -534,7 +536,7 @@ export class SlotRenderer {
   // `clearCellHighlight` preserves the original per-tile gold glow by default, but lets a
   // cluster visualizer replace that busy cell-by-cell treatment with one clean silhouette.
   drawGridSymbols(ctx, asset, symbolsConfig, layout, reelsCount, rowsCount, gridState) {
-    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true } = gridState;
+    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true, wildMultipliers, wildSymbol } = gridState;
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
 
     for (let col = 0; col < reelsCount; col++) {
@@ -562,11 +564,35 @@ export class SlotRenderer {
         drawSpriteSymbol(ctx, asset, tile, cx, cy, symbolWidth, symbolHeight, 0);
         ctx.restore();
 
+        if (symbol === wildSymbol && Number(wildMultipliers?.[col]?.[row] ?? 1) > 1) {
+          this._drawWildMultiplierBadge(ctx, cx, cy, layout, wildMultipliers[col][row]);
+        }
+
         if (clearInfo && clearEffect?.spriteAsset?.image && clearEffect.animation) {
           this._drawClearSpriteEffect(ctx, clearEffect, cx, cy, layout, clearProgress);
         }
       }
     }
+  }
+
+  _drawWildMultiplierBadge(ctx, cx, cy, layout, multiplier) {
+    const radius = Math.max(11, Math.min(layout.symbolWidth, layout.symbolHeight) * 0.17);
+    const x = cx + layout.symbolWidth - radius * 0.75;
+    const y = cy + radius * 0.75;
+    ctx.save();
+    ctx.fillStyle = '#ffed45';
+    ctx.strokeStyle = '#5f1e7d';
+    ctx.lineWidth = Math.max(2, radius * 0.16);
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = '#3b124f';
+    ctx.font = `900 ${Math.max(10, radius * 0.95)}px Outfit, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`${multiplier}×`, x, y + 1);
+    ctx.restore();
   }
 
   _applyLandingBounce(ctx, progress, cx, cy, layout) {
@@ -777,7 +803,7 @@ export class SlotRenderer {
   // (Task 17) - until then this method only knows how to draw a line-pay engine, which is all
   // that's wired up through Task 14.
   draw(engine, ctx) {
-    if (engine.mechanic?.name === 'cascade') {
+    if (engine.mechanic?.name === 'cascade' || engine.mechanic?.isCascade) {
       this._drawCascade(engine, ctx);
     } else {
       this._drawLine(engine, ctx);
@@ -786,7 +812,10 @@ export class SlotRenderer {
 
   _drawLine(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
-    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, engine.config.viewportBackground);
+    const viewportBackground = engine.presentationPhase === 'pop-rush'
+      ? (engine.config.popRushViewportBackground || engine.config.viewportBackground)
+      : engine.config.viewportBackground;
+    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground);
 
     const theme = engine.config.playfield || {};
 
@@ -831,7 +860,10 @@ export class SlotRenderer {
 
   _drawCascade(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
-    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, engine.config.viewportBackground);
+    const viewportBackground = engine.presentationPhase === 'pop-rush'
+      ? (engine.config.popRushViewportBackground || engine.config.viewportBackground)
+      : engine.config.viewportBackground;
+    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground);
 
     const theme = engine.config.playfield || {};
 
@@ -882,6 +914,8 @@ export class SlotRenderer {
         // Keep legacy games visually unchanged unless they explicitly choose a cluster-level
         // visualization instead of one highlight rectangle per clearing cell.
         clearCellHighlight: engine.config.clearCellHighlight !== false,
+        wildMultipliers: animator.wildMultipliers,
+        wildSymbol: engine.config.wildSymbol,
         bounceDuration: engine.turboMode ? 140 : 260,
         now: Date.now(),
       });
@@ -901,6 +935,12 @@ export class SlotRenderer {
       reelsCount: engine.config.reelsCount,
       visualizer: cascadeVisualizer,
       drawClusterOutline: !!engine.config.clusterVisualizer,
+    });
+    this.straightLineWinRenderer.render(ctx, {
+      currentClusterWins: animator?.currentClusterWins,
+      currentClusterIndex: animator?.currentClusterIndex,
+      layout,
+      visualizer: engine.config.straightLineVisualizer,
     });
     engine.particleSystem?.render(ctx);
     if (animator?.activePopups) {

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lemon Pop — No-Refill Cascade Slot</title>
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../../core/ui/slot-game.css">
+  <link rel="stylesheet" href="game.css">
+</head>
+<body>
+  <main class="cabinet-container">
+    <header>
+      <div class="title-logo">LEMON <span>POP</span></div>
+      <div class="top-controls">
+        <button id="btn-paytable" class="btn-icon" type="button">📋 Paytable</button>
+        <button id="btn-mute" class="btn-icon" type="button">🔊 Sound ON</button>
+      </div>
+    </header>
+
+    <section class="game-viewport" aria-label="Lemon Pop game board">
+      <div id="game-ticker" class="game-ticker">READY TO POP</div>
+      <div class="pop-rush-meter" aria-label="Pop Rush progress: four cascades trigger a free respin">
+        <span>POP RUSH</span><i></i><i></i><i></i><i></i>
+      </div>
+      <div id="pop-rush-panel" class="pop-rush-panel" aria-live="polite"><b id="pop-rush-label">POP RUSH</b></div>
+      <canvas id="game-canvas"></canvas>
+    </section>
+
+    <section class="dashboard" aria-label="Game controls">
+      <div class="dashboard-left">
+        <div class="dashboard-panel dashboard-balance"><div class="bet-container"><span class="dashboard-label">Balance</span><span id="display-balance" class="dashboard-value">$1,000.00</span></div></div>
+        <div class="dashboard-side dashboard-side-left"><div class="dashboard-panel"><div class="bet-container"><span class="dashboard-label">Bet</span><div class="bet-adjuster"><button id="bet-minus" class="btn-adjust" type="button" aria-label="Decrease bet">−</button><span id="bet-value" class="bet-display-value">1.00</span><button id="bet-plus" class="btn-adjust" type="button" aria-label="Increase bet">+</button></div></div></div></div>
+      </div>
+      <div class="spin-section"><button id="btn-spin" class="btn-spin" type="button">SPIN</button></div>
+      <div class="auto-turbo-container"><button id="btn-turbo" class="btn-icon" type="button">⚡ Turbo</button><button id="btn-auto" class="btn-icon" type="button">🔄 Auto</button></div>
+    </section>
+  </main>
+
+  <nav class="top-controls developer-tools" aria-label="Developer tools">
+    <button id="btn-tune" class="btn-icon btn-sim-btn" type="button" title="Tune frequencies" aria-label="Tune frequencies">🎛️</button>
+    <button id="btn-sim" class="btn-icon btn-sim-btn" type="button" title="Run simulation" aria-label="Run simulation">📊</button>
+    <button id="btn-spinlog" class="btn-icon btn-sim-btn" type="button" title="Open spin log" aria-label="Open spin log">📜</button>
+  </nav>
+
+  <div id="modal-paytable" class="modal-overlay" role="dialog" aria-modal="true" aria-label="Lemon Pop paytable">
+    <section class="modal-content paytable-modal">
+      <button class="btn-modal-close" type="button" aria-label="Close paytable">×</button>
+      <h2>LEMON POP PAYTABLE</h2>
+      <div id="paytable-grid-content" class="paytable-table-wrap"></div>
+      <button id="btn-paytable-ok" class="btn-primary" type="button">CLOSE</button>
+    </section>
+  </div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>

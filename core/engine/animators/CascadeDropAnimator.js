@@ -67,6 +67,7 @@ export class CascadeDropAnimator {
     };
 
     this.grid = null;
+    this.wildMultipliers = null;
     this.cellOffsets = null;
     this.outgoingGrid = null;
     this.outgoingOffsets = null;
@@ -94,6 +95,7 @@ export class CascadeDropAnimator {
 
     const { grid } = applyCascade(emptyGrid, cursorStateByColumn, reelStrips, allCleared);
     this.grid = grid;
+    this.wildMultipliers = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(1));
     this.cellOffsets = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(0));
   }
 
@@ -115,7 +117,7 @@ export class CascadeDropAnimator {
   // has landed on `targetGrid`/`targetOffsets`. Shared by playEntrance (may have an outgoing
   // grid to exit first) and playTransition's fall half (never does - a mid-spin refill has
   // nothing to exit).
-  _runFallPhase(engine, targetGrid, targetOffsets, hasOutgoing, onDone) {
+  _runFallPhase(engine, targetGrid, targetOffsets, hasOutgoing, onDone, targetWildMultipliers = null) {
     const reelsCount = engine.config.reelsCount;
     const rowsCount = engine.config.rowsCount;
     const turbo = engine.turboMode;
@@ -124,6 +126,8 @@ export class CascadeDropAnimator {
     const stepStartTime = Date.now();
 
     this.grid = targetGrid;
+    this.wildMultipliers = targetWildMultipliers?.map(column => column.slice())
+      || Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(1));
     this.cellOffsets = targetOffsets.map(col => col.slice());
 
     if (hasOutgoing) {
@@ -209,12 +213,12 @@ export class CascadeDropAnimator {
     }
     this.currentClearPositions = [];
 
-    this._runFallPhase(engine, step.grid, step.fallOffsets, hasExistingGrid, onDone);
+    this._runFallPhase(engine, step.grid, step.fallOffsets, hasExistingGrid, onDone, step.wildMultipliers);
   }
 
   playTransition(engine, prevStep, nextStep, onDone) {
     if (prevStep.clusterWins.length === 0) {
-      this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone);
+      this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
       return;
     }
 
@@ -228,6 +232,8 @@ export class CascadeDropAnimator {
     // original resolved grid for every step after the spin completes, not this animator's
     // transient display state).
     this.grid = prevStep.grid.map(col => col.slice());
+    this.wildMultipliers = prevStep.wildMultipliers?.map(column => column.slice())
+      || this.grid.map(column => new Array(column.length).fill(1));
 
     const clusterWins = prevStep.clusterWins;
     let clusterIndex = 0;
@@ -266,6 +272,7 @@ export class CascadeDropAnimator {
         // the "cluster 1 reappears" bug).
         cluster.winningPositions.forEach(([col, row]) => {
           this.grid[col][row] = null;
+          this.wildMultipliers[col][row] = 1;
         });
         clusterIndex++;
         if (clusterIndex < clusterWins.length) {
@@ -273,7 +280,7 @@ export class CascadeDropAnimator {
         } else {
           this.currentClearPositions = [];
           this.currentClusterWins = null;
-          this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone);
+          this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
         }
       };
       requestAnimationFrame(waitForClear);
@@ -288,9 +295,11 @@ export class CascadeDropAnimator {
   // the branch above, where each cluster gets its own visual clear.
   _playAllAtOnceWinTransition(engine, prevStep, nextStep, onDone) {
     this.grid = prevStep.grid.map(col => col.slice());
+    this.wildMultipliers = prevStep.wildMultipliers?.map(column => column.slice())
+      || this.grid.map(column => new Array(column.length).fill(1));
 
     const wins = prevStep.clusterWins;
-    const lineWins = wins.filter(win => win.lineIndex != null);
+    const lineWins = wins.filter(win => win.lineIndex != null || win.kind === 'straight-line');
     this.currentClusterWins = lineWins;
     this.currentClusterIndex = 0;
 
@@ -338,9 +347,10 @@ export class CascadeDropAnimator {
         }
         clearPositions.forEach(([col, row]) => {
           this.grid[col][row] = null;
+          this.wildMultipliers[col][row] = 1;
         });
         this.currentClearPositions = [];
-        this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone);
+        this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
       };
       requestAnimationFrame(waitForClear);
     };

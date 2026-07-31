@@ -186,3 +186,20 @@ export function renderClusterPaytable({
   container.replaceChildren(defaultRule, table);
   if (notes) container.insertAdjacentHTML('beforeend', notes);
 }
+
+/** Render the 3/4/5 ladder and rules for a straight-line cascade game. */
+export function renderStraightLinePaytable({ container, paytable, assets, wildSymbol, renderSymbol, featureNames = [] }) {
+  if (!container) return;
+  container.classList.add('slot-paytable-host');
+  const paying = Object.entries(paytable)
+    .filter(([symbol, meta]) => symbol !== wildSymbol && Array.isArray(meta.linePayout))
+    .sort(([, a], [, b]) => (b.linePayout.at(-1) || 0) - (a.linePayout.at(-1) || 0));
+  const wild = paytable[wildSymbol];
+  const table = document.createElement('table');
+  table.className = 'slot-paytable-table slot-straight-line-paytable';
+  table.innerHTML = `<thead><tr><th>Symbol</th><th>3</th><th>4</th><th>5</th></tr></thead><tbody>${paying.map(([symbol, meta]) => `<tr><th class="slot-paytable-symbol-cell">${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span></th>${meta.linePayout.map(value => `<td class="has-payout">${asMultiplier(value)}</td>`).join('')}</tr>`).join('')}${wild ? `<tr class="slot-paytable-wild-row"><th class="slot-paytable-symbol-cell">${renderSymbol?.(wildSymbol, wild) || symbolIconMarkup(wildSymbol, assets)}<span class="slot-paytable-symbol-name">${wild.friendlyName || 'Wild Can'}</span></th>${wild.linePayout.map(value => `<td class="has-payout">${asMultiplier(value)}</td>`).join('')}</tr>` : ''}</tbody>`;
+  const rules = document.createElement('div');
+  rules.className = 'slot-paytable-straight-rules';
+  rules.innerHTML = `<p class="slot-paytable-default-rule">Horizontal and vertical runs of 3–5 pay. Every winning run pops, leaves one wild can at its centre, then gravity drops the board without refilling it.</p><ul><li>One natural symbol plus wild cans pays that symbol’s full value.</li><li>Mixed premium runs pay half the highest premium present; mixed regular runs do not pay.</li><li>All-wild runs use the Wild Can ladder. A 2× can doubles a winning run once.</li>${featureNames.map(name => `<li><b>${name}</b></li>`).join('')}</ul>`;
+  container.replaceChildren(rules, table);
+}

@@ -5,6 +5,8 @@
 // resolveCascadeSequence below unchanged.
 import { createSeededRng } from './SlotMath.js';
 
+const wildMultiplierAt = (wildMultipliers, col, row) => Number(wildMultipliers?.[col]?.[row] ?? 1);
+
 /**
  * Reads the symbol at cursorState.index, then advances the cursor by 1, wrapping circularly.
  * Centralizes the "keep reading forward, never re-roll" rule used by every cell that drops
@@ -83,6 +85,102 @@ export function applyCascade(grid, cursorStateByColumn, strips, clearedPositions
   }
 
   return { grid: newGrid, fallOffsets };
+}
+
+/**
+ * Clear cells, optionally replace some of those cells with persistent symbols, and apply gravity
+ * without dealing new symbols into the vacated top cells. `wildMultipliers` is a parallel grid:
+ * 1 is a normal wild/no multiplier and 2 marks a Pop Rush wild. It travels with its symbol.
+ */
+export function applyNoRefillCascade(grid, clearedPositions, spawnedSymbols = [], wildMultipliers = null) {
+  const reelsCount = grid.length;
+  const rowsCount = grid[0].length;
+  const cleared = new Set(clearedPositions.map(([col, row]) => `${col},${row}`));
+  const spawns = new Map(spawnedSymbols.map(({ position, symbol, multiplier = 1 }) => [
+    `${position[0]},${position[1]}`, { symbol, multiplier },
+  ]));
+  const nextGrid = [];
+  const nextMultipliers = [];
+  const fallOffsets = [];
+
+  for (let col = 0; col < reelsCount; col++) {
+    const survivors = [];
+    for (let row = 0; row < rowsCount; row++) {
+      const key = `${col},${row}`;
+      const spawn = spawns.get(key);
+      if (spawn) {
+        survivors.push({ symbol: spawn.symbol, multiplier: spawn.multiplier, originalRow: row });
+      } else if (!cleared.has(key) && grid[col][row] != null) {
+        survivors.push({ symbol: grid[col][row], multiplier: wildMultiplierAt(wildMultipliers, col, row), originalRow: row });
+      }
+    }
+
+    const emptyCount = rowsCount - survivors.length;
+    const column = new Array(rowsCount).fill(null);
+    const multiplierColumn = new Array(rowsCount).fill(1);
+    const offsets = new Array(rowsCount).fill(0);
+    survivors.forEach((cell, index) => {
+      const row = emptyCount + index;
+      column[row] = cell.symbol;
+      multiplierColumn[row] = cell.multiplier;
+      offsets[row] = row - cell.originalRow;
+    });
+    nextGrid.push(column);
+    nextMultipliers.push(multiplierColumn);
+    fallOffsets.push(offsets);
+  }
+  return { grid: nextGrid, wildMultipliers: nextMultipliers, fallOffsets };
+}
+
+/** Resolve a deterministic cascade sequence with one initial reel fill and gravity-only steps. */
+export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvaluator, {
+  maxCascadeSteps = 25,
+  initialTransform = null,
+} = {}) {
+  const rng = createSeededRng(seed);
+  const reelsCount = strips.length;
+  const cursorStateByColumn = strips.map(strip => ({ index: Math.floor(rng() * strip.length) }));
+  const emptyGrid = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(null));
+  const allPositions = [];
+  for (let col = 0; col < reelsCount; col++) for (let row = 0; row < rowsCount; row++) allPositions.push([col, row]);
+  let { grid: currentGrid, fallOffsets: currentFallOffsets } = applyCascade(emptyGrid, cursorStateByColumn, strips, allPositions);
+  let currentWildMultipliers = createWildMultipliers(reelsCount, rowsCount);
+  if (initialTransform) {
+    const transformed = initialTransform({ grid: currentGrid, wildMultipliers: currentWildMultipliers, rng });
+    currentGrid = transformed.grid;
+    currentWildMultipliers = transformed.wildMultipliers;
+  }
+
+  const cascadeSteps = [];
+  let totalPayoutMultiplier = 0;
+  for (let stepIndex = 0; stepIndex <= maxCascadeSteps; stepIndex++) {
+    const result = winEvaluator(currentGrid, currentWildMultipliers);
+    const hasWin = result.totalPayoutMultiplier > 0;
+    cascadeSteps.push({
+      grid: currentGrid,
+      wildMultipliers: currentWildMultipliers,
+      fallOffsets: currentFallOffsets,
+      clusterWins: hasWin ? result.clusterWins : [],
+      payout: hasWin ? result.totalPayoutMultiplier : 0,
+    });
+    if (!hasWin) break;
+    totalPayoutMultiplier += result.totalPayoutMultiplier;
+    const clearedPositions = result.clusterWins.flatMap(win => win.winningPositions);
+    const spawnedSymbols = result.clusterWins.map(win => ({
+      position: win.wildSpawnPosition,
+      symbol: result.wildSymbol || 'lemonpop',
+      multiplier: 1,
+    }));
+    const next = applyNoRefillCascade(currentGrid, clearedPositions, spawnedSymbols, currentWildMultipliers);
+    currentGrid = next.grid;
+    currentWildMultipliers = next.wildMultipliers;
+    currentFallOffsets = next.fallOffsets;
+  }
+  return { cascadeSteps, totalPayoutMultiplier, finalGrid: currentGrid, wildMultipliers: currentWildMultipliers, scatterWin: null };
+}
+
+function createWildMultipliers(reelsCount, rowsCount) {
+  return Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(1));
 }
 
 /**

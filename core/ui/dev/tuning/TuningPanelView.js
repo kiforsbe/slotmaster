@@ -30,7 +30,7 @@ export function openTuningPanel({ paytable, reelFrequencyTables, tuneConfig, pan
     // on the reels you watch land, but rarely align") - meaningless for a cluster-pays cascade
     // game, which has no left-to-right line of sight at all. A cascade tuneConfig (mechanic:
     // CascadeSpinMechanic) defaults every reel to 'No preference' instead.
-    const isCascadeMechanic = tuneConfig.mechanic?.name === 'cascade';
+    const isCascadeMechanic = tuneConfig.mechanic?.name === 'cascade' || tuneConfig.mechanic?.isCascade === true;
     function defaultBiasForReel(r, count) {
       if (isCascadeMechanic) return 0;
       if (count <= 1) return 1;

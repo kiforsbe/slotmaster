@@ -1,0 +1,71 @@
+:root {
+  --gold: #e8ff50;
+  --gold-glow: rgba(224, 255, 67, .42);
+  --cabinet: #42123f;
+  --cabinet-light: #672055;
+  --pink: #ff76c8;
+  --text: #fff4ff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 35%, #702760, #180716 72%);
+  color: var(--text); font-family: Outfit, sans-serif;
+}
+.cabinet-container {
+  position: relative; display: flex; flex-direction: column; overflow: hidden;
+  border: 3px solid var(--gold); border-radius: 18px; background: var(--cabinet);
+  box-shadow: 0 0 44px rgba(0, 0, 0, .75), 0 0 22px var(--gold-glow);
+}
+header { display: flex; align-items: center; justify-content: space-between; background: linear-gradient(180deg, rgba(91, 27, 75, .96), rgba(49, 12, 44, .96)); border-bottom: 1px solid rgba(232,255,80,.35); }
+.title-logo { color: #fff; font: 900 clamp(19px, 3vw, 32px)/1 'Baloo 2', sans-serif; letter-spacing: .045em; text-shadow: 0 2px 0 #6d1a62, 0 0 16px #ff6ec7; }
+.title-logo span { color: var(--gold); }
+.top-controls { display: flex; align-items: center; }
+.btn-icon { border: 1px solid rgba(232,255,80,.38); border-radius: 8px; background: rgba(255,255,255,.07); color: var(--text); cursor: pointer; font-family: inherit; transition: .18s ease; }
+.btn-icon:hover, .btn-icon.active { background: var(--gold); color: #381231; }
+.game-viewport { position: relative; min-height: 0; background: #240b25; }
+#game-canvas { display: block; }
+.game-ticker { position: absolute; z-index: 6; top: 9px; left: 50%; transform: translateX(-50%); color: #fff; font-size: clamp(10px, 1.5vw, 14px); font-weight: 800; letter-spacing: .12em; text-shadow: 0 2px 4px #251020; }
+.pop-rush-meter { position: absolute; z-index: 6; left: 12px; bottom: 10px; display: flex; align-items: center; gap: 5px; color: #fff9ae; font-size: 10px; font-weight: 900; letter-spacing: .08em; text-shadow: 0 2px 3px #24101f; }
+.pop-rush-meter i { width: 12px; height: 12px; border: 2px solid #ecff61; border-radius: 50%; background: rgba(49,11,44,.62); box-shadow: 0 0 5px rgba(0,0,0,.6); }
+.pop-rush-meter i.filled { background: #ecff61; box-shadow: 0 0 10px #ecff61; }
+.pop-rush-panel { position: absolute; z-index: 7; top: 42px; left: 50%; transform: translate(-50%, -10px) scale(.94); padding: 7px 15px; border: 1px solid #fff16d; border-radius: 999px; background: rgba(71, 14, 67, .84); color: #fff16d; font-size: clamp(11px, 1.8vw, 17px); letter-spacing: .08em; opacity: 0; pointer-events: none; transition: .25s ease; white-space: nowrap; }
+.pop-rush-panel.active { transform: translate(-50%, 0) scale(1); opacity: 1; box-shadow: 0 0 20px rgba(255,241,109,.45); }
+body.pop-rush-active .game-viewport { box-shadow: inset 0 0 40px rgba(236,255,97,.24); }
+.dashboard { border-top: 1px solid rgba(232,255,80,.35); background: linear-gradient(0deg, #2b0a2a, #53184a); }
+.bet-container { display: flex; flex-direction: column; gap: 3px; }
+.dashboard-label { min-height: 1.2em; color: rgba(255,244,255,.58); font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+.dashboard-value { color: #fff; font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.bet-adjuster { display: flex; align-items: center; overflow: hidden; border: 1px solid rgba(255,255,255,.17); border-radius: 8px; background: rgba(0,0,0,.13); }
+.btn-adjust { width: 36px; height: 36px; border: 0; background: transparent; color: var(--gold); cursor: pointer; font: 900 20px/1 Outfit, sans-serif; }
+.btn-adjust:hover { background: rgba(232,255,80,.16); }
+.bet-display-value { width: 58px; color: #fff; font-size: 18px; font-weight: 800; text-align: center; font-variant-numeric: tabular-nums; }
+.btn-spin { border: 4px solid var(--gold); border-radius: 50%; background: radial-gradient(circle at 35% 25%, #ff9ad8, #bc338b 58%, #72205d); color: #fff; cursor: pointer; font: 900 17px/1 'Baloo 2', sans-serif; letter-spacing: .06em; box-shadow: 0 0 21px var(--gold-glow); transition: transform .16s ease, filter .16s ease; }
+.btn-spin:hover { transform: scale(1.045); filter: brightness(1.1); }
+.btn-spin.spinning { opacity: .74; }
+.auto-turbo-container { display: flex; gap: 8px; }
+.modal-overlay { position: fixed; inset: 0; z-index: 200; display: none; align-items: center; justify-content: center; padding: 12px; background: rgba(16, 3, 15, .8); backdrop-filter: blur(5px); }
+.modal-overlay.active { display: flex; }
+.modal-content { position: relative; width: min(920px, 100%); border: 2px solid var(--gold); border-radius: 16px; background: linear-gradient(145deg, #632253, #250b29); box-shadow: 0 16px 50px rgba(0,0,0,.6); text-align: center; }
+.modal-content h2 { margin-bottom: 12px; color: var(--gold); font: 800 clamp(21px, 4vw, 31px)/1 'Baloo 2', sans-serif; letter-spacing: .05em; }
+.btn-modal-close { position: absolute; top: 8px; right: 12px; border: 0; background: transparent; color: #fff; cursor: pointer; font: 400 27px/1 Outfit, sans-serif; }
+.btn-primary { margin-top: 14px; padding: 11px 28px; border: 0; border-radius: 8px; background: var(--gold); color: #34122f; cursor: pointer; font: 900 14px Outfit, sans-serif; letter-spacing: .06em; }
+.paytable-table-wrap { max-height: min(54dvh, 460px); overflow: auto; text-align: left; }
+.paytable-icon { position: relative; display: inline-block; overflow: hidden; vertical-align: middle; }
+.paytable-icon img { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.slot-straight-line-paytable { min-width: 500px; }
+.slot-paytable-wild-row { background: rgba(232,255,80,.12) !important; }
+.slot-paytable-straight-rules ul { margin: 0 0 12px 18px; color: rgba(255,255,255,.76); font-size: .84em; line-height: 1.45; }
+.sim-modal { position: fixed; z-index: 210; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 2px solid var(--gold); border-radius: 14px; background: #260b2a; color: #fff; }
+.sim-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px,1fr)); gap: 10px; }
+.stat-box { padding: 11px; border: 1px solid rgba(232,255,80,.22); border-radius: 8px; background: rgba(255,255,255,.06); }
+.stat-label { display: block; color: rgba(255,255,255,.64); font-size: 10px; text-transform: uppercase; }
+.stat-value { margin-top: 4px; color: var(--gold); font-size: 18px; font-weight: 800; }
+.btn-sim-btn { border-color: var(--pink) !important; color: #ffc2e7 !important; }
+@media (max-width: 620px) {
+  .pop-rush-meter { left: 8px; bottom: 7px; }
+  .pop-rush-meter span { display: none; }
+  .pop-rush-panel { top: 34px; }
+  /* The dev toolbar remains an intentional floating tool, but no longer covers the title/header. */
+  .developer-tools { top: 64px !important; }
+}
