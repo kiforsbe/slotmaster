@@ -8,7 +8,7 @@ function assertPositiveInteger(value, name) {
   if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
 }
 
-function summarizeTrialResults(trialResults) {
+function summarizeTrialResults(trialResults, spinsPerTrial, trialsPerPoint) {
   const rtps = trialResults.map(result => result.rtpRaw * 100);
   const rtp = rtps.reduce((sum, value) => sum + value, 0) / rtps.length;
   const trialRtpStdDev = rtps.length > 1
@@ -16,6 +16,10 @@ function summarizeTrialResults(trialResults) {
     : 0;
   const roundStats = trialResults.map(result => result.roundStats).filter(Boolean);
   return {
+    // Provenance travels with the result. An exploration candidate and a holdout candidate can
+    // have the same RTP field while carrying radically different confidence.
+    spinsPerTrial,
+    trialsPerPoint,
     rtp,
     triggerRate: trialResults.reduce((sum, result) => sum + (result.freeSpinsTriggered / result.baseSpins) * 100, 0) / trialResults.length,
     trialRtpMin: Math.min(...rtps),
@@ -57,5 +61,5 @@ export async function measureSimulationTrials({
       measurementConfig, spins, betPerLine, linesCount,
       seed == null ? Math.random : createSeededRng(seed),
     ));
-  return summarizeTrialResults(trialResults);
+  return summarizeTrialResults(trialResults, spins, trials);
 }

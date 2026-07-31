@@ -1681,6 +1681,10 @@ export async function tuneFrequencies(paytable, reelFrequencyTables, options = {
         spacingViolations,
         rtp: measured.rtp,
         triggerRate: measured.triggerRate,
+        // Phase 2 can intentionally use a cheaper training sample than the final holdout. Keep
+        // the candidate's real sample contract so progress/history never relabels it later.
+        measurementSpins: measured.spinsPerTrial,
+        measurementTrials: measured.trialsPerPoint,
         trialRtpMin: measured.trialRtpMin,
         trialRtpMax: measured.trialRtpMax,
         trialRtpStdDev: measured.trialRtpStdDev,

@@ -60,7 +60,10 @@ export function createTuneLogEntry({ index, step, stage, candidate, options, ree
       value: candidate.trialRtpStdError ?? 0 },
   ].map(t => ({ ...t, contribution: t.weight * t.value }));
 
-  const stdError = candidate.trialRtpStdError ?? 0;
+  const measurementSpins = candidate.measurementSpins ?? options.trialSpins ?? null;
+  const measurementTrials = candidate.measurementTrials ?? options.trialsPerPoint ?? null;
+  const varianceKnown = measurementTrials != null && measurementTrials > 1;
+  const stdError = varianceKnown ? (candidate.trialRtpStdError ?? 0) : null;
 
   return {
     index,
@@ -87,14 +90,15 @@ export function createTuneLogEntry({ index, step, stage, candidate, options, ree
     // this an exported config is a number with no error bar, which is the same mistake the tuner
     // itself used to make before maxRtpStdError existed.
     measurement: {
-      trialRtpStdDev: candidate.trialRtpStdDev ?? null,
+      trialRtpStdDev: varianceKnown ? (candidate.trialRtpStdDev ?? null) : null,
       trialRtpStdError: stdError,
       trialRtpMin: candidate.trialRtpMin ?? null,
       trialRtpMax: candidate.trialRtpMax ?? null,
       maxRtpStdError: options.maxRtpStdError ?? null,
-      reliable: options.maxRtpStdError == null || stdError <= options.maxRtpStdError,
-      trialSpins: options.trialSpins ?? null,
-      trialsPerPoint: options.trialsPerPoint ?? null,
+      reliable: varianceKnown && (options.maxRtpStdError == null || stdError <= options.maxRtpStdError),
+      varianceKnown,
+      trialSpins: measurementSpins,
+      trialsPerPoint: measurementTrials,
     },
 
     // ---- What it feels like, not just what it returns ----
@@ -138,13 +142,19 @@ export function createTuneLogEntry({ index, step, stage, candidate, options, ree
 export function describeTuneEntryQuality(entry) {
   const problems = [];
   const notes = [];
+  // Logs exported before explicit provenance existed used the configured multi-trial budget.
+  // Treat those as known unless they explicitly say otherwise, while new one-trial entries stay
+  // visibly unvalidated.
+  const varianceKnown = entry.measurement.varianceKnown ?? ((entry.measurement.trialsPerPoint ?? 2) > 1);
   if (!entry.achieved.withinRtpTolerance && entry.achieved.targetRtp != null) {
     problems.push(`RTP off by ${(entry.achieved.rtpError ?? 0).toFixed(2)}pp`);
   }
   if (!entry.achieved.withinTriggerTolerance && entry.achieved.targetTriggerRatePct != null) {
     problems.push('trigger rate out of band');
   }
-  if (!entry.measurement.reliable) {
+  if (!varianceKnown) {
+    problems.push('single exploration trial (variance unknown)');
+  } else if (!entry.measurement.reliable) {
     problems.push(`noisy (±${entry.measurement.trialRtpStdError.toFixed(2)}pp)`);
   }
   if (entry.violations.ordering > 0) problems.push(`${entry.violations.ordering} ordering`);

@@ -17,6 +17,7 @@ export function renderTuneLogHtml(entries) {
   if (!entries?.length) return '';
   const rows = [...entries].reverse().map(e => {
     const q = describeTuneEntryQuality(e);
+    const varianceKnown = e.measurement.varianceKnown ?? ((e.measurement.trialsPerPoint ?? 2) > 1);
     const shape = e.shape
       ? `${e.shape.volatilityIndex.toFixed(1)}x ${esc(e.shape.volatilityBand)} · hit ${(e.shape.hitRate * 100).toFixed(0)}% · max ${e.shape.maxWin.toFixed(0)}x · top1% ${(e.shape.top1PctShare * 100).toFixed(0)}%`
       : 'shape not measured';
@@ -24,14 +25,14 @@ export function renderTuneLogHtml(entries) {
         <td style="padding: 5px 8px 5px 0; white-space: nowrap; color: #888; font-size: 0.9em;">#${e.index}<br><span style="font-size: 0.85em;">step ${e.step}${e.stage ? ` · ${esc(e.stage)}` : ''}</span></td>
         <td style="padding: 5px 8px 5px 0; white-space: nowrap;">
           <span style="color: ${e.achieved.withinRtpTolerance ? '#7fd97f' : '#e6b800'}; font-weight: bold;">${e.achieved.rtp != null ? `${e.achieved.rtp.toFixed(2)}%` : '—'}</span>
-          <span style="color: #777; font-size: 0.85em;"> ±${e.measurement.trialRtpStdError.toFixed(2)}</span><br>
+          <span style="color: ${varianceKnown ? '#777' : '#ffb347'}; font-size: 0.85em;">${varianceKnown ? ` ±${e.measurement.trialRtpStdError.toFixed(2)}` : ' single trial / unvalidated'}</span><br>
           <span style="color: ${e.achieved.withinTriggerTolerance ? '#9ab' : '#e6b800'}; font-size: 0.85em;">${e.achieved.spinsPerTrigger != null ? `1 in ${Math.round(e.achieved.spinsPerTrigger)}` : 'no bonus'}</span>
         </td>
         <td style="padding: 5px 8px 5px 0; color: #9ab; font-size: 0.85em;">${shape}</td>
         <td style="padding: 5px 8px 5px 0; white-space: nowrap; color: #aaa; font-size: 0.85em;">loss ${e.loss.total != null ? e.loss.total.toFixed(4) : '—'}</td>
         <td style="padding: 5px 8px 5px 0; font-size: 0.85em; color: ${q.ok ? '#7fd97f' : '#e6b800'};">${q.ok ? '✓' : '⚠'} ${esc(q.verdict)}</td>
         <td style="padding: 5px 0; white-space: nowrap;">
-          <button class="btn-icon tune-log-copy-js" data-index="${e.index}" title="Copy this config as paste-ready FREQUENCY_REEL code, exactly like the output at the end of a tune - with a header saying which log entry it is and what was wrong with it, since this is one candidate from the history rather than the run's final answer." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,214,0,0.18); border-color: rgba(255,214,0,0.5); color: #ffe9a3;">COPY JS</button>
+          <button class="btn-icon tune-log-copy-js" data-index="${e.index}" title="Copy this historical training candidate. It is not the final holdout-selected result; validate it on fresh full-fidelity trials before using it in a game." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,214,0,0.18); border-color: rgba(255,214,0,0.5); color: #ffe9a3;">COPY TRAINING JS</button>
           <button class="btn-icon tune-log-copy" data-index="${e.index}" title="Copy this entry as JSON - every measured field, not just the frequencies." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">JSON</button>
           <button class="btn-icon tune-log-export" data-index="${e.index}" title="Download this entry as a .json file." style="padding: 3px 8px; font-size: 0.7em; background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #ddd;">FILE</button>
         </td>
@@ -557,13 +558,18 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
   // candidate was measured more reliably.
   const e = context.tuneLogEntry ?? null;
   const q = e ? describeTuneEntryQuality(e) : null;
+  const eVarianceKnown = e && (e.measurement.varianceKnown ?? ((e.measurement.trialsPerPoint ?? 2) > 1));
   const header = [
     e
       ? `// ---- Tuned ${new Date().toISOString().slice(0, 10)} - accepted-best entry #${e.index} (step ${e.step}${e.stage ? `, ${e.stage}` : ''}) ----`
       : `// ---- Tuned ${new Date().toISOString().slice(0, 10)} ----`,
     `// Achieved: RTP ${num(context.rtp, 2)}%  |  free-spin trigger ${num(context.triggerRatePct, 3)}%`
-      + (e ? `  |  measured +/-${e.measurement.trialRtpStdError.toFixed(2)}pp` : ''),
-    e ? `// This is one candidate from that run's history, NOT necessarily its final result.` : null,
+      + (e ? (eVarianceKnown ? `  |  measured +/-${e.measurement.trialRtpStdError.toFixed(2)}pp` : '  |  single trial, variance unknown') : ''),
+    e ? `// TRAINING CANDIDATE ONLY - this is one historical search entry, not the final holdout-selected result.` : null,
+    e ? `// Candidate measurement: ${e.measurement.trialSpins?.toLocaleString() ?? 'unknown'} spins x ${e.measurement.trialsPerPoint ?? 'unknown'} trial${e.measurement.trialsPerPoint === 1 ? '' : 's'}${eVarianceKnown ? ` (±${e.measurement.trialRtpStdError.toFixed(2)}pp)` : ' (variance unknown)'}.` : null,
+    e && !eVarianceKnown
+      ? `// DO NOT ship from this value: validate these exact tables on fresh full-fidelity trials first.`
+      : null,
     e ? `// Verdict at the time: ${q.ok ? 'meets every target' : q.verdict}${q.notes.length ? ` (${q.notes.join(', ')})` : ''}` : null,
     e && e.shape
       ? `// Shape: volatility ${e.shape.volatilityIndex.toFixed(1)}x (${e.shape.volatilityBand}), hit rate ${(e.shape.hitRate * 100).toFixed(0)}%, biggest round ${e.shape.maxWin.toFixed(0)}x, top 1% carry ${(e.shape.top1PctShare * 100).toFixed(0)}%`
@@ -578,7 +584,9 @@ export function formatReelFrequencyTablesForCopy(reelFrequencyTables, context = 
     // "0.5988023952095808%". Rounded, plus the spins form, which is the number to type back in.
     `//   target RTP ${p.targetRtp}% +/-${p.rtpTolerancePct}   target trigger ${num(p.targetTriggerRatePct)}%`
       + ` (1 in ${Math.round(pctToSpinsPerTrigger(p.targetTriggerRatePct) ?? 0)}) +/-${p.triggerRateTolerancePct}`,
-    `//   ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`,
+    e
+      ? `//   run's final-validation budget: ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`
+      : `//   ${p.trialSpins?.toLocaleString()} spins x ${p.trialsPerPoint} trials   ${p.searchAlgorithm}, max ${p.maxIterations} iterations`,
     (p.searchTrialSpins != null || p.searchTrialsPerPoint != null || p.finalValidation)
       ? `//   exploration: ${explorationSpins?.toLocaleString()} spins x ${explorationTrials} trials   holdout: ${p.finalValidation ? `${holdoutSpins?.toLocaleString()} spins x ${holdoutTrials} trials across ${p.finalistCount ?? 4} finalists` : 'off'}`
       : null,

@@ -35,6 +35,8 @@ test('measureSimulationTrials uses deterministic independent seeds and disables 
   assert.ok(calls.every(call => call.config.logSpins === false));
   assert.equal(result.rtp, 100);
   assert.equal(result.triggerRate, 0);
+  assert.equal(result.spinsPerTrial, 100);
+  assert.equal(result.trialsPerPoint, 3);
   assert.equal(result.trialRtpStdError, 0);
   assert.equal(result.roundStats.rounds, 300);
 });

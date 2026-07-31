@@ -703,12 +703,14 @@ test('a log entry copied as JS says which entry it is, not just what it achieved
       tuneLogEntry: logEntryFixture({
         index: 2, step: 3, stage: 'linked',
         achieved: { ...logEntryFixture().achieved, rtp: 105.6, rtpError: 9.6, withinRtpTolerance: false },
-        measurement: { trialRtpStdError: 0.97, reliable: true },
+        measurement: { trialRtpStdError: 0.97, reliable: true, varianceKnown: false, trialSpins: 75000, trialsPerPoint: 1 },
       }),
     });
   assert.match(out, /accepted-best entry #2 \(step 3, linked\)/);
-  assert.match(out, /\+\/-0\.97pp/, 'the error bar is the whole reason to pick this one');
-  assert.match(out, /NOT necessarily its final result/);
+  assert.match(out, /single trial, variance unknown/);
+  assert.match(out, /TRAINING CANDIDATE ONLY/);
+  assert.match(out, /Candidate measurement: 75\s000 spins x 1 trial/);
+  assert.match(out, /DO NOT ship from this value/);
   assert.match(out, /RTP off by 9\.60pp/, 'and its known problem travels with it');
   assert.match(out, /volatility 5\.5x \(medium\)/);
   // Still the same paste-ready code as any other export.
@@ -725,10 +727,10 @@ test('the ordinary end-of-tune output is unchanged when no log entry is involved
   assert.match(out, /^\/\/ ---- Tuned \d{4}-\d{2}-\d{2} ----/);
 });
 
-test('renderTuneLogHtml offers JS code alongside JSON for every entry', () => {
+test('renderTuneLogHtml identifies copied history as training code alongside JSON', () => {
   const out = renderTuneLogHtml([logEntryFixture()]);
   assert.match(out, /tune-log-copy-js" data-index="3"/);
-  assert.match(out, />COPY JS</);
+  assert.match(out, />COPY TRAINING JS</);
   assert.match(out, />JSON</);
   assert.match(out, />FILE</);
 });

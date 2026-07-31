@@ -60,6 +60,16 @@ test('an entry carries its own error bar, so an exported config is never a numbe
   assert.equal(noisy.measurement.reliable, false);
 });
 
+test('an exploration candidate records its actual one-trial budget as unvalidated, not the final budget', () => {
+  const e = entry({ measurementSpins: 75000, measurementTrials: 1, trialRtpStdDev: 0, trialRtpStdError: 0 });
+  assert.equal(e.measurement.trialSpins, 75000);
+  assert.equal(e.measurement.trialsPerPoint, 1);
+  assert.equal(e.measurement.varianceKnown, false);
+  assert.equal(e.measurement.trialRtpStdError, null);
+  assert.equal(e.measurement.reliable, false);
+  assert.match(describeTuneEntryQuality(e).verdict, /variance unknown/);
+});
+
 test('an entry records the payout SHAPE, which is the whole reason to keep a history', () => {
   // Two candidates with identical RTP can be completely different games, and the loss cannot see
   // the difference - so a log that recorded only loss and RTP would not be worth keeping.

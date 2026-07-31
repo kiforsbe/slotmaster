@@ -96,18 +96,24 @@ export function checkLineCascadeWins(grid, paytable, scatterSymbol, scatterTrigg
   };
 }
 
-// ---- Tuned 2026-07-28 ----
-// Achieved: RTP 125.86%  |  free-spin trigger 0.528%
+// ---- Tuned 2026-07-31 - accepted-best entry #7 (step 25, linked) ----
+// Achieved: RTP 95.16%  |  free-spin trigger 0.556%  |  single trial, variance unknown
+// TRAINING CANDIDATE ONLY - this is one historical search entry, not the final holdout-selected result.
+// Candidate measurement: 750,000 spins x 1 trial (variance unknown).
+// DO NOT ship from this value: validate these exact tables on fresh full-fidelity trials first.
+// Verdict at the time: single exploration trial (variance unknown) (high volatility, top 1% carry 47%)
+// Shape: volatility 14.8x (high), hit rate 28%, biggest round 4879x, top 1% carry 47%
 //
 // To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
 // same reel geometry, since strips are generated from them:
 //   searchSeed 12345   reelSeeds [8721, 1432, 998, 7653, 4421]
 //   reelLength 500   reels 5 x 3 rows
 //   target RTP 96% +/-1.5   target trigger 0.5988% (1 in 167) +/-0.15
-//   250,000 spins x 2 trials   cmaes, max 150 iterations
-//   initial weights: uniform   max RTP std error 1
-//   reelCoupling linked-then-refine   maxReelDeviation 0.25
-//   loss weights (raw): ordering 1, limit 1, uniformity 4, stdError 0, triggerRate 0.1, spacing 1
+//   run's final-validation budget: 3,000,000 spins x 3 trials   cmaes, max 50 iterations
+//   exploration: 750,000 spins x 1 trials   holdout: 3,000,000 spins x 3 trials across 4 finalists
+//   initial weights: provided   max RTP std error 1
+//   reelCoupling linked   maxReelDeviation 0.25
+//   loss weights (raw): ordering 1, limit 1, uniformity 0, stdError 0, triggerRate 0.1, spacing 0
 //   ordering bias by reel: [0, 0, 0, 0, 0]
 //
 // REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
@@ -118,16 +124,16 @@ export const FREQUENCY_REEL1 = {
   defaults: { minFrequency: 0.01, maxFrequency: 1 },
   symbols: {
     gold:   { frequency: 0.05, minGap: 3, maxStack: 1 },
-    llama:  { frequency: 0.1303 },
-    face:   { frequency: 0.1271 },
-    maise:  { frequency: 0.1659 },
-    head:   { frequency: 0.2255 },
-    jaguar: { frequency: 0.1428 },
-    ace:    { frequency: 0.21 },
-    king:   { frequency: 0.2694 },
-    queen:  { frequency: 0.2296 },
-    jack:   { frequency: 0.1814 },
-    ten:    { frequency: 0.1378 },
+    llama:  { frequency: 0.05591 },
+    face:   { frequency: 0.03094 },
+    maise:  { frequency: 0.05797 },
+    head:   { frequency: 0.1258 },
+    jaguar: { frequency: 0.05229 },
+    ace:    { frequency: 0.388 },
+    king:   { frequency: 0.2519 },
+    queen:  { frequency: 0.4692 },
+    jack:   { frequency: 0.2486 },
+    ten:    { frequency: 0.1392 },
   },
 };
 
@@ -135,16 +141,16 @@ export const FREQUENCY_REEL2 = {
   defaults: { minFrequency: 0.01, maxFrequency: 1 },
   symbols: {
     gold:   { frequency: 0.05, minGap: 3, maxStack: 1 },
-    llama:  { frequency: 0.2122 },
-    face:   { frequency: 0.07453 },
-    maise:  { frequency: 0.1621 },
-    head:   { frequency: 0.1322 },
-    jaguar: { frequency: 0.1395 },
-    ace:    { frequency: 0.1231 },
-    king:   { frequency: 0.2632 },
-    queen:  { frequency: 0.1932 },
-    jack:   { frequency: 0.2954 },
-    ten:    { frequency: 0.2244 },
+    llama:  { frequency: 0.05591 },
+    face:   { frequency: 0.03094 },
+    maise:  { frequency: 0.05797 },
+    head:   { frequency: 0.1258 },
+    jaguar: { frequency: 0.05229 },
+    ace:    { frequency: 0.388 },
+    king:   { frequency: 0.2519 },
+    queen:  { frequency: 0.4692 },
+    jack:   { frequency: 0.2486 },
+    ten:    { frequency: 0.1392 },
   },
 };
 
@@ -152,16 +158,16 @@ export const FREQUENCY_REEL3 = {
   defaults: { minFrequency: 0.01, maxFrequency: 1 },
   symbols: {
     gold:   { frequency: 0.05, minGap: 3, maxStack: 1 },
-    llama:  { frequency: 0.2104 },
-    face:   { frequency: 0.1232 },
-    maise:  { frequency: 0.1607 },
-    head:   { frequency: 0.2185 },
-    jaguar: { frequency: 0.1384 },
-    ace:    { frequency: 0.2034 },
-    king:   { frequency: 0.1566 },
-    queen:  { frequency: 0.1916 },
-    jack:   { frequency: 0.2837 },
-    ten:    { frequency: 0.1335 },
+    llama:  { frequency: 0.05591 },
+    face:   { frequency: 0.03094 },
+    maise:  { frequency: 0.05798 },
+    head:   { frequency: 0.1258 },
+    jaguar: { frequency: 0.0523 },
+    ace:    { frequency: 0.388 },
+    king:   { frequency: 0.2519 },
+    queen:  { frequency: 0.4693 },
+    jack:   { frequency: 0.2486 },
+    ten:    { frequency: 0.1392 },
   },
 };
 
@@ -169,16 +175,16 @@ export const FREQUENCY_REEL4 = {
   defaults: { minFrequency: 0.01, maxFrequency: 1 },
   symbols: {
     gold:   { frequency: 0.05, minGap: 3, maxStack: 1 },
-    llama:  { frequency: 0.2118 },
-    face:   { frequency: 0.08014 },
-    maise:  { frequency: 0.1618 },
-    head:   { frequency: 0.155 },
-    jaguar: { frequency: 0.2321 },
-    ace:    { frequency: 0.2048 },
-    king:   { frequency: 0.1576 },
-    queen:  { frequency: 0.1928 },
-    jack:   { frequency: 0.2001 },
-    ten:    { frequency: 0.2239 },
+    llama:  { frequency: 0.05591 },
+    face:   { frequency: 0.03094 },
+    maise:  { frequency: 0.05798 },
+    head:   { frequency: 0.1258 },
+    jaguar: { frequency: 0.0523 },
+    ace:    { frequency: 0.388 },
+    king:   { frequency: 0.2519 },
+    queen:  { frequency: 0.4693 },
+    jack:   { frequency: 0.2486 },
+    ten:    { frequency: 0.1392 },
   },
 };
 
@@ -186,16 +192,16 @@ export const FREQUENCY_REEL5 = {
   defaults: { minFrequency: 0.01, maxFrequency: 1 },
   symbols: {
     gold:   { frequency: 0.05, minGap: 3, maxStack: 1 },
-    llama:  { frequency: 0.1241 },
-    face:   { frequency: 0.08186 },
-    maise:  { frequency: 0.158 },
-    head:   { frequency: 0.2147 },
-    jaguar: { frequency: 0.2053 },
-    ace:    { frequency: 0.1999 },
-    king:   { frequency: 0.2565 },
-    queen:  { frequency: 0.1883 },
-    jack:   { frequency: 0.1727 },
-    ten:    { frequency: 0.2187 },
+    llama:  { frequency: 0.05592 },
+    face:   { frequency: 0.03094 },
+    maise:  { frequency: 0.05798 },
+    head:   { frequency: 0.1258 },
+    jaguar: { frequency: 0.0523 },
+    ace:    { frequency: 0.388 },
+    king:   { frequency: 0.2519 },
+    queen:  { frequency: 0.4693 },
+    jack:   { frequency: 0.2486 },
+    ten:    { frequency: 0.1392 },
   },
 };
 export const FREQUENCY_REELS = [FREQUENCY_REEL1, FREQUENCY_REEL2, FREQUENCY_REEL3, FREQUENCY_REEL4, FREQUENCY_REEL5];
