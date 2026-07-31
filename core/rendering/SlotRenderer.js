@@ -13,6 +13,7 @@
 import { drawSpriteSymbol } from './SpriteDrawer.js';
 import { SpriteAnimation } from '../assets/AssetLoader.js';
 import { resolveAnimatedValue } from '../animation/AnimatedValue.js';
+import { buildClusterOutlinePaths, buildRoundedClusterOutlineCommands } from './ClusterOutline.js';
 
 // How far outside the grid a payline's numbered tag sits - matches both engines' own
 // LINE_TAG_OFFSET constant, so the line runs tag to tag either way.
@@ -535,8 +536,10 @@ export class SlotRenderer {
   // _renderClearGlow/_applyClearTransform. `gridState` bundles the per-cell animation info the
   // original methods read off `this`: { grid, cellOffsets, currentClearVariants (Map keyed
   // "col,row"), cellBounceStartTime, clearProgress (0..1 or null), bounceDuration, now }.
+  // `clearCellHighlight` preserves the original per-tile gold glow by default, but lets a
+  // cluster visualizer replace that busy cell-by-cell treatment with one clean silhouette.
   drawGridSymbols(ctx, asset, symbolsConfig, layout, reelsCount, rowsCount, gridState) {
-    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect } = gridState;
+    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true } = gridState;
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
 
     for (let col = 0; col < reelsCount; col++) {
@@ -553,7 +556,7 @@ export class SlotRenderer {
         const bounceElapsed = now - cellBounceStartTime[col][row];
         const isBouncing = !clearInfo && offsetRows === 0 && bounceElapsed >= 0 && bounceElapsed < bounceDuration;
 
-        if (clearInfo) this._drawClearGlow(ctx, cx, cy, layout, clearProgress);
+        if (clearInfo && clearCellHighlight) this._drawClearGlow(ctx, cx, cy, layout, clearProgress);
 
         ctx.save();
         if (clearInfo) {
@@ -736,6 +739,54 @@ export class SlotRenderer {
     const label = win.lineIndex + 1;
     this.drawLineTag(ctx, label, leftTagX, centerOf(0).y, color);
     this.drawLineTag(ctx, label, rightTagX, centerOf(lastReel).y, color);
+  }
+
+  // Draw the outer perimeter of the cluster currently being collected. Unlike a translucent
+  // fill, this leaves the symbols, their clear effect, particles, and win popup visible while
+  // still making an irregular cluster's actual shape immediately readable. This is deliberately
+  // configured per game: line-pay cascades have paths, not cluster shapes, so they simply omit
+  // `clusterVisualizer`. Its drawing options intentionally mirror CanvasRenderingContext2D:
+  // { color, alpha, lineWidth, lineCap, lineJoin, miterLimit, lineDash, lineDashOffset,
+  //   cornerRadius, roundConcaveCorners, glow, glowColor, pulse }. Corner radius is built from
+  // exact, validated cubic arcs along an ordered perimeter (not from line joins). `glow` is a
+  // blur radius (or false for no glow), and `pulse` may be false or { minAlpha, maxAlpha, periodMs }.
+  drawClusterOutline(ctx, engineState, layout, visualizer = {}) {
+    const { currentClusterWins, currentClusterIndex } = engineState;
+    const cluster = currentClusterWins?.[currentClusterIndex];
+    if (!cluster?.winningPositions?.length || cluster.lineIndex != null) return;
+
+    const { symbolWidth, symbolHeight } = layout;
+    const pulseOptions = visualizer.pulse === false ? null : (visualizer.pulse || {});
+    const pulse = pulseOptions
+      ? (pulseOptions.minAlpha ?? 0.82)
+        + ((pulseOptions.maxAlpha ?? 1) - (pulseOptions.minAlpha ?? 0.82))
+          * ((Math.sin((Date.now() / (pulseOptions.periodMs ?? 690)) * Math.PI * 2) + 1) / 2)
+      : 1;
+    const glow = visualizer.glow === false ? 0 : (visualizer.glow ?? 14);
+
+    ctx.save();
+    ctx.strokeStyle = visualizer.color || '#fff4a8';
+    ctx.lineWidth = visualizer.lineWidth || Math.max(3, Math.min(symbolWidth, symbolHeight) * 0.075);
+    ctx.lineCap = visualizer.lineCap || 'round';
+    ctx.lineJoin = visualizer.lineJoin || 'round';
+    if (visualizer.miterLimit != null) ctx.miterLimit = visualizer.miterLimit;
+    ctx.setLineDash(visualizer.lineDash || []);
+    ctx.lineDashOffset = visualizer.lineDashOffset ?? 0;
+    ctx.globalAlpha = (visualizer.alpha ?? 1) * pulse;
+    ctx.shadowColor = visualizer.glowColor || ctx.strokeStyle;
+    ctx.shadowBlur = glow;
+    ctx.beginPath();
+
+    const paths = buildClusterOutlinePaths(cluster.winningPositions, layout);
+    buildRoundedClusterOutlineCommands(paths, visualizer).forEach(commands => {
+      commands.forEach(command => {
+        if (command.type === 'move') ctx.moveTo(command.x, command.y);
+        else if (command.type === 'line') ctx.lineTo(command.x, command.y);
+        else ctx.bezierCurveTo(command.cp1x, command.cp1y, command.cp2x, command.cp2y, command.x, command.y);
+      });
+    });
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawLineTag(ctx, num, x, y, color) {
@@ -931,6 +982,9 @@ export class SlotRenderer {
             spriteAsset: engine.assets[engine.config.clearEffect.asset],
           }
           : null,
+        // Keep legacy games visually unchanged unless they explicitly choose a cluster-level
+        // visualization instead of one highlight rectangle per clearing cell.
+        clearCellHighlight: engine.config.clearCellHighlight !== false,
         bounceDuration: engine.turboMode ? 140 : 260,
         now: Date.now(),
       });
@@ -942,6 +996,12 @@ export class SlotRenderer {
     this.drawGridBorders(ctx, layout, engine.config.rowsCount, engine.config.reelsCount, theme);
     if (!theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
     this.drawWinLine(ctx, { state: engine.state, currentClusterWins: animator?.currentClusterWins, currentClusterIndex: animator?.currentClusterIndex }, layout, engine.config.paylines, engine.config.reelsCount);
+    if (engine.config.clusterVisualizer) {
+      this.drawClusterOutline(ctx, {
+        currentClusterWins: animator?.currentClusterWins,
+        currentClusterIndex: animator?.currentClusterIndex,
+      }, layout, engine.config.clusterVisualizer === true ? {} : engine.config.clusterVisualizer);
+    }
     engine.particleSystem?.render(ctx);
     if (animator?.activePopups) {
       const now = Date.now();
