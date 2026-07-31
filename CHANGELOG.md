@@ -3,6 +3,55 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.9.0 — 2026-07-31
+
+### Added
+
+- **Shared responsive slot UI across all games** — common controls and state handling now cover
+  bet size, lines, balance, spin/stop, autoplay, turbo, sound, and music, with layouts that scale
+  from embedded views through fullscreen desktop, tablet, and phone sizes.
+- **Dynamic paytables for line and cluster games**, including symbol artwork, payline diagrams,
+  scatter-specific payouts, and cluster payout tables.
+- **Dedicated developer panels** for simulation, tuning, and live spin logging, with proper
+  panel chrome, movable/resizable/collapsible spin logging, live updates, and shared panel
+  management.
+- **Configurable cascade win visualization** — cluster outlines support themed colors, glow,
+  pulse, rounded and concave corners, line styles, and payline-cascade winning-cell outlines.
+- **Generic asset and sprite animation loading**, including animated clear effects and Mayan
+  Tumble's stone-explosion assets.
+- **GitHub Pages deployment workflow** and updated game portal presentation.
+
+### Changed
+
+- **Simulation and tuning were refactored into dedicated modules** under `core/simulation/` and
+  `core/tuning/`, with worker-pool execution, bounded concurrency, deterministic trial seeds,
+  explicit exploration/holdout measurements, improved diagnostics, structural search, frequency
+  comparison tables, and clearer result/export reporting.
+- **Developer UI files were moved into `core/ui/dev/`**, file I/O into `core/io/`, and spin-log
+  support into `core/logging/`, removing the old root-level compatibility shims and updating games
+  and tests to use the real modules.
+- **Slot rendering was further decomposed**: cluster geometry now lives in
+  `core/math/ClusterOutline.js`, while Canvas painting is handled by
+  `core/rendering/ClusterOutlineRenderer.js`; `SlotRenderer` remains the frame orchestrator.
+- **Cascade paylines now support all-at-once win clearing**, showing each active payline before
+  clearing the combined winning positions.
+- **Audio and game assets use shared engine services**, including music toggling, preloaded music,
+  accelerated stopping, and unified sprite/tilemap handling.
+- **Free-spins intro handling now pauses autoplay and queued spin requests** until the player
+  explicitly enters the bonus round.
+
+### Fixed
+
+- **Cluster visualization now works for payline-based cascade games** such as Mayan Tumble: the
+  active payline remains visible and the configured outline is also painted around its winning
+  cells.
+- **Cascade clear stopping no longer references an undefined turbo flag**, including the
+  all-at-once payline transition path.
+- **Tuning output now preserves the actual measurement budget and uncertainty** instead of
+  presenting a single-trial exploration result as a fully validated result.
+- **Legacy per-game UI and win-handling duplication was removed**, preventing inconsistent control
+  behavior and stale panel wiring between games.
+
 ## 0.8.0 — 2026-07-29
 
 ### Added
