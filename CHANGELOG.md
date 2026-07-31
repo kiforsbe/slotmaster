@@ -3,6 +3,25 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.10.0 — 2026-08-01
+
+### Added
+
+- **Lemon Pop game and assets were added** — includes tile definitions/artwork and a dedicated
+  no-refill cascade implementation (`Pop Rush`) with game-specific mechanics and effects, including
+  `LemonPopSpinMechanic.js`, `LemonPopFeatures.js`, and `StraightLineMath.js` for line-based evaluation.
+- **New rendering components for line games** — `StraightLineWinRenderer.js` added to support
+  payline visualization in cascade games like Lemon Pop.
+
+### Changed
+
+- **Lemon Pop paytable and mechanics were refined** — payout tuning, paytable presentation,
+  and related test coverage were updated after the initial game add.
+- **Web Audio music playback now uses `resume()` flow** for better browser audio-context
+  integration across all games.
+- **Pop Rush mechanics and effects were enhanced** — game features and UI elements were updated
+  to improve the no-refill cascade experience.
+
 ## 0.9.0 — 2026-07-31
 
 ### Added
@@ -293,4 +312,4 @@ and ends, not decorations parked beside it.
   that is not a plain multiplier. It now distinguishes the three, which have different fixes.
 
 ---
-_Docs last synced with the codebase: 2026-07-29, commit `4c572a7`._
+_Docs last synced with the codebase: 2026-08-01, HEAD `e7cf178` (tag v0.10.0)._
