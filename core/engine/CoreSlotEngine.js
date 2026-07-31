@@ -6,6 +6,7 @@ import { computeGridLayout } from '../rendering/GridLayout.js';
 import { audio } from '../audio/SlotAudio.js';
 import { createSeededRng } from '../math/SlotMath.js';
 import { simulateSpins } from '../SpinSimulator.js';
+import { AssetLoader } from '../assets/AssetLoader.js';
 
 export class CoreSlotEngine {
   constructor(canvas, config = {}) {
@@ -34,8 +35,11 @@ export class CoreSlotEngine {
     this.audioController = config.audioController ?? null;
     this.spinLogRecorder = config.spinLogRecorder ?? null;
 
-    this.spritesheetUrl = config.spritesheetUrl || '';
-    this.symbolsConfig = config.symbolsConfig || {};
+    this.assetLoader = config.assetLoader ?? new AssetLoader();
+    this.assetManifest = config.assetManifest ?? null;
+    // AssetLoader returns the canonical asset map. Renderers consume assets.symbols directly;
+    // there is no second game-specific asset representation.
+    this.assets = config.assets ?? {};
 
     // Per-game-state theme music (e.g. { main, freespins }), configured via config.music - a
     // game that sets nothing never touches the audio engine's music subsystem at all. Wired here
@@ -44,8 +48,7 @@ export class CoreSlotEngine {
     // no-ops until a real AudioContext exists, so calling them eagerly is safe.
     this.musicConfig = config.music || null;
     if (this.musicConfig) {
-      audio.setMusicTracks(this.musicConfig);
-      audio.setMusicState('main');
+      this._configureMusic(this.musicConfig);
     }
 
     // Duck-on-effect and the master compressor are on by default (matching this file's original
@@ -101,7 +104,6 @@ export class CoreSlotEngine {
     this.activeWinLineIndex = -1;
 
     // Asset/layout state - populated by loadAssets()/resize(), read by a Renderer/SpinAnimator.
-    this.spritesheet = typeof Image !== 'undefined' ? new Image() : null;
     this.assetsLoaded = false;
     this.symbolWidth = 0;
     this.symbolHeight = 0;
@@ -117,28 +119,40 @@ export class CoreSlotEngine {
   // in tests with a stub canvas and no DOM).
   init() {
     this.setupResize();
-    this.loadAssets();
+    const assetsReady = this.loadAssets();
     // Decorative-only, not a real spin: matches SlotEngine.js's/CascadeEngine.js's own eager
     // initial-fill call from their constructor-invoked init(), so the game never shows a blank
     // playfield before the player's first spin. Optional - an animator that has nothing
     // decorative to show (or is under test with a stub) simply skips this.
     this.animator?.showIdle?.(this);
     this.animate();
+    return assetsReady;
   }
 
-  loadAssets(spritesheetUrl = this.spritesheetUrl, symbolsConfig = this.symbolsConfig) {
-    this.assetsLoaded = false;
-    this.spritesheetUrl = spritesheetUrl;
-    this.symbolsConfig = symbolsConfig;
+  _configureMusic(tracks) {
+    this.musicConfig = tracks;
+    audio.setMusicTracks(tracks);
+    audio.setMusicState('main');
+  }
 
-    this.spritesheet.src = spritesheetUrl;
-    this.spritesheet.onload = () => {
+  loadAssets() {
+    this.assetsLoaded = false;
+    const load = this.assetManifest
+      ? this.assetLoader.loadAll(this.assetManifest).then(assets => { this.assets = assets; })
+      : Promise.resolve(this.assets);
+    this.assetLoadPromise = load.then(() => {
+      if (!this.musicConfig && this.assets.music) {
+        const track = this.assets.music.audio || this.assets.music.url;
+        if (track) this._configureMusic({ main: track });
+      }
       this.assetsLoaded = true;
-      this.resize();
-    };
-    this.spritesheet.onerror = () => {
-      console.error('CoreSlotEngine: failed to load spritesheet from: ' + spritesheetUrl);
-    };
+      if (this.canvas?.parentElement) this.resize();
+      return this.assets;
+    }).catch(error => {
+      console.error(`CoreSlotEngine: failed to load assets: ${error.message}`);
+      throw error;
+    });
+    return this.assetLoadPromise;
   }
 
   setupResize() {

@@ -805,6 +805,7 @@ export class SlotRenderer {
     }
 
     const layout = engine.layout;
+    const symbols = engine.assets.symbols || engine.assets.tilemap;
     this.drawCabinet(ctx, layout, theme, { skipBackdropFill: !!engine.config.viewportBackground });
     if (theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
 
@@ -816,11 +817,11 @@ export class SlotRenderer {
     this.drawPlayfieldBackground(ctx, layout, theme.background);
     this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
     if (engine.animator?.reels) {
-      this.drawReelsSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.animator.reels);
+      this.drawReelsSymbols(ctx, symbols?.image, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.animator.reels);
     }
     if (engine.state === 'expanding' && engine.animator?.expansionReelsToAnimate) {
       this.drawExpandingAnimation(
-        ctx, layout, engine.spritesheet, engine.symbolsConfig, engine.config.expandingSymbol,
+        ctx, layout, symbols?.image, symbols?.tiles || {}, engine.config.expandingSymbol,
         engine.animator.expansionReelsToAnimate, engine.animator.expansionReelStartTimes,
       );
     }
@@ -849,6 +850,7 @@ export class SlotRenderer {
     }
 
     const layout = engine.layout;
+    const symbols = engine.assets.symbols || engine.assets.tilemap;
     this.drawCabinet(ctx, layout, theme, { skipBackdropFill: !!engine.config.viewportBackground });
     if (theme.outlineBehindSymbols) this.drawCabinetGlow(ctx, layout, theme);
 
@@ -865,7 +867,7 @@ export class SlotRenderer {
     if (overlayBehind && engine.inFreeSpins) mode.renderOverlay(engine.freeSpinsModeState, engine);
 
     if (animator?.outgoingGrid) {
-      this.drawOutgoingGridSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.config.rowsCount, animator.outgoingGrid, animator.outgoingOffsets);
+      this.drawOutgoingGridSymbols(ctx, symbols?.image, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.config.rowsCount, animator.outgoingGrid, animator.outgoingOffsets);
     }
     if (animator?.grid) {
       const isClearing = animator.currentClearPositions && animator.currentClearPositions.length > 0;
@@ -873,7 +875,7 @@ export class SlotRenderer {
       const clearProgress = isClearing
         ? Math.min((Date.now() - animator._clearStartTime) / clearDuration, 1)
         : null;
-      this.drawGridSymbols(ctx, engine.spritesheet, engine.symbolsConfig, layout, engine.config.reelsCount, engine.config.rowsCount, {
+      this.drawGridSymbols(ctx, symbols?.image, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.config.rowsCount, {
         grid: animator.grid,
         cellOffsets: animator.cellOffsets,
         currentClearVariants: animator.currentClearVariants,

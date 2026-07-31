@@ -289,23 +289,10 @@ const DEBUG_MODE = true;
 
 let engine = null;
 let pendingFreeSpinsAward = 0;
-const THEME_NAME = 'candies_1';
-
-async function loadThemeAssets(themeName) {
-  try {
-    const response = await fetch(`./assets/${themeName}/${themeName}.tiles.json`);
-    const data = await response.json();
-    const symbolsConfig = {};
-    data.tiles.forEach(tile => {
-      symbolsConfig[tile.name] = { x: tile.x, y: tile.y, w: tile.w, h: tile.h };
-    });
-    const spritesheetUrl = `./assets/${themeName}/${data.sheet}`;
-    return { spritesheetUrl, symbolsConfig };
-  } catch (error) {
-    console.error(`Failed to fetch tile config for theme: ${themeName}`, error);
-    return null;
-  }
-}
+const GAME_ASSET_MANIFEST = {
+  symbols: { url: './assets/candies_1/candies_1.tiles.json', type: 'tilemap' },
+  music: { url: './assets/music/candyfrenzy_theme.mp3', type: 'music' },
+};
 
 async function initGame() {
   canvas = document.getElementById('game-canvas');
@@ -452,12 +439,6 @@ async function initGame() {
     });
   }
 
-  const themeAssets = await loadThemeAssets(THEME_NAME);
-  if (!themeAssets) {
-    alert('Error loading assets!');
-    return;
-  }
-
   const renderer = new SlotRenderer();
   const particleSystem = new ParticleSystem();
   engine = new CoreSlotEngine(canvas, {
@@ -488,20 +469,18 @@ async function initGame() {
     scatterSymbol: 'bonus',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
     playfield: PLAYFIELD,
-    music: { main: "./assets/music/candyfrenzy_theme.mp3" },
+    assetManifest: GAME_ASSET_MANIFEST,
     viewportBackground: { type: "image", image: "./assets/backgrounds/candyfrenzy_background_2.png" },
-    symbolsConfig: themeAssets.symbolsConfig,
-    spritesheetUrl: themeAssets.spritesheetUrl,
     betAmount: BET_AMOUNT,
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo),
   });
-  engine.init();
+  await engine.init();
 
   updateUI();
   setupUIHandlers();
-  buildPaytableContent(themeAssets);
+  buildPaytableContent(engine.assets);
 }
 
 function updateUI() {
@@ -651,12 +630,13 @@ function setupUIHandlers() {
 // One tile out of the spritesheet, positioned by CSS rather than drawn: the paytable opens before
 // the engine has necessarily finished loading its own copy, and a <canvas> here would need that.
 // Returns '' when the theme has no tile for the symbol, so a missing sprite costs a name, not a row.
-function symbolIconHtml(symbol, themeAssets, size = 36) {
-  const tile = themeAssets?.symbolsConfig?.[symbol];
-  if (!tile || !themeAssets.spritesheetUrl) return '';
+function symbolIconHtml(symbol, gameAssets, size = 36) {
+  const symbolAsset = gameAssets?.symbols?.tiles?.[symbol];
+  const tile = symbolAsset?.frames?.[0] || symbolAsset;
+  if (!tile || !gameAssets.symbols.sheetUrl) return '';
   const scale = size / tile.w;
   return `<span class="paytable-icon" style="width: ${size}px; height: ${Math.round(tile.h * scale)}px;">`
-    + `<img src="${themeAssets.spritesheetUrl}" alt="" style="transform: scale(${scale}) translate(${-tile.x}px, ${-tile.y}px);">`
+    + `<img src="${gameAssets.symbols.sheetUrl}" alt="" style="transform: scale(${scale}) translate(${-tile.x}px, ${-tile.y}px);">`
     + `</span>`;
 }
 
@@ -670,7 +650,7 @@ function formatMultiplier(multiplier) {
 // carries its own ladder, so "what does a cluster of 12 pay?" is a row here where it used to be
 // seven separate lookups. Both axes are derived from PAYTABLE rather than hardcoded - a symbol
 // added or a breakpoint moved changes this table without anyone remembering to edit it.
-function buildPaytableContent(themeAssets) {
+function buildPaytableContent(gameAssets) {
   const container = document.getElementById('paytable-grid-content');
   const topTierOf = (symbol) => PAYTABLE[symbol].clusterPayout.at(-1).multiplier;
 
@@ -686,7 +666,7 @@ function buildPaytableContent(themeAssets) {
   const topSize = sizes.at(-1);
 
   const head = `<th class="paytable-size">Cluster</th>` + paying.map(s =>
-    `<th>${symbolIconHtml(s, themeAssets)}<span class="paytable-col-name">${PAYTABLE[s].friendlyName || s}</span></th>`).join('');
+    `<th>${symbolIconHtml(s, gameAssets)}<span class="paytable-col-name">${PAYTABLE[s].friendlyName || s}</span></th>`).join('');
 
   // Biggest first: the top row is what anyone opens a paytable to find.
   const rows = [...sizes].reverse().map(size => {
@@ -703,7 +683,7 @@ function buildPaytableContent(themeAssets) {
   // Anything without a ladder pays by its own rule and would be a column of dashes.
   const notes = Object.keys(PAYTABLE)
     .filter(s => !Array.isArray(PAYTABLE[s].clusterPayout))
-    .map(s => `<div class="paytable-note">${symbolIconHtml(s, themeAssets, 29)}<span><strong style="color: var(--gold);">`
+    .map(s => `<div class="paytable-note">${symbolIconHtml(s, gameAssets, 29)}<span><strong style="color: var(--gold);">`
       + `${PAYTABLE[s].friendlyName || s}</strong> pays anywhere on the grid. ${SCATTER_TRIGGER_COUNT}+ triggers `
       + `${FREE_SPINS_AWARD} Free Spins - winning tiles leave a growing multiplier.</span></div>`)
     .join('');

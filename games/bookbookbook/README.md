@@ -73,8 +73,7 @@ SlotEngine(...)` config — they aren't picked up automatically just by being de
 
 ## Controls
 
-SPIN / STOP, AUTO, TURBO, mute, a theme switcher (swaps the sprite sheet/tile config live via
-`loadThemeAssets`), and a PAYTABLE modal rendering payouts and payline previews straight from
+SPIN / STOP, AUTO, TURBO, mute, and a PAYTABLE modal rendering payouts and payline previews straight from
 `PAYTABLE`/`PAYLINES`. A dedicated free spins panel shows spins remaining/total and the
 current expanding symbol during the bonus.
 

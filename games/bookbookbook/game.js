@@ -171,7 +171,7 @@ const REEL_STRIPS = FREQUENCY_REELS.map((freqTable, i) => generateReel(freqTable
 
 // 3. UI Dom Selectors - will be initialized in load handler
 let canvas, btnSpin, btnAuto, btnTurbo, btnMute, btnPaytable, btnPaytableOk;
-let themeSelect, displayBalance, betValue, betMinus, betPlus, gameTicker, displayTotalBet;
+let displayBalance, betValue, betMinus, betPlus, gameTicker, displayTotalBet;
 let linesValue, linesMinus, linesPlus;
 let btnSim, simModal, btnCloseSim, btnTune, simStats, btnSpinLog;
 let simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay;
@@ -185,34 +185,10 @@ const DEBUG_MODE = true; // Set to false in production
 
 
 let engine = null;
-let currentTheme = 'style_4';  // Default theme
-
-// 4. Async Theme Config Loader
-async function loadThemeAssets(themeName) {
-  try {
-    const response = await fetch(`./assets/${themeName}/${themeName}.tiles.json`);
-    const data = await response.json();
-    
-    // Convert tiles array into symbol mapping config
-    const symbolsConfig = {};
-    data.tiles.forEach(tile => {
-      symbolsConfig[tile.name] = {
-        x: tile.x,
-        y: tile.y,
-        w: tile.w,
-        h: tile.h
-      };
-    });
-
-    const spritesheetUrl = `./assets/${themeName}/${data.sheet}`;
-    
-    return { spritesheetUrl, symbolsConfig };
-  } catch (error) {
-    console.error(`Failed to fetch tile config for theme: ${themeName}`, error);
-    // Return empty fallback
-    return null;
-  }
-}
+const GAME_ASSET_MANIFEST = {
+  symbols: { url: './assets/style_4/style_4.tiles.json', type: 'tilemap' },
+  music: { url: './assets/music/bookbookbook_theme.mp3', type: 'music' },
+};
 
 // 5. Initialize game on window load
 window.addEventListener('load', async () => {
@@ -224,7 +200,6 @@ window.addEventListener('load', async () => {
   btnMute = document.getElementById('btn-mute');
   btnPaytable = document.getElementById('btn-paytable');
   btnPaytableOk = document.getElementById('btn-paytable-ok');
-  themeSelect = document.getElementById('theme-select');
   displayBalance = document.getElementById('display-balance');
   betValue = document.getElementById('bet-value');
   betMinus = document.getElementById('bet-minus');
@@ -327,12 +302,6 @@ window.addEventListener('load', async () => {
     });
   }
 
-  const themeAssets = await loadThemeAssets(currentTheme);
-  if (!themeAssets) {
-    alert("Error loading assets!");
-    return;
-  }
-
   // Create slot engine instance
   const renderer = new SlotRenderer();
   engine = new CoreSlotEngine(canvas, {
@@ -348,8 +317,7 @@ window.addEventListener('load', async () => {
     paylines: PAYLINES,
     wildSymbol: null,
     scatterSymbol: 'book',
-    symbolsConfig: themeAssets.symbolsConfig,
-    spritesheetUrl: themeAssets.spritesheetUrl,
+    assetManifest: GAME_ASSET_MANIFEST,
     betPerLine: BET_PER_LINE,
     linesCount: LINES_COUNT,
     // Read by engine.runSimulation() (-> simulateSpins) so RUN SIMULATION matches this game's
@@ -367,13 +335,12 @@ window.addEventListener('load', async () => {
       outlineWidth: 2,
       outlineGlow: 7,
     },
-    music: { main: "./assets/music/bookbookbook_theme.mp3" },
 
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo)
   });
-  engine.init();
+  await engine.init();
 
   // Load balance and bet sizes
   updateUI();
@@ -430,9 +397,9 @@ function handleStateChange(state) {
     fsSymbolName.textContent = friendlyName;
     
     // Set thumbnail image position
-    const tile = engine.config.symbolsConfig[engine.expandingSymbol];
+    const tile = engine.assets.symbols.tiles[engine.expandingSymbol];
     if (tile) {
-      fsSymbolThumbnail.style.backgroundImage = `url('${engine.config.spritesheetUrl}')`;
+      fsSymbolThumbnail.style.backgroundImage = `url('${engine.assets.symbols.sheetUrl}')`;
       
       // Calculate background offsets (scale down from spritesheet coordinate size)
       const scale = 32 / tile.w;
@@ -485,8 +452,8 @@ function playBookSymbolReel(chosenSymbol, durationMs) {
   bookRevealCanvas.height = cssH * dpr;
   bookRevealCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const { symbolsConfig } = engine.config;
-  const spritesheet = engine.spritesheet;
+  const symbolsConfig = engine.assets.symbols.tiles;
+  const spritesheet = engine.assets.symbols.image;
   const iconSize = cssH;
   const artSize = Math.max(0, Math.min(cssW, iconSize) - 16);
   const finalOffset = (stripSymbols.length - 1) * iconSize;
@@ -689,18 +656,6 @@ function setupUIHandlers() {
       const simModalEl = btn.closest('.sim-modal');
       if (simModalEl) simModalEl.style.display = 'none';
     });
-  });
-
-  // Theme Switcher
-  themeSelect.addEventListener('change', async (e) => {
-    const newTheme = e.target.value;
-    currentTheme = newTheme;
-    
-    // Load theme assets and tell engine to swap
-    const assets = await loadThemeAssets(newTheme);
-    if (assets) {
-      engine.loadAssets(assets.spritesheetUrl, assets.symbolsConfig);
-    }
   });
 
   // Free spins action listeners

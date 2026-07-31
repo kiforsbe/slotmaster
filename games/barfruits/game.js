@@ -189,26 +189,10 @@ const DEBUG_MODE = true; // Set to false in production
 
 let engine = null;
 let pendingFreeSpinsAward = 0;
-const THEME_NAME = 'fruitmachine_1'; // Same shared asset pack as games/fruitmachine
-
-// Async Theme Config Loader
-async function loadThemeAssets(themeName) {
-  try {
-    const response = await fetch(`./assets/${themeName}/${themeName}.tiles.json`);
-    const data = await response.json();
-
-    const symbolsConfig = {};
-    data.tiles.forEach(tile => {
-      symbolsConfig[tile.name] = { x: tile.x, y: tile.y, w: tile.w, h: tile.h };
-    });
-
-    const spritesheetUrl = `./assets/${themeName}/${data.sheet}`;
-    return { spritesheetUrl, symbolsConfig };
-  } catch (error) {
-    console.error(`Failed to fetch tile config for theme: ${themeName}`, error);
-    return null;
-  }
-}
+const GAME_ASSET_MANIFEST = {
+  symbols: { url: './assets/fruitmachine_1/fruitmachine_1.tiles.json', type: 'tilemap' },
+  music: { url: './assets/music/barfruits_theme.mp3', type: 'music' },
+};
 
 async function initGame() {
   // Initialize all DOM references
@@ -310,12 +294,6 @@ async function initGame() {
     });
   }
 
-  const themeAssets = await loadThemeAssets(THEME_NAME);
-  if (!themeAssets) {
-    alert('Error loading assets!');
-    return;
-  }
-
   // Create slot engine instance
   const renderer = new SlotRenderer();
   engine = new CoreSlotEngine(canvas, {
@@ -332,10 +310,8 @@ async function initGame() {
     paylines: PAYLINES,
     wildSymbol: null,
     scatterSymbol: 'star',
-    music: { main: "./assets/music/barfruits_theme.mp3" },
+    assetManifest: GAME_ASSET_MANIFEST,
     viewportBackground: { type: "image", image: "./assets/backgrounds/barfruits_background_1.png" },
-    symbolsConfig: themeAssets.symbolsConfig,
-    spritesheetUrl: themeAssets.spritesheetUrl,
     betPerLine: BET_PER_LINE,
     linesCount: LINES_COUNT,
     // Read by engine.runSimulation() (-> simulateSpins) so the RUN SIMULATION dev tool
@@ -348,7 +324,7 @@ async function initGame() {
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo),
   });
-  engine.init();
+  await engine.init();
 
   updateUI();
   setupUIHandlers();

@@ -18,7 +18,7 @@ class SlotAudio {
     this.activeOscillators = [];
 
     // Background music (per-game theme tracks, configured via CoreSlotEngine's `music` config).
-    this.musicTracks = {}; // state name -> URL
+    this.musicTracks = {}; // state name -> URL or preloaded HTMLAudioElement
     this.musicState = 'main';
     this.musicEl = null; // HTMLAudioElement currently playing, or null
     this.musicSource = null; // its MediaElementAudioSourceNode
@@ -115,15 +115,22 @@ class SlotAudio {
 
   resume() {
     this.init();
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
-    }
-    // Browsers block <audio> playback until a user gesture too; every play* method already
-    // routes through resume() on first use, so this is what actually starts the configured
-    // music track the first time the player does anything, with no extra wiring per game.
-    if (this.musicEl && this.musicEl.paused && !this.isMuted) {
-      this.musicEl.play().catch(() => {});
-    }
+    const contextReady = this.ctx?.state === 'suspended' ? this.ctx.resume() : Promise.resolve();
+    // Browsers block <audio> playback until a user gesture. Wait for the Web Audio context to
+    // finish resuming before retrying the media element; calling both synchronously can leave a
+    // browser with a suspended source and a rejected play() promise.
+    const tryPlayMusic = () => {
+      if (this.musicEl && this.musicEl.paused && !this.isMuted) {
+        this.musicEl.play().catch(error => console.warn(
+          `SlotAudio: music playback failed (${this.musicEl.src || 'no source'})`, error,
+        ));
+      }
+    };
+    // Keep one attempt synchronous while still inside the click/tap handler (the browser's
+    // transient user activation may not survive a promise continuation), then retry once the
+    // context is fully resumed.
+    tryPlayMusic();
+    Promise.resolve(contextReady).then(tryPlayMusic);
   }
 
   setMute(mute) {
@@ -209,21 +216,24 @@ class SlotAudio {
   // Hard-cuts to a new track: no crossfade: the old element stops and the new one starts
   // immediately. Simpler than a crossfade and fine since games don't yet define more than one
   // distinct track each.
-  _playMusicTrack(url) {
+  _playMusicTrack(track) {
     this.init();
     if (!this.ctx) return;
 
     this._stopMusic();
-    this.currentMusicUrl = url;
+    this.currentMusicUrl = track;
 
-    const el = new Audio(url);
+    const el = typeof track === 'string' ? new Audio(track) : track;
+    if (!el) return;
     el.loop = true;
+    el.preload = 'auto';
     this.musicEl = el;
     this.musicSource = this.ctx.createMediaElementSource(el);
     this.musicSource.connect(this.musicGain);
 
     if (!this.isMuted) {
-      // May be rejected by autoplay policy before the first user gesture; resume() retries.
+      // May be rejected by autoplay policy before the first user gesture; resume() retries after
+      // the first user gesture and after the AudioContext has resumed.
       el.play().catch(() => {});
     }
   }

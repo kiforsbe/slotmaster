@@ -307,14 +307,14 @@ canvas {
 }
 
 /* Theme Switcher */
-.theme-selector-container {
+.game-controls-container {
   display: flex;
   flex-direction: column;
   gap: 4px;
   align-items: flex-end;
 }
 
-.theme-select {
+.game-controls-container select {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(212, 175, 55, 0.3);
   color: var(--text);
@@ -326,7 +326,7 @@ canvas {
   font-size: 13px;
 }
 
-.theme-select:hover {
+.game-controls-container select:hover {
   border-color: var(--gold);
   background: rgba(212, 175, 55, 0.1);
 }

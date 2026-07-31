@@ -211,23 +211,11 @@ const DEBUG_MODE = true;
 
 let engine = null;
 let pendingFreeSpinsAward = 0;
-const THEME_NAME = 'mayan';
-
-async function loadThemeAssets(themeName) {
-  try {
-    const response = await fetch(`./assets/${themeName}/${themeName}.tiles.json`);
-    const data = await response.json();
-    const symbolsConfig = {};
-    data.tiles.forEach(tile => {
-      symbolsConfig[tile.name] = { x: tile.x, y: tile.y, w: tile.w, h: tile.h };
-    });
-    const spritesheetUrl = `./assets/${themeName}/${data.sheet}`;
-    return { spritesheetUrl, symbolsConfig };
-  } catch (error) {
-    console.error(`Failed to fetch tile config for theme: ${themeName}`, error);
-    return null;
-  }
-}
+const GAME_ASSET_MANIFEST = {
+  symbols: { url: './assets/mayan/mayan.tiles.json', type: 'tilemap' },
+  stoneExplode: { url: './assets/sprites/stone_explode.json', type: 'sprite' },
+  music: { url: './assets/music/mayan_tumble_theme.mp3', type: 'music' },
+};
 
 async function initGame() {
   canvas = document.getElementById('game-canvas');
@@ -322,12 +310,6 @@ async function initGame() {
     });
   }
 
-  const themeAssets = await loadThemeAssets(THEME_NAME);
-  if (!themeAssets) {
-    alert('Error loading assets!');
-    return;
-  }
-
   const renderer = new SlotRenderer();
   const particleSystem = new ParticleSystem();
   engine = new CoreSlotEngine(canvas, {
@@ -361,7 +343,6 @@ async function initGame() {
       outlineGlowIntensity: 1,
       frame: '#0b120d',
       gridLines: null,
-      music: { main: "./assets/music/mayan_tumble_theme.mp3" },
       background: { type: "color", color: "#0303039a" },
       loadingBackground: '#0a1410',
       loadingColor: '#dfb239',
@@ -374,14 +355,13 @@ async function initGame() {
     winEvaluator,
     scatterSymbol: 'gold',
     freeSpinsMode: createMultiplierTilesMode({ badgeStyle: 'background', renderOrder: 'behind' }),
-    symbolsConfig: themeAssets.symbolsConfig,
-    spritesheetUrl: themeAssets.spritesheetUrl,
+    assetManifest: GAME_ASSET_MANIFEST,
     betAmount: BET_AMOUNT,
     onStateChange: (state) => handleStateChange(state),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
     onWin: (winInfo) => handleWin(winInfo),
   });
-  engine.init();
+  await engine.init();
 
   updateUI();
   setupUIHandlers();
