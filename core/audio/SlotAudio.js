@@ -14,6 +14,7 @@ class SlotAudio {
     this.masterBus = null; // all synthesized SFX connect here
     this.compressor = null; // masterBus + musicGain both feed this before destination, if enabled
     this.isMuted = false;
+    this.musicMuted = false;
     this.globalVolume = 0.3; // Default master volume
     this.activeOscillators = [];
 
@@ -120,7 +121,7 @@ class SlotAudio {
     // finish resuming before retrying the media element; calling both synchronously can leave a
     // browser with a suspended source and a rejected play() promise.
     const tryPlayMusic = () => {
-      if (this.musicEl && this.musicEl.paused && !this.isMuted) {
+      if (this.musicEl && this.musicEl.paused && !this.isMuted && !this.musicMuted) {
         this.musicEl.play().catch(error => console.warn(
           `SlotAudio: music playback failed (${this.musicEl.src || 'no source'})`, error,
         ));
@@ -147,13 +148,24 @@ class SlotAudio {
       this.activeOscillators = [];
       this.musicEl?.pause();
     } else {
-      this.musicEl?.play().catch(() => {});
+      if (!this.musicMuted) this.musicEl?.play().catch(() => {});
     }
   }
 
   toggleMute() {
     this.setMute(!this.isMuted);
     return this.isMuted;
+  }
+
+  setMusicMute(mute) {
+    this.musicMuted = mute;
+    if (mute) this.musicEl?.pause();
+    else if (!this.isMuted) this.musicEl?.play().catch(() => {});
+  }
+
+  toggleMusicMute() {
+    this.setMusicMute(!this.musicMuted);
+    return this.musicMuted;
   }
 
   // Create standard helper to configure a gain node and connect to output
@@ -231,7 +243,7 @@ class SlotAudio {
     this.musicSource = this.ctx.createMediaElementSource(el);
     this.musicSource.connect(this.musicGain);
 
-    if (!this.isMuted) {
+    if (!this.isMuted && !this.musicMuted) {
       // May be rejected by autoplay policy before the first user gesture; resume() retries after
       // the first user gesture and after the AudioContext has resumed.
       el.play().catch(() => {});

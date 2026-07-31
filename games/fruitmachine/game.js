@@ -8,6 +8,7 @@ import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWildLineWins } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
+import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
 // frequency tuner - a single source of truth so all three actually model the same reels
@@ -246,6 +247,8 @@ async function initGame() {
   await engine.init();
 
   updateUI();
+  bindCommonSlotControls({ getEngine: () => engine, onUpdate: updateUI, betStep: BET_PER_LINE_STEP, betMax: BET_PER_LINE_MAX, linesMax: LINES_COUNT });
+  observeSlotViewport();
   setupUIHandlers();
   buildPaytableContent();
 }

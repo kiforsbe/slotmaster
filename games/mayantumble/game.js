@@ -7,6 +7,7 @@ import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
 import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWins } from '../../core/math/SlotMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
+import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
@@ -377,6 +378,8 @@ async function initGame() {
   await engine.init();
 
   updateUI();
+  bindCommonSlotControls({ getEngine: () => engine, onUpdate: updateUI, betStep: BET_STEP, betMax: BET_MAX, linesMax: PAYLINES.length });
+  observeSlotViewport();
   setupUIHandlers();
   buildPaytableContent();
 }

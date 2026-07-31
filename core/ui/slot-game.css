@@ -1,0 +1,74 @@
+/* Shared responsive cabinet. Theme styles define the color variables and may override any
+   visual detail; these rules own sizing, layout and input ergonomics. */
+:root { --slot-gap: clamp(8px, 1.5vw, 16px); }
+
+html, body { width: 100%; min-width: 280px; min-height: 100%; }
+body { height: 100dvh; min-height: 100dvh; overflow: hidden; }
+.cabinet-container {
+  width: min(100%, 1100px);
+  height: min(100dvh, 860px);
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  border-width: clamp(1px, .35vw, 4px);
+}
+.cabinet-container:fullscreen { width: 100vw; height: 100dvh; max-width: none; max-height: none; border-radius: 0; }
+header { flex: 0 0 auto; min-height: 48px; padding: clamp(7px, 1.2vw, 14px) clamp(10px, 2.5vw, 24px); gap: var(--slot-gap); }
+.title-logo { font-size: clamp(15px, 2.5vw, 28px); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top-controls { gap: clamp(5px, 1vw, 12px); }
+.btn-icon { min-height: 38px; padding: 7px clamp(8px, 1.4vw, 14px); font-size: clamp(11px, 1.4vw, 14px); }
+.game-viewport { flex: 1 1 auto; min-height: 0; }
+#game-canvas { width: 100%; height: 100%; touch-action: none; }
+.dashboard { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: var(--slot-gap); padding: clamp(8px, 1.6vw, 16px) clamp(10px, 2.5vw, 24px); }
+.dashboard-panel, .auto-turbo-container, .spin-section { min-width: 0; }
+.dashboard-left { min-width: 0; grid-column: 1; display: flex; align-items: flex-start; gap: var(--slot-gap); }
+.dashboard-side { min-width: 0; display: flex; align-items: flex-start; gap: var(--slot-gap); }
+.dashboard-balance { flex: 0 0 auto; }
+.dashboard-side-left { flex: 1 1 auto; flex-wrap: nowrap; }
+.dashboard-left .dashboard-panel { align-items: flex-start; }
+.dashboard-left .bet-container { align-items: flex-start; min-width: max-content; }
+.dashboard-left .dashboard-label { display: block; min-height: 1.2em; line-height: 1.2; white-space: nowrap; }
+.dashboard-left .dashboard-value,
+.dashboard-left .bet-adjuster { min-height: 36px; display: flex; align-items: center; }
+.dashboard > .spin-section { grid-column: 2; position: static; transform: none; justify-self: center; }
+.dashboard > .auto-turbo-container, .dashboard > .game-controls-container { grid-column: 3; justify-self: end; }
+.dashboard-value, .bet-display-value { font-size: clamp(15px, 2vw, 20px); }
+.btn-spin { width: clamp(58px, 8vw, 88px); height: clamp(58px, 8vw, 88px); }
+.auto-turbo-container { justify-content: center; flex-wrap: nowrap; white-space: nowrap; }
+.dashboard > .game-controls-container > div { flex-wrap: nowrap; white-space: nowrap; }
+.developer-tools { position: fixed !important; top: 8px; right: 8px; z-index: 150; align-items: center; justify-content: flex-end; gap: 4px; padding: 5px 6px 5px 8px; border: 1px dashed rgba(255, 170, 80, .7); border-radius: 7px; background: rgba(22, 12, 8, .9); box-shadow: 0 4px 16px rgba(0, 0, 0, .45); }
+.developer-tools::before { content: 'DEV'; margin-right: 2px; color: #ffb36b; font: 700 9px/1 'Outfit', sans-serif; letter-spacing: .12em; }
+.developer-tools .btn-icon { width: 30px; min-width: 30px; height: 28px; min-height: 28px; padding: 0; justify-content: center; border-color: rgba(255, 170, 80, .55); color: #ffd2a6; font-size: 15px; line-height: 1; }
+.developer-tools .btn-icon:hover { background: rgba(255, 170, 80, .2); border-color: #ffb36b; color: #fff; }
+.modal-content, .sim-modal { max-width: min(600px, calc(100% - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: clamp(16px, 4vw, 30px); }
+.paytable-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); max-height: min(50dvh, 400px); }
+
+@media (max-width: 620px) {
+  body { justify-content: flex-start; }
+  .cabinet-container { width: 100%; height: 100dvh; border-radius: 0; }
+  header { align-items: flex-start; }
+  .top-controls { justify-content: flex-end; }
+  .top-controls .btn-icon { font-size: 0; min-width: 38px; padding-inline: 8px; }
+  .top-controls .btn-icon::first-letter { font-size: 16px; }
+  .developer-tools .btn-icon { font-size: 16px; min-width: 32px; padding-inline: 0; }
+  .dashboard { grid-template-columns: max-content max-content max-content; justify-content: start; overflow-x: auto; scrollbar-width: thin; }
+  .dashboard-left { grid-column: 1; grid-row: 1; justify-content: flex-start; flex-wrap: nowrap; }
+  .dashboard > .spin-section { grid-column: 2; grid-row: 1; justify-self: center; }
+  .dashboard > .auto-turbo-container, .dashboard > .game-controls-container { grid-column: 3; grid-row: 1; justify-self: end; }
+  .dashboard-side-left { flex-wrap: nowrap; }
+  .spin-section .btn-spin { width: 68px; height: 68px; }
+  .game-ticker { max-width: 55%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .free-spins-panel { max-width: 85%; padding: 5px 10px; }
+  .fs-counter { font-size: clamp(12px, 3vw, 18px); }
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  header { min-height: 38px; padding-block: 4px; }
+  .dashboard { padding-block: 5px; }
+  .btn-spin { width: 52px; height: 52px; }
+  .dashboard-label { font-size: 9px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

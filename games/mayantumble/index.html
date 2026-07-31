@@ -9,6 +9,7 @@
   <style type="text/css">
     @import url('game.css');
   </style>
+  <link rel="stylesheet" href="../../core/ui/slot-game.css">
 </head>
 <body>
 
@@ -38,22 +39,27 @@
     </div>
 
     <div class="dashboard">
-      <div class="dashboard-panel">
+      <div class="dashboard-left">
+      <div class="dashboard-panel dashboard-balance">
         <div class="bet-container">
           <span class="dashboard-label">Balance</span>
           <span id="display-balance" class="dashboard-value">$1,000.00</span>
         </div>
       </div>
 
+      <div class="dashboard-side dashboard-side-left">
       <div class="dashboard-panel">
         <div class="bet-container">
-          <span class="dashboard-label">Total Bet</span>
+          <span class="dashboard-label">Bet</span>
           <div class="bet-adjuster">
             <button id="bet-minus" class="btn-adjust">-</button>
             <span id="bet-value" class="bet-display-value">1.00</span>
             <button id="bet-plus" class="btn-adjust">+</button>
           </div>
         </div>
+      </div>
+
+      </div>
       </div>
 
       <div class="spin-section">
@@ -66,10 +72,10 @@
       </div>
     </div>
 
-    <div class="top-controls" style="position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; gap: 10px;">
-      <button id="btn-tune" class="btn-icon btn-sim-btn">TUNE FREQUENCIES</button>
-      <button id="btn-sim" class="btn-icon btn-sim-btn">RUN SIMULATION</button>
-      <button id="btn-spinlog" class="btn-icon btn-sim-btn">SPIN LOG</button>
+    <div class="top-controls developer-tools" aria-label="Developer tools">
+      <button id="btn-tune" class="btn-icon btn-sim-btn" title="Tune frequencies" aria-label="Tune frequencies">🎛️</button>
+      <button id="btn-sim" class="btn-icon btn-sim-btn" title="Run simulation" aria-label="Run simulation">📊</button>
+      <button id="btn-spinlog" class="btn-icon btn-sim-btn" title="Open spin log" aria-label="Open spin log">📜</button>
     </div>
 
   </div>
