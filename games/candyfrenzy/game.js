@@ -481,7 +481,7 @@ async function initGame() {
     clusterVisualizer: {
       color: '#fff0a6', alpha: 1, lineWidth: 4,
       lineCap: 'round', lineJoin: 'round', lineDash: [], cornerRadius: 10,
-      roundConcaveCorners: false,
+      roundConcaveCorners: true,
       glowColor: '#ff54c7', glow: 18,
       pulse: { minAlpha: 0.82, maxAlpha: 1, periodMs: 690 },
     },

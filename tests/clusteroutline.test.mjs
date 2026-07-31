@@ -119,3 +119,14 @@ test('fractional cell dimensions never split a contour at an adjacent grid corne
     });
   }
 });
+
+test('concave corners are rounded only when requested', () => {
+  const largeCell = { reelsX: 0, reelsY: 0, symbolWidth: 100, symbolHeight: 100 };
+  const paths = buildClusterOutlinePaths(SHAPES.lTriomino, largeCell);
+  const curveCount = (options) => buildRoundedClusterOutlineCommands(paths, options)
+    .flat()
+    .filter(command => command.type === 'curve').length;
+
+  assert.equal(curveCount({ cornerRadius: 10 }), 5, 'the five outward L-shape turns round by default');
+  assert.equal(curveCount({ cornerRadius: 10, roundConcaveCorners: true }), 6, 'enabling the option rounds the L-shape’s inward turn too');
+});
