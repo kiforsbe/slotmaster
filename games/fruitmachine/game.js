@@ -288,7 +288,8 @@ function handleWin(winInfo) {
 
 function setupUIHandlers() {
   btnSpin.addEventListener('click', () => {
-    engine.requestSpin();
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') engine.stopSpin();
+    else engine.requestSpin();
   });
 
   betMinus.addEventListener('click', () => {

@@ -571,7 +571,8 @@ function handleWin(winInfo) {
 function setupUIHandlers() {
   // Spin button
   btnSpin.addEventListener('click', () => {
-    engine.requestSpin();
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') engine.stopSpin();
+    else engine.requestSpin();
   });
 
   // Bet adjustments

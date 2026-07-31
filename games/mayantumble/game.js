@@ -397,7 +397,11 @@ function updateUI() {
 function handleStateChange(state) {
   updateUI();
 
-  if (state === 'dropping_in' || state === 'falling') {
+  if (state === 'stopping') {
+    btnSpin.textContent = 'STOP';
+    btnSpin.className = 'btn-spin spinning';
+    gameTicker.textContent = 'STOPPING...';
+  } else if (state === 'dropping_in' || state === 'falling') {
     btnSpin.textContent = 'STOP';
     btnSpin.className = 'btn-spin spinning';
     gameTicker.textContent = state === 'dropping_in' ? 'TUMBLING IN...' : 'CASCADING...';
@@ -460,7 +464,8 @@ function closeFreeSpinsSummary() {
 
 function setupUIHandlers() {
   btnSpin.addEventListener('click', () => {
-    engine.requestSpin();
+    if (engine.state !== 'idle' && engine.state !== 'showing_wins') engine.stopSpin();
+    else engine.requestSpin();
   });
 
   betMinus.addEventListener('click', () => {

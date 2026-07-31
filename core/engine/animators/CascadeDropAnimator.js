@@ -119,7 +119,7 @@ export class CascadeDropAnimator {
     const reelsCount = engine.config.reelsCount;
     const rowsCount = engine.config.rowsCount;
     const turbo = engine.turboMode;
-    const speed = turbo ? 0.19 : 0.095;
+    const speed = (turbo ? 0.19 : 0.095) * (engine._stopRequested ? 4 : 1);
     const rampDuration = turbo ? 120 : 240;
     const stepStartTime = Date.now();
 
@@ -329,7 +329,10 @@ export class CascadeDropAnimator {
       }
 
       const waitForClear = () => {
-        if (Date.now() - this._clearStartTime < clearDuration) {
+        const effectiveClearDuration = engine._stopRequested
+          ? Math.min(clearDuration, turbo ? 80 : 180)
+          : clearDuration;
+        if (Date.now() - this._clearStartTime < effectiveClearDuration) {
           requestAnimationFrame(waitForClear);
           return;
         }

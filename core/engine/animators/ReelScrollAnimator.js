@@ -83,6 +83,14 @@ export class ReelScrollAnimator {
         if (reel.state === 'spinning') {
           allSettled = false;
 
+          // STOP uses the same landing and bounce stages as a normal spin. Move each reel's
+          // scheduled landing to now and shorten only the landing duration, preserving the
+          // visible deceleration rather than snapping directly to the result.
+          if (engine._stopRequested) {
+            reel.landStartTime = now;
+            reel.landDuration = turbo ? 80 : 180;
+          }
+
           const maxSpeed = turbo ? SPIN_SPEED_TURBO_MAX : SPIN_SPEED_NORMAL_MAX;
           if (reel.speed < maxSpeed) reel.speed += 3;
           reel.offsetY += reel.speed;

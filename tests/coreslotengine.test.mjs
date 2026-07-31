@@ -57,6 +57,30 @@ test('spin() moves idle -> spinning -> idle when the mechanic reports no payout'
   assert.equal(engine.state, 'idle');
 });
 
+test('stopSpin requests an accelerated stop and the next spin starts normally', async () => {
+  const observedStopValues = [];
+  let entranceCount = 0;
+  const engine = new CoreSlotEngine(stubCanvas(), {
+    mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+    animator: {
+      playEntrance: (activeEngine, step, onDone) => {
+        entranceCount++;
+        observedStopValues.push(activeEngine._stopRequested);
+        if (entranceCount === 1) activeEngine.stopSpin();
+        onDone();
+      },
+      playTransition: (activeEngine, prevStep, nextStep, onDone) => onDone(),
+    },
+    renderer: { draw: () => {} },
+  });
+
+  await engine.spin(1);
+  await engine.spin(2);
+
+  assert.deepEqual(observedStopValues, [false, false]);
+  assert.equal(engine.state, 'idle');
+});
+
 test('spin() plays only the first step\'s entrance, then transitions through every later cascade step', async () => {
   const entranceGrids = [];
   const transitionPairs = [];

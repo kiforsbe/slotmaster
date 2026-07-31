@@ -257,6 +257,7 @@ export class CoreSlotEngine {
   }
 
   async _spin(seed) {
+    this._stopRequested = false;
     this.updateBet();
     if (!this.inFreeSpins) {
       // SlotEngine.js showed a blocking alert() here; dropped since it isn't safe for
@@ -430,9 +431,12 @@ export class CoreSlotEngine {
   }
 
   stopSpin() {
-    // Turbo/skip hook - a real animator's playEntrance/playTransition should resolve immediately
-    // when this is set; the skeleton just exposes the flag components read.
-    this._skipAnimation = true;
+    // Ask the active animator to enter its normal landing/deceleration path at accelerated
+    // timing. The resolved outcome is never changed; only the presentation is shortened.
+    if (this.state === 'spinning' || this.state === 'dropping_in' || this.state === 'falling' || this.state === 'clearing') {
+      this._stopRequested = true;
+      this._setState('stopping');
+    }
   }
 
   // Debug/cheat helper - forces the next spin's grid to contain a given outcome. Builds the
