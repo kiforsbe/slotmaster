@@ -8,7 +8,7 @@ import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel, checkWildLineWins } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
-import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
@@ -242,7 +242,9 @@ async function initGame() {
     linesCount: LINES_COUNT,
     viewportBackground: { type: "image", image: "./assets/backgrounds/fruitmachine_background_1.png" },
 
-    onStateChange: (state) => handleStateChange(state),
+    onStateChange: (state) => updateSlotStateUI({ engine, state, refs: { spin: btnSpin, ticker: gameTicker }, onUpdate: updateUI, messages: {
+      spinning: 'SPINNING...', stopping: 'STOPPING...', showing_wins: game => `WIN: $${game.lastWin.toFixed(2)}!`, idle: 'IDLE',
+    } }),
   });
   await engine.init();
 
@@ -259,30 +261,6 @@ function updateUI() {
   betValue.textContent = engine.betPerLine.toFixed(2);
   linesValue.textContent = `${engine.linesCount} / ${LINES_COUNT}`;
   displayTotalBet.textContent = `$${engine.totalBet.toFixed(2)}`;
-}
-
-function handleStateChange(state) {
-  updateUI();
-
-  if (state === 'spinning') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'SPINNING...';
-  } else if (state === 'stopping') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'STOPPING...';
-  } else {
-    btnSpin.textContent = 'SPIN';
-    btnSpin.className = 'btn-spin';
-
-    if (state === 'showing_wins') {
-      const winVal = engine.lastWin;
-      gameTicker.textContent = `WIN: $${winVal.toFixed(2)}!`;
-    } else {
-      gameTicker.textContent = 'IDLE';
-    }
-  }
 }
 
 function setupUIHandlers() {

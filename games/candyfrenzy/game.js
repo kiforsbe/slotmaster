@@ -8,7 +8,7 @@ import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel } from '../../core/math/SlotMath.js';
 import { checkClusterWins } from '../../core/math/ClusterMath.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
-import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { renderClusterPaytable } from '../../core/ui/PaytableRenderer.js';
 import { createMultiplierTilesMode } from '../../core/engine/FreeSpinsModes.js';
 import { CascadeSpinMechanic } from '../../core/engine/mechanics/CascadeSpinMechanic.js';
@@ -474,7 +474,11 @@ async function initGame() {
     assetManifest: GAME_ASSET_MANIFEST,
     viewportBackground: { type: "image", image: "./assets/backgrounds/candyfrenzy_background_2.png" },
     betAmount: BET_AMOUNT,
-    onStateChange: (state) => handleStateChange(state),
+    onStateChange: (state) => updateSlotStateUI({ engine, state, refs: { spin: btnSpin, ticker: gameTicker }, onUpdate: updateUI, messages: {
+      stopping: 'STOPPING...', dropping_in: 'DROPPING IN...', falling: 'CASCADING...', clearing: 'SWEET WIN!',
+      showing_wins: game => `WIN: $${game.lastWin.toFixed(2)}!`, free_spins_intro: 'BONUS TRIGGER!',
+      game_over: 'FREE SPINS COMPLETE!', idle: 'IDLE',
+    }, onGameOver: handleFreeSpinsComplete }),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
   });
   await engine.init();
@@ -496,36 +500,6 @@ function updateUI() {
     fsCounter.textContent = `FREE SPINS: ${engine.freeSpinsRemaining} / ${engine.freeSpinsTotal}`;
   } else {
     fsPanel.classList.remove('active');
-  }
-}
-
-function handleStateChange(state) {
-  updateUI();
-
-  if (state === 'stopping') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'STOPPING...';
-  } else if (state === 'dropping_in' || state === 'falling') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = state === 'dropping_in' ? 'DROPPING IN...' : 'CASCADING...';
-  } else if (state === 'clearing') {
-    gameTicker.textContent = 'SWEET WIN!';
-  } else {
-    btnSpin.textContent = 'SPIN';
-    btnSpin.className = 'btn-spin';
-
-    if (state === 'showing_wins') {
-      gameTicker.textContent = `WIN: $${engine.lastWin.toFixed(2)}!`;
-    } else if (state === 'free_spins_intro') {
-      gameTicker.textContent = 'BONUS TRIGGER!';
-    } else if (state === 'game_over') {
-      gameTicker.textContent = 'FREE SPINS COMPLETE!';
-      handleFreeSpinsComplete();
-    } else {
-      gameTicker.textContent = 'IDLE';
-    }
   }
 }
 

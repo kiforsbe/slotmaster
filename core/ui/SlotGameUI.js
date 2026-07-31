@@ -174,3 +174,23 @@ export function observeSlotViewport() {
   new ResizeObserver(updateScale).observe(cabinet);
   updateScale();
 }
+
+// Shared state-to-HUD adapter. Games provide only their theme-specific status copy and any
+// bonus-round completion callback; spin button behavior and common state transitions live here.
+export function updateSlotStateUI({ engine, state, refs, onUpdate, messages = {}, onGameOver }) {
+  if (!engine || !refs) return;
+  onUpdate?.();
+
+  const spinning = state === 'spinning' || state === 'stopping' || state === 'dropping_in' || state === 'falling';
+  if (spinning) {
+    refs.spin.textContent = 'STOP';
+    refs.spin.className = 'btn-spin spinning';
+  } else {
+    refs.spin.textContent = 'SPIN';
+    refs.spin.className = 'btn-spin';
+  }
+
+  const message = typeof messages[state] === 'function' ? messages[state](engine) : messages[state];
+  if (message) refs.ticker.textContent = message;
+  if (state === 'game_over') onGameOver?.();
+}

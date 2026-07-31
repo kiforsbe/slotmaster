@@ -8,7 +8,7 @@ import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
-import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
@@ -338,7 +338,13 @@ window.addEventListener('load', async () => {
       outlineGlow: 7,
     },
 
-    onStateChange: (state) => handleStateChange(state),
+    onStateChange: (state) => {
+      updateSlotStateUI({ engine, state, refs: { spin: btnSpin, ticker: gameTicker }, onUpdate: updateUI, messages: {
+        spinning: 'SPINNING...', stopping: 'STOPPING...', showing_wins: game => `WIN: $${game.lastWin.toFixed(0)}!`,
+        expanding: 'EXPANDING SYMBOLS!', free_spins_intro: 'SCATTER TRIGGER!', game_over: 'FREE SPINS COMPLETE!', idle: 'IDLE',
+      }, onGameOver: handleFreeSpinsComplete });
+      updateBookFreeSpinsUI();
+    },
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
   });
   await engine.init();
@@ -360,38 +366,9 @@ function updateUI() {
   displayTotalBet.textContent = `$${engine.totalBet.toFixed(2)}`;
 }
 
-// 6. Handle state changes from the engine
-function handleStateChange(state) {
-  updateUI();
-
-  // Update central spin button
-  if (state === 'spinning') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'SPINNING...';
-  } else if (state === 'stopping') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'STOPPING...';
-  } else {
-    btnSpin.textContent = 'SPIN';
-    btnSpin.className = 'btn-spin';
-    
-    if (state === 'showing_wins') {
-      const winVal = engine.lastWin;
-      gameTicker.textContent = `WIN: $${winVal.toFixed(0)}!`;
-    } else if (state === 'expanding') {
-      gameTicker.textContent = `EXPANDING SYMBOLS!`;
-    } else if (state === 'free_spins_intro') {
-      gameTicker.textContent = `SCATTER TRIGGER!`;
-    } else if (state === 'game_over') {
-      gameTicker.textContent = `FREE SPINS COMPLETE!`;
-      handleFreeSpinsComplete();
-    } else {
-      gameTicker.textContent = 'IDLE';
-    }
-  }
-
+// The expanding-symbol badge is unique to this game; the common state/ticker handling lives in
+// SlotGameUI.updateSlotStateUI above.
+function updateBookFreeSpinsUI() {
   // Update Free Spins Indicators
   if (engine.inFreeSpins) {
     fsPanel.classList.add('active');
@@ -400,7 +377,8 @@ function handleStateChange(state) {
     fsSymbolName.textContent = friendlyName;
     
     // Set thumbnail image position
-    const tile = engine.assets.symbols.tiles[engine.expandingSymbol];
+    const animation = engine.assets.symbols.tiles[engine.expandingSymbol];
+    const tile = animation?.frameAt?.() || animation?.frames?.[0]?.tile || animation?.frames?.[0] || animation;
     if (tile) {
       fsSymbolThumbnail.style.backgroundImage = `url('${engine.assets.symbols.sheetUrl}')`;
       

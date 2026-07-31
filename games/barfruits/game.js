@@ -8,7 +8,7 @@ import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel } from '../../core/math/SlotMath.js';
 import { runSimulationAndRender, openTuneFrequenciesPanel } from '../../core/SimulationPanel.js';
 import { openSpinLogPanel } from '../../core/SpinLogPanel.js';
-import { bindCommonSlotControls, observeSlotViewport } from '../../core/ui/SlotGameUI.js';
+import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 
 // Grid/reel parameters shared by the live game, the RUN SIMULATION button, and the
@@ -322,7 +322,10 @@ async function initGame() {
     freeSpinsAwardTable: FREE_SPINS_AWARD,
     retriggerFreeSpinsAwardTable: FREE_SPINS_AWARD,
 
-    onStateChange: (state) => handleStateChange(state),
+    onStateChange: (state) => updateSlotStateUI({ engine, state, refs: { spin: btnSpin, ticker: gameTicker }, onUpdate: updateUI, messages: {
+      spinning: 'SPINNING...', stopping: 'STOPPING...', showing_wins: game => `WIN: $${game.lastWin.toFixed(2)}!`,
+      free_spins_intro: 'SCATTER TRIGGER!', game_over: 'FREE SPINS COMPLETE!', idle: 'IDLE',
+    }, onGameOver: handleFreeSpinsComplete }),
     onScatterTrigger: (scatterCount, isInFreeSpins) => handleScatterTrigger(scatterCount, isInFreeSpins),
   });
   await engine.init();
@@ -346,35 +349,6 @@ function updateUI() {
     fsCounter.textContent = `FREE SPINS: ${engine.freeSpinsRemaining} / ${engine.freeSpinsTotal}`;
   } else {
     fsPanel.classList.remove('active');
-  }
-}
-
-function handleStateChange(state) {
-  updateUI();
-
-  if (state === 'spinning') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'SPINNING...';
-  } else if (state === 'stopping') {
-    btnSpin.textContent = 'STOP';
-    btnSpin.className = 'btn-spin spinning';
-    gameTicker.textContent = 'STOPPING...';
-  } else {
-    btnSpin.textContent = 'SPIN';
-    btnSpin.className = 'btn-spin';
-
-    if (state === 'showing_wins') {
-      const winVal = engine.lastWin;
-      gameTicker.textContent = `WIN: $${winVal.toFixed(2)}!`;
-    } else if (state === 'free_spins_intro') {
-      gameTicker.textContent = 'SCATTER TRIGGER!';
-    } else if (state === 'game_over') {
-      gameTicker.textContent = 'FREE SPINS COMPLETE!';
-      handleFreeSpinsComplete();
-    } else {
-      gameTicker.textContent = 'IDLE';
-    }
   }
 }
 

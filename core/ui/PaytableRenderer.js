@@ -17,6 +17,11 @@ function symbolMarkup(symbol, meta, renderSymbol) {
   return `${icon}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>`;
 }
 
+function clusterHeaderMarkup(symbol, meta, renderSymbol) {
+  const icon = renderSymbol?.(symbol, meta) || '';
+  return `<div class="slot-paytable-header"><span class="slot-paytable-header-icon">${icon}</span><span class="slot-paytable-header-name">${meta.friendlyName || symbol}</span></div>`;
+}
+
 function makeLinePreview(container, paylines, rows = 3) {
   if (!container || !paylines?.length) return;
   container.innerHTML = '';
@@ -161,7 +166,7 @@ export function renderClusterPaytable({
   const largest = sizes.at(-1);
   const table = document.createElement('table');
   table.className = 'slot-paytable-table slot-cluster-paytable';
-  const head = `<thead><tr><th>Cluster</th>${paying.map(([symbol, meta]) => `<th>${symbolMarkup(symbol, meta, renderSymbol)}</th>`).join('')}</tr></thead>`;
+  const head = `<thead><tr><th class="slot-paytable-axis-header"><div class="slot-paytable-header"><span class="slot-paytable-header-icon" aria-hidden="true"></span><span class="slot-paytable-header-name">Cluster</span></div></th>${paying.map(([symbol, meta]) => `<th>${clusterHeaderMarkup(symbol, meta, renderSymbol)}</th>`).join('')}</tr></thead>`;
   const rows = [...sizes].reverse().map(size => {
     const cells = paying.map(([, meta]) => {
       const tier = meta.clusterPayout.filter(entry => entry.min <= size).at(-1);
