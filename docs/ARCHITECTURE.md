@@ -602,11 +602,11 @@ supplies `options.runTrial`:
 
 `core/SimulationWorkerPool.js` is the browser-side caller that supplies `runTrial`: it keeps a
 pool of persistent Worker threads (`navigator.hardwareConcurrency - 1`, one core left for the
-UI), each running `core/simulationTrialWorker.js` — a small script that resolves one
+UI), each running `core/simulation/trialWorker.js` — a small script that resolves one
 `simulateSpins()` trial per message and replies with just the three numbers `measure()` needs
 (`rtpRaw`/`freeSpinsTriggered`/`baseSpins`) plus `roundStats`, not the full result.
 `config.mechanic`/`winEvaluator`/`freeSpinsMode` cross into a pool Worker by name
-(`core/mechanicRegistry.js` resolves them back to the real objects/functions), the same convention
+(`core/simulation/workerMechanicRegistry.js` resolves them back to the real objects/functions), the same convention
 every other postMessage-crossing config in this codebase uses. Omitting `runTrial` (the default)
 runs exactly the original in-process sequential loop — every existing caller/test is unaffected.
 
