@@ -1,14 +1,14 @@
 // Lemon Pop — 5x5 no-refill straight-line cascades with persistent wild cans.
+
+// Imports from the core engine, math, and UI packages
 import { CoreSlotEngine } from '../../core/engine/CoreSlotEngine.js';
 import { CascadeDropAnimator } from '../../core/engine/animators/CascadeDropAnimator.js';
-import { LemonPopSpinMechanic } from '../../core/engine/mechanics/LemonPopSpinMechanic.js';
 import { SlotRenderer } from '../../core/rendering/SlotRenderer.js';
 import { ParticleSystem } from '../../core/rendering/ParticleSystem.js';
 import { SpinLogRecorder } from '../../core/engine/SpinLogRecorder.js';
 import { AudioController } from '../../core/engine/AudioController.js';
 import { generateReel } from '../../core/math/SlotMath.js';
 import { checkStraightLineWins } from '../../core/math/StraightLineMath.js';
-import { POP_FEATURES, POP_RUSH_VARIANTS } from '../../core/math/LemonPopFeatures.js';
 import { bindCommonSlotControls, observeSlotViewport, updateSlotStateUI } from '../../core/ui/SlotGameUI.js';
 import { ensureDeveloperPanels } from '../../core/ui/DeveloperPanels.js';
 import { openSpinLogPanel } from '../../core/ui/dev/SpinLogPanel.js';
@@ -16,6 +16,11 @@ import { runSimulationAndRender } from '../../core/ui/dev/SimulationPanel.js';
 import { openTuningPanel } from '../../core/ui/dev/tuning/TuningPanelView.js';
 import { renderStraightLinePaytable } from '../../core/ui/PaytableRenderer.js';
 
+// Lemon Pop's own pluggable mechanic and feature implementations, plus the game's own constants.
+import { LemonPopSpinMechanic } from './LemonPopSpinMechanic.js';
+import { POP_FEATURES, POP_RUSH_VARIANTS } from './LemonPopFeatures.js';
+
+// The rest of this file is the game's own constants and UI wiring, not part of the core engine.
 export const REELS_COUNT = 5;
 export const ROWS_COUNT = 5;
 export const REEL_LENGTH = 480;
@@ -26,6 +31,7 @@ export const BET_MAX = 50;
 export const WILD_SYMBOL = 'lemonpop';
 export const LINES_PER_POP = 5;
 export const POPS_TO_RUSH = 3;
+
 // Calibrated over the complete three-Pop progression + Pop Rush sequence for the seven-symbol
 // reel set. All ladders scale together, preserving hierarchy and feature logic at 96% RTP.
 export const PAYOUT_SCALE = 1.62074;

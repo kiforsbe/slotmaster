@@ -20,7 +20,7 @@ All six games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug to
 RUN SIMULATION, TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic
 actually runs is pluggable per game via a **mechanic** component, `core/engine/mechanics/
 LineMechanic.js` (the first three), `core/engine/mechanics/CascadeSpinMechanic.js` (Candy Frenzy
-and Mayan Tumble), or `core/engine/mechanics/LemonPopSpinMechanic.js` (Lemon Pop) - see
+and Mayan Tumble), or `games/lemonpop/LemonPopSpinMechanic.js` (Lemon Pop) - see
 `docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section
 for how they share one architecture instead of two. Each README covers only what's specific to
 that game.

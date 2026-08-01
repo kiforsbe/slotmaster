@@ -81,9 +81,11 @@ flowchart TB
     SpinLog --> FileIO
 ```
 
-Nothing in `core/` imports from `games/`. A game only ever flows data *into* `core/` (its own
-paytable, paylines, reel strips, DOM element references) — `core/` never hardcodes a symbol
-name, payout shape, or grid size. This is what lets `SlotMath.js` and `SpinSimulator.js` run
+Almost nothing in `core/` imports from `games/`. A game only ever flows data *into* `core/`
+(its own paytable, paylines, reel strips, DOM element references) — `core/` never hardcodes a
+symbol name, payout shape, or grid size. The one exception is the worker mechanic registry,
+which consumes game-local registration helpers so simulation and tuning can reconstruct a
+game-owned mechanic by name. This is what lets `SlotMath.js` and `SpinSimulator.js` run
 identically inside the live browser game, inside the in-browser debug tools, and inside
 `node --test` with no DOM at all.
 

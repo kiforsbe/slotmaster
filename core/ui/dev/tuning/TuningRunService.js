@@ -6,6 +6,15 @@ export async function runTuneFrequenciesWithPool(paytable, reelFrequencyTables, 
   // closure, is passed straight through in `tuneOptions` below for the (unused when runTrial is
   // set) in-process fallback path).
   const { winEvaluatorName: explicitWinEvaluatorName, minClusterSize, scatterTriggerCount, ...tuneOptions } = options;
+  const usePool = !tuneOptions.mechanic || tuneOptions.mechanic.name === 'line' || tuneOptions.mechanic.name === 'cascade';
+  if (!usePool) {
+    return tuneFrequencies(paytable, reelFrequencyTables, {
+      ...tuneOptions,
+      minClusterSize, scatterTriggerCount,
+      onProgress,
+    });
+  }
+
   const pool = createSimulationWorkerPool();
   try {
     return await tuneFrequencies(paytable, reelFrequencyTables, {

@@ -10,7 +10,6 @@ import { checkClusterWins } from '../math/ClusterMath.js';
 import { checkStraightLineWins } from '../math/StraightLineMath.js';
 import { LineMechanic } from '../engine/mechanics/LineMechanic.js';
 import { CascadeSpinMechanic } from '../engine/mechanics/CascadeSpinMechanic.js';
-import { LemonPopSpinMechanic } from '../engine/mechanics/LemonPopSpinMechanic.js';
 import { createFlatMultiplierMode, createMultiplierTilesMode } from '../engine/FreeSpinsModes.js';
 
 const WIN_EVALUATORS = { checkWins, checkWildLineWins };
@@ -57,7 +56,7 @@ const CLUSTER_WIN_EVALUATOR_BUILDERS = {
     (grid, wildMultipliers) => checkStraightLineWins(grid, paytable, { wildSymbol, wildMultipliers }),
 };
 
-const MECHANICS = { line: LineMechanic, cascade: CascadeSpinMechanic, lemonPopCascade: LemonPopSpinMechanic };
+const MECHANICS = { line: LineMechanic, cascade: CascadeSpinMechanic };
 
 // Visual-only options (badgeStyle/renderOrder) never affect wrapWinEvaluator/onClusterCleared -
 // see FreeSpinsModes.js's own doc - so reconstructing with defaults here is exact, not lossy.

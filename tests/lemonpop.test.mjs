@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { applyNoRefillCascade } from '../core/math/CascadeMath.js';
-import { applyPopFeature, applyPopRushVariant, POP_FEATURES, POP_RUSH_VARIANTS } from '../core/math/LemonPopFeatures.js';
+import { applyPopFeature, applyPopRushVariant, POP_FEATURES, POP_RUSH_VARIANTS } from '../games/lemonpop/LemonPopFeatures.js';
 import { checkStraightLineWins } from '../core/math/StraightLineMath.js';
-import { LemonPopSpinMechanic } from '../core/engine/mechanics/LemonPopSpinMechanic.js';
+import { LemonPopSpinMechanic } from '../games/lemonpop/LemonPopSpinMechanic.js';
 import { resolveMechanic, resolveWinEvaluator } from '../core/simulation/workerMechanicRegistry.js';
 import { createSeededRng } from '../core/math/SlotMath.js';
 import { PAYTABLE, REEL_STRIPS, REELS_COUNT, ROWS_COUNT, WILD_SYMBOL } from '../games/lemonpop/game.js';
@@ -146,7 +146,8 @@ test('three five-line Pops trigger one seeded Rush and workers rebuild the same 
   assert.equal(result.steps.flatMap(step => step.popFeatures || []).length, 3);
   assert.ok(result.steps.some(step => step.presentationPhase === 'pop-rush'));
   assert.equal(result.popRushVariant, replay.popRushVariant);
-  assert.equal(resolveMechanic('lemonPopCascade'), LemonPopSpinMechanic);
+  assert.equal(LemonPopSpinMechanic.name, 'lemonPopCascade');
+  assert.equal(resolveMechanic('line').name, 'line');
   const rebuilt = resolveWinEvaluator('checkStraightLineWins', PAYTABLE, null, 3, null, null, WILD_SYMBOL);
   const board = blank(); board[0][0] = board[1][0] = board[2][0] = 'lemon';
   assert.deepEqual(rebuilt(board, null), checkStraightLineWins(board, PAYTABLE, { wildSymbol: WILD_SYMBOL, wildMultipliers: null }));

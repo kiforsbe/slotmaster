@@ -1,6 +1,6 @@
 // Deterministic Lemon Pop board effects. Charge effects happen inside a base no-refill cascade;
 // full Pop Rush variants prepare the one bonus respin after all three charges have been filled.
-import { applyNoRefillCascade } from './CascadeMath.js';
+import { applyNoRefillCascade } from '../../core/math/CascadeMath.js';
 
 const keyOf = ([col, row]) => `${col},${row}`;
 

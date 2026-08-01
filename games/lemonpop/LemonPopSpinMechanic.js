@@ -1,8 +1,10 @@
 // No-refill straight-line cascade mechanic used by Lemon Pop. It shares the ordinary cascade
 // step shape so rendering, logs, simulations, and engine bookkeeping stay mechanic-agnostic.
-import { resolveNoRefillCascadeSequence } from '../../math/CascadeMath.js';
-import { applyPopFeature, applyPopRushVariant, POP_FEATURES, POP_RUSH_VARIANTS } from '../../math/LemonPopFeatures.js';
-import { createCascadeSpinLogEntry } from '../../logging/SpinLog.js';
+import { resolveNoRefillCascadeSequence } from '../../core/math/CascadeMath.js';
+import { applyPopFeature, applyPopRushVariant, POP_FEATURES, POP_RUSH_VARIANTS } from './LemonPopFeatures.js';
+import { createCascadeSpinLogEntry } from '../../core/logging/SpinLog.js';
+
+export const LEMON_POP_MECHANIC_NAME = 'lemonPopCascade';
 
 const popProgressSnapshot = (totalLines, linesPerPop, popsToRush) => ({
   totalLines,
@@ -93,7 +95,7 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
 
 export const LemonPopSpinMechanic = {
   // Separate name lets simulation workers select this mechanic instead of generic refill cascades.
-  name: 'lemonPopCascade',
+  name: LEMON_POP_MECHANIC_NAME,
   isCascade: true,
 
   resolveLiveSpin({ reelStrips, rowsCount, seed, config, winEvaluator }) {
