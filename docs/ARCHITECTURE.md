@@ -81,13 +81,13 @@ flowchart TB
     SpinLog --> FileIO
 ```
 
-Almost nothing in `core/` imports from `games/`. A game only ever flows data *into* `core/`
+Nothing in `core/` imports from `games/`. A game only ever flows data *into* `core/`
 (its own paytable, paylines, reel strips, DOM element references) — `core/` never hardcodes a
-symbol name, payout shape, or grid size. The one exception is the worker mechanic registry,
-which consumes game-local registration helpers so simulation and tuning can reconstruct a
-game-owned mechanic by name. This is what lets `SlotMath.js` and `SpinSimulator.js` run
-identically inside the live browser game, inside the in-browser debug tools, and inside
-`node --test` with no DOM at all.
+symbol name, payout shape, or grid size. The one place that needs to know whether a run can
+use the worker pool is the tuning wrapper, which chooses between the worker-backed and
+in-process code paths from the game config it was given. This is what lets `SlotMath.js` and
+`SpinSimulator.js` run identically inside the live browser game, inside the in-browser debug
+tools, and inside `node --test` with no DOM at all.
 
 **`CoreSlotEngine` is a skeleton, not a monolith.** It owns exactly two things: the state
 machine (`idle` → `spinning` → `evaluating` → ...) and the animation dispatch loop
