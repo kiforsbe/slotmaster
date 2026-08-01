@@ -4,27 +4,28 @@ import { exportSpinLogCsv } from '../../logging/SpinLog.js';
 import { showDeveloperPanel } from '../DeveloperPanels.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+const fmtInt = (n) => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 
 function renderWinTable(counts, hitLabel, accentColor, emptyText) {
   const sortedKeys = Object.keys(counts).sort((a, b) => a - b);
   if (sortedKeys.length === 0) {
-    return `<div style="color: #666; font-style: italic; font-size: 0.8em;">${emptyText}</div>`;
+    return `<div style="color: #666; font-style: italic; font-size: 0.8em; padding: 4px 0;">${emptyText}</div>`;
   }
-  let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.95em;">`;
-  html += `<thead><tr style="color: #888; font-size: 0.8em; text-transform: uppercase;">
-              <th style="text-align: left; font-weight: normal; padding: 2px 4px 4px 0;">${hitLabel}</th>
-              <th style="text-align: right; font-weight: normal; padding: 2px 4px 4px;">Wins</th>
-              <th style="text-align: right; font-weight: normal; padding: 2px 4px 4px;">Avg Win</th>
-              <th style="text-align: right; font-weight: normal; padding: 2px 0 4px;">Total Win</th>
+  let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em; margin-top: 4px;">`;
+  html += `<thead><tr style="color: #888; font-size: 0.75em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1);">
+              <th style="text-align: left; font-weight: 600; padding: 4px 4px 6px 0;">${hitLabel}</th>
+              <th style="text-align: right; font-weight: 600; padding: 4px 4px 6px;">Wins</th>
+              <th style="text-align: right; font-weight: 600; padding: 4px 4px 6px;">Avg Win</th>
+              <th style="text-align: right; font-weight: 600; padding: 4px 0 6px;">Total Win</th>
             </tr></thead><tbody>`;
   sortedKeys.forEach(key => {
     const data = counts[key];
     const avg = data.totalAmount / data.count;
-    html += `<tr>
-                <td style="padding: 2px 4px 2px 0; color: ${accentColor};">${key}</td>
-                <td style="text-align: right; padding: 2px 4px;">${data.count}</td>
-                <td style="text-align: right; padding: 2px 4px;">$${fmt(avg)}</td>
-                <td style="text-align: right; padding: 2px 0; font-weight: bold;">$${fmt(data.totalAmount)}</td>
+    html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
+                <td style="padding: 4px 4px 4px 0; color: ${accentColor}; font-weight: 600;">${key}</td>
+                <td style="text-align: right; padding: 4px;">${fmtInt(data.count)}</td>
+                <td style="text-align: right; padding: 4px; color: #ddd;">$${fmt(avg)}</td>
+                <td style="text-align: right; padding: 4px 0; font-weight: 700; color: #fff;">$${fmt(data.totalAmount)}</td>
               </tr>`;
   });
   html += `</tbody></table>`;
@@ -36,47 +37,41 @@ function renderWinTable(counts, hitLabel, accentColor, emptyText) {
 // passes its own (see CascadeSpinMechanic.statsLabels: 'Cluster Wins'/'Cluster Size') so a
 // cluster win doesn't get mislabeled as a payline hit.
 function createSection(title, symbols, symbolStats, paytable, labels = { primaryHeader: 'Normal Wins', hitLabel: 'Hits' }) {
-  if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.8em;">No wins found for ${title}</div>`;
-  let sectionHtml = `<h4 style="margin: 15px 0 10px 0; color: #aaa; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1px;">${title}</h4>`;
-  sectionHtml += `<div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;">`;
+  if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.85em; margin-bottom: 12px;">No wins found for ${title}</div>`;
+  let sectionHtml = `<h4 style="margin: 20px 0 10px 0; color: #888; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1.5px; font-weight: 700;">${title}</h4>`;
+  sectionHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;">`;
 
   symbols.forEach(symbol => {
     const stats = symbolStats[symbol] || { counts: {}, wildAssisted: { counts: {} }, alone: { counts: {} }, expanding: { counts: {} } };
     const friendlyName = paytable[symbol]?.friendlyName || symbol;
     const isScatter = paytable[symbol]?.type === 'scatter';
 
-    sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.2); padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.85em;">`;
-    sectionHtml += `<strong style="display: block; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 4px;">${friendlyName}</strong>`;
+    sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.12); padding: 14px; border-radius: 10px; background: rgba(0, 0, 0, 0.25); box-shadow: 0 4px 12px rgba(0,0,0,0.15);">`;
+    sectionHtml += `<strong style="display: block; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; color: #fff; font-size: 0.95em;">${friendlyName}</strong>`;
 
     sectionHtml += `<div style="margin-bottom: 8px;">`;
-    sectionHtml += `<span style="font-size: 0.7em; color: #999; text-transform: uppercase;">${isScatter ? 'Scatter Wins' : labels.primaryHeader}</span>`;
-    sectionHtml += renderWinTable(stats.counts, labels.hitLabel, '#ccc', isScatter ? 'No scatter wins' : `No ${labels.primaryHeader.toLowerCase()}`);
+    sectionHtml += `<span style="font-size: 0.7em; color: #aaa; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">${isScatter ? 'Scatter Wins' : labels.primaryHeader}</span>`;
+    sectionHtml += renderWinTable(stats.counts, labels.hitLabel, '#4ade80', isScatter ? 'No scatter wins' : `No ${labels.primaryHeader.toLowerCase()}`);
     sectionHtml += `</div>`;
 
-    // Wild-assisted matches (natural run one short of a full line, completed by a wild) are
-    // reported apart from natural hits above - otherwise a full-payout wild-completed win
-    // reads like a partial pay for symbols that don't actually have one.
     if (stats.wildAssisted && Object.keys(stats.wildAssisted.counts).length > 0) {
-      sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-      sectionHtml += `<span style="font-size: 0.7em; color: #7ec8ff; text-transform: uppercase;">Wild-Assisted Wins</span>`;
-      sectionHtml += renderWinTable(stats.wildAssisted.counts, 'Natural Hits', '#7ec8ff', '');
+      sectionHtml += `<div style="margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
+      sectionHtml += `<span style="font-size: 0.7em; color: #60a5fa; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Wild-Assisted Wins</span>`;
+      sectionHtml += renderWinTable(stats.wildAssisted.counts, 'Natural Hits', '#60a5fa', '');
       sectionHtml += `</div>`;
     }
 
-    // A wild's standalone "alone bonus" pays out regardless of what's elsewhere on the
-    // line, so it's tallied under the wild symbol itself rather than whatever unrelated
-    // symbol happened to land in reel 1.
     if (stats.alone && Object.keys(stats.alone.counts).length > 0) {
-      sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-      sectionHtml += `<span style="font-size: 0.7em; color: #ffb27e; text-transform: uppercase;">Alone Bonus</span>`;
-      sectionHtml += renderWinTable(stats.alone.counts, 'Landed', '#ffb27e', '');
+      sectionHtml += `<div style="margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
+      sectionHtml += `<span style="font-size: 0.7em; color: #f97316; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Alone Bonus</span>`;
+      sectionHtml += renderWinTable(stats.alone.counts, 'Landed', '#f97316', '');
       sectionHtml += `</div>`;
     }
 
     if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
-      sectionHtml += `<div style="margin-top: 8px; padding-top: 4px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-      sectionHtml += `<span style="font-size: 0.7em; color: #ffd700; text-transform: uppercase;">Expanding Wins</span>`;
-      sectionHtml += renderWinTable(stats.expanding.counts, 'Reels', '#ffd700', '');
+      sectionHtml += `<div style="margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
+      sectionHtml += `<span style="font-size: 0.7em; color: #eab308; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Expanding Wins</span>`;
+      sectionHtml += renderWinTable(stats.expanding.counts, 'Reels', '#eab308', '');
       sectionHtml += `</div>`;
     }
 
@@ -124,6 +119,39 @@ function groupSymbolsByType(paytable) {
 export function runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins = 1000000, labels, domRefs }) {
   const { btnSim, simModal, panel = simModal, simStats, simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay } = domRefs;
   const idleButtonMarkup = btnSim.innerHTML;
+  const statScope = panel || simModal;
+  const resolvedSimStats = simStats || statScope?.querySelector('#sim-stats');
+  const resolvedSimRtpDisplay = simRtpDisplay || statScope?.querySelector('#sim-rtp');
+  const resolvedSimTotalSpinsDisplay = simTotalSpinsDisplay || statScope?.querySelector('#sim-total-spins');
+  const resolvedSimMaxWinDisplay = simMaxWinDisplay || statScope?.querySelector('#sim-max-win');
+  const resolvedSimFreeSpinsDisplay = simFreeSpinsDisplay || statScope?.querySelector('#sim-free-spins');
+  const statHost = resolvedSimStats || statScope;
+
+  const ensureStatNode = (existingNode, id, label) => {
+    if (existingNode) return existingNode;
+    if (!statHost) return null;
+    let box = statHost.querySelector(`#${id}`)?.closest('.stat-box');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'stat-box';
+      box.innerHTML = `<span class="stat-label">${label}</span><div id="${id}" class="stat-value">-</div>`;
+      statHost.appendChild(box);
+    }
+    return box.querySelector(`#${id}`);
+  };
+
+  const statNodes = {
+    stats: statHost,
+    rtp: ensureStatNode(resolvedSimRtpDisplay, 'sim-rtp', 'Return to Player (RTP)'),
+    totalSpins: ensureStatNode(resolvedSimTotalSpinsDisplay, 'sim-total-spins', 'Total Spins'),
+    maxWin: ensureStatNode(resolvedSimMaxWinDisplay, 'sim-max-win', 'Max Win'),
+    freeSpins: ensureStatNode(resolvedSimFreeSpinsDisplay, 'sim-free-spins', 'Free Spins Triggered'),
+  };
+  const setStatTextOrError = (node, value, fallbackMessage) => {
+    if (!node) return;
+    const isValid = value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value));
+    node.textContent = isValid ? value : fallbackMessage;
+  };
 
   btnSim.textContent = '⏳';
   btnSim.setAttribute('aria-busy', 'true');
@@ -138,12 +166,16 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
       const startedAt = new Date().toISOString();
       const results = engine.runSimulation(numSpins, betPerLine, linesCount, { seed, logSpins: true });
 
-      if (simStats) simStats.style.display = '';
-      simRtpDisplay.textContent = results.rtp;
-      simTotalSpinsDisplay.textContent = results.totalSpins;
-      simMaxWinDisplay.textContent = `$${results.maxWin}`;
+      if (statNodes.stats) statNodes.stats.style.display = '';
+      setStatTextOrError(statNodes.rtp, results.rtp, 'Error: RTP value unavailable');
+      setStatTextOrError(statNodes.totalSpins, results.totalSpins, 'Error: Total Spins value unavailable');
+      setStatTextOrError(statNodes.maxWin, `$${fmt(results.maxWin)}`, 'Error: Max Win value unavailable');
       const pct = results.totalSpins > 0 ? (results.freeSpinsTriggered / results.totalSpins) * 100 : 0;
-      simFreeSpinsDisplay.textContent = `${results.freeSpinsTriggered} (${pct.toFixed(2)}%)`;
+      setStatTextOrError(
+        statNodes.freeSpins,
+        `${results.freeSpinsTriggered} (${pct.toFixed(2)}%)`,
+        'Error: Free Spins value unavailable',
+      );
 
       function bump(bucket, key, amount) {
         if (!bucket[key]) bucket[key] = { count: 0, totalAmount: 0 };
@@ -172,20 +204,21 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
       if (!detailsContainer) {
         detailsContainer = document.createElement('div');
         detailsContainer.id = 'sim-details';
-        detailsContainer.style.marginTop = '20px';
-        detailsContainer.style.padding = '15px';
-        detailsContainer.style.background = 'rgba(255, 255, 255, 0.1)';
-        detailsContainer.style.borderRadius = '12px';
+        detailsContainer.style.marginTop = '24px';
+        detailsContainer.style.padding = '20px';
+        detailsContainer.style.background = 'rgba(0, 0, 0, 0.2)';
+        detailsContainer.style.border = '1px solid rgba(255, 255, 255, 0.08)';
+        detailsContainer.style.borderRadius = '14px';
         detailsContainer.style.fontSize = '0.9em';
         panel.appendChild(detailsContainer);
       } else {
         detailsContainer.innerHTML = '';
       }
 
-      let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 8px;">Detailed Win Breakdown</h3>';
-      detailsHtml += `<div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 15px; font-size: 0.85em; color: #aaa;">
-                        <span title="Pass this to engine.runSimulation(..., { seed }) to reproduce this exact run">Seed: <strong style="color: #ccc;">${seed}</strong></span>
-                        <button id="sim-export-log-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.9em;">EXPORT SPIN LOG (CSV)</button>
+      let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.12); padding-bottom: 10px; font-size: 1.1em; letter-spacing: 0.5px;">Detailed Win Breakdown</h3>';
+      detailsHtml += `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; font-size: 0.85em; color: #888;">
+                        <span title="Pass this to engine.runSimulation(..., { seed }) to reproduce this exact run">Seed: <strong style="color: #4ade80; font-family: monospace; font-size: 1.05em;">${seed}</strong></span>
+                        <button id="sim-export-log-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.85em; border-radius: 6px;">EXPORT SPIN LOG (CSV)</button>
                       </div>`;
       groupSymbolsByType(paytable).forEach(({ type, symbols }) => {
         const title = type.charAt(0).toUpperCase() + type.slice(1) + ' Symbols';
