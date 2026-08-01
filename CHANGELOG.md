@@ -21,6 +21,11 @@ annotated tags (`git show 0.5.0`).
   card and the Seed card no longer forces full width, so all five stat cards fit on one row on
   desktop widths; the duplicate "Overall Seed" bar in the Detailed Win Breakdown section was
   removed, since the seed is already shown in the stat-card row.
+- **Removed the stale hand-written `#sim-modal`/`#sim-stats` skeleton** from barfruits',
+  bookbookbook's, candyfrenzy's, fruitmachine's, and mayantumble's `index.html` — the simulation
+  panel and its stat cards have been fully DOM-built by `DeveloperPanels.js`/`SimulationPanel.js`
+  since 0.9.0's developer-panel work, so this static markup was dead weight, silently discarded on
+  the first RUN SIMULATION click of every session.
 
 ## 0.10.0 — 2026-08-01
 

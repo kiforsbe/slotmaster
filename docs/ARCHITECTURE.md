@@ -856,10 +856,8 @@ supply them. At minimum: `#game-canvas` (the render target), `#btn-spin`, `#btn-
 panels) at runtime if it isn't already present, and `SimulationPanel.js`'s
 `runSimulationAndRender` builds and rebuilds the `#sim-stats` grid and its stat cards (RTP,
 Total Spins, Max Win, Free Spins Triggered, Seed) itself on every run via `ensureStatCard` —
-same "never hand-author it, it drifts" reasoning as the paytable, and the reason a couple of
-older `index.html` files still carrying a hand-written `#sim-modal`/`#sim-stats` skeleton is
-legacy cruft rather than something a new game needs to copy: it gets wiped by
-`getOrCreateStatsGrid` the moment RUN SIMULATION is first clicked.
+same "never hand-author it, it drifts" reasoning as the paytable. A new game's `index.html`
+should not include a `#sim-modal`/`#sim-stats` skeleton at all.
 Copy an existing game's `index.html` as the starting point rather than writing this from
 scratch — the exact id set is easiest to get right by example.
 
@@ -944,4 +942,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-08-01, commit `7ce921e`._
+_Docs last synced with the codebase: 2026-08-01, commit `7d4d999`._
