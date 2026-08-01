@@ -705,10 +705,14 @@ A game never talks to the simulator directly for its UI — it calls this module
 
 - **`runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins, labels,
   domRefs })`** — runs `engine.runSimulation(...)` and renders RTP/win-distribution/per-symbol
-  breakdown tables into the given modal DOM elements. `labels` overrides the primary win
-  bucket's header/column wording for a non-line-pay mechanic (e.g. Candy Frenzy passes
-  `CascadeSpinMechanic.statsLabels` — "Cluster Wins"/"Cluster Size" instead of "Normal
-  Wins"/"Hits"); omitted, it defaults to the line-pay wording.
+  breakdown tables into `domRefs.panel` (falling back to `domRefs.simModal`). Only `btnSim` and
+  `panel`/`simModal` matter now — the stat-card grid (`#sim-stats`: RTP, Total Spins, Max Win,
+  Free Spins Triggered, Seed) is built fresh on `panel` by `getOrCreateStatsGrid`/`ensureStatCard`
+  every run, so any other `domRefs` a caller passes (e.g. individual `#sim-rtp`-style element
+  refs, kept by some games for a pre-stat-card-grid API) are accepted but ignored. `labels`
+  overrides the primary win bucket's header/column wording for a non-line-pay mechanic (e.g.
+  Candy Frenzy passes `CascadeSpinMechanic.statsLabels` — "Cluster Wins"/"Cluster Size" instead
+  of "Normal Wins"/"Hits"); omitted, it defaults to the line-pay wording.
 ## `core/ui/dev/TuningPanel.js` — browser UI for frequency tuning
 
 Tuning controls, diagnostics, worker-backed progress, tuning history, and copyable results live in
@@ -845,12 +849,17 @@ cascade it is also `paylines`/`wildSymbol`.
 
 There's no framework here — `game.js` looks up elements by hardcoded `id`, so the HTML has to
 supply them. At minimum: `#game-canvas` (the render target), `#btn-spin`, `#btn-auto`,
-`#btn-turbo`, `#btn-mute`, bet/lines adjuster buttons and value spans, `#game-ticker`, a
+`#btn-turbo`, `#btn-mute`, bet/lines adjuster buttons and value spans, `#game-ticker`, and a
 `#modal-paytable` with a `#paytable-grid-content` container `game.js` fills in dynamically
-(never hand-author paytable text — it drifts), and a `#sim-modal` with the stat elements
-`runSimulationAndRender` renders into (`#sim-stats`, `#sim-rtp`, `#sim-total-spins`,
-`#sim-max-win`, `#sim-free-spins`). `DeveloperPanels.js` creates separate runtime panels for
-tuning and spin logging.
+(never hand-author paytable text — it drifts). The simulation panel needs no HTML at all:
+`DeveloperPanels.js`'s `ensureDeveloperPanels()` creates `#sim-modal` (and the tuning/spin-log
+panels) at runtime if it isn't already present, and `SimulationPanel.js`'s
+`runSimulationAndRender` builds and rebuilds the `#sim-stats` grid and its stat cards (RTP,
+Total Spins, Max Win, Free Spins Triggered, Seed) itself on every run via `ensureStatCard` —
+same "never hand-author it, it drifts" reasoning as the paytable, and the reason a couple of
+older `index.html` files still carrying a hand-written `#sim-modal`/`#sim-stats` skeleton is
+legacy cruft rather than something a new game needs to copy: it gets wiped by
+`getOrCreateStatsGrid` the moment RUN SIMULATION is first clicked.
 Copy an existing game's `index.html` as the starting point rather than writing this from
 scratch — the exact id set is easiest to get right by example.
 
@@ -935,4 +944,4 @@ scatter trigger means. To add a free-spins bonus (as bookbookbook does):
   *presentation-layer* formatter, not the math itself, silently diverges from the real values.
 
 ---
-_Docs last synced with the codebase: 2026-07-28, commit `3540cf2`._
+_Docs last synced with the codebase: 2026-08-01, commit `7ce921e`._

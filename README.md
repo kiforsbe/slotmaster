@@ -257,4 +257,4 @@ Portions of this project (code, docs, and image assets) were developed with the 
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-07-28, commit `4ed60a2`._
+_Docs last synced with the codebase: 2026-08-01, commit `7ce921e`._

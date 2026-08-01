@@ -3,6 +3,25 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.10.1 — 2026-08-01
+
+### Fixed
+
+- **The RUN SIMULATION panel's stat cards no longer duplicate on repeated runs** — a stale
+  `document.getElementById('sim-stats')` reference re-queried on every click (Lemon Pop) could
+  resolve to the grid the panel itself created on the previous run, and the panel's own
+  `getOrCreateStatsGrid` couldn't recognize being handed the grid as its own host (`querySelector`
+  only searches descendants), so it nested a second stats grid inside the first instead of
+  clearing it. The panel now always hosts its stat-card grid on `panel` itself, ignoring any
+  legacy per-field `domRefs` a caller supplies.
+
+### Changed
+
+- **Simulation panel stat cards unified across games** — RTP is no longer a hero (full-width)
+  card and the Seed card no longer forces full width, so all five stat cards fit on one row on
+  desktop widths; the duplicate "Overall Seed" bar in the Detailed Win Breakdown section was
+  removed, since the seed is already shown in the stat-card row.
+
 ## 0.10.0 — 2026-08-01
 
 ### Added
