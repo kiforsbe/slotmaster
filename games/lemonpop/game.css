@@ -68,10 +68,11 @@ body.pop-rush-active .game-viewport { box-shadow: inset 0 0 40px rgba(236,255,97
 .slot-paytable-wild .slot-paytable-table { background: rgba(232,255,80,.07); }
 .slot-paytable-straight-rules ul { margin: 0 0 12px 18px; color: rgba(255,255,255,.76); font-size: .84em; line-height: 1.45; }
 .sim-modal { position: fixed; z-index: 210; top: 50%; left: 50%; transform: translate(-50%,-50%); border: 2px solid var(--gold); border-radius: 14px; background: #260b2a; color: #fff; }
-.sim-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(125px,1fr)); gap: 10px; }
-.stat-box { padding: 11px; border: 1px solid rgba(232,255,80,.22); border-radius: 8px; background: rgba(255,255,255,.06); }
-.stat-label { display: block; color: rgba(255,255,255,.64); font-size: 10px; text-transform: uppercase; }
-.stat-value { margin-top: 4px; color: var(--gold); font-size: 18px; font-weight: 800; }
+.sim-stats { gap: 10px; }
+.stat-box { border-color: rgba(232,255,80,.22); background: rgba(255,255,255,.06); text-align: left; }
+.stat-box-hero { background: linear-gradient(135deg, rgba(232,255,80,.14), rgba(255,255,255,.06)); }
+.stat-label { color: rgba(255,255,255,.64); }
+.stat-value { color: var(--gold); }
 .btn-sim-btn { border-color: var(--pink) !important; color: #ffc2e7 !important; }
 @media (max-width: 620px) {
   .pop-rush-meter { top: 38px; left: 8px; gap: 6px; }

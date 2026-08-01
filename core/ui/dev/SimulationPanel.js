@@ -5,30 +5,74 @@ import { showDeveloperPanel } from '../DeveloperPanels.js';
 
 const fmt = (n) => n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const fmtInt = (n) => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+const fmtPct = (n) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+
+const BUCKET_META = {
+  counts: { label: 'Wins', hitLabel: 'Hits', color: '#4ade80' },
+  wildAssisted: { label: 'Wild-Assisted', hitLabel: 'Natural Hits', color: '#60a5fa' },
+  alone: { label: 'Alone Bonus', hitLabel: 'Landed', color: '#f97316' },
+  expanding: { label: 'Expanding', hitLabel: 'Reels', color: '#eab308' },
+};
 
 function renderWinTable(counts, hitLabel, accentColor, emptyText) {
-  const sortedKeys = Object.keys(counts).sort((a, b) => a - b);
+  const sortedKeys = Object.keys(counts).sort((a, b) => Number(a) - Number(b));
   if (sortedKeys.length === 0) {
-    return `<div style="color: #666; font-style: italic; font-size: 0.8em; padding: 4px 0;">${emptyText}</div>`;
+    return `<div class="sim-win-empty">${emptyText}</div>`;
   }
-  let html = `<table style="width: 100%; border-collapse: collapse; font-size: 0.9em; margin-top: 4px;">`;
-  html += `<thead><tr style="color: #888; font-size: 0.75em; text-transform: uppercase; border-bottom: 1px solid rgba(255,255,255,0.1);">
-              <th style="text-align: left; font-weight: 600; padding: 4px 4px 6px 0;">${hitLabel}</th>
-              <th style="text-align: right; font-weight: 600; padding: 4px 4px 6px;">Wins</th>
-              <th style="text-align: right; font-weight: 600; padding: 4px 4px 6px;">Avg Win</th>
-              <th style="text-align: right; font-weight: 600; padding: 4px 0 6px;">Total Win</th>
-            </tr></thead><tbody>`;
+  let html = '<table class="sim-win-table">';
+  html += `<thead><tr>
+    <th class="sim-win-hit" scope="col">${hitLabel}</th>
+    <th class="sim-win-num" scope="col">Wins</th>
+    <th class="sim-win-num" scope="col">Avg Win</th>
+    <th class="sim-win-num" scope="col">Total Win</th>
+  </tr></thead><tbody>`;
   sortedKeys.forEach(key => {
     const data = counts[key];
     const avg = data.totalAmount / data.count;
-    html += `<tr style="border-bottom: 1px solid rgba(255,255,255,0.03);">
-                <td style="padding: 4px 4px 4px 0; color: ${accentColor}; font-weight: 600;">${key}</td>
-                <td style="text-align: right; padding: 4px;">${fmtInt(data.count)}</td>
-                <td style="text-align: right; padding: 4px; color: #ddd;">$${fmt(avg)}</td>
-                <td style="text-align: right; padding: 4px 0; font-weight: 700; color: #fff;">$${fmt(data.totalAmount)}</td>
-              </tr>`;
+    html += `<tr>
+      <td class="sim-win-hit" style="color: ${accentColor};">${key}</td>
+      <td class="sim-win-num">${fmtInt(data.count)}</td>
+      <td class="sim-win-num sim-win-muted">$${fmt(avg)}</td>
+      <td class="sim-win-num sim-win-total">$${fmt(data.totalAmount)}</td>
+    </tr>`;
   });
-  html += `</tbody></table>`;
+  html += '</tbody></table>';
+  return html;
+}
+
+function renderSymbolCard(symbol, stats, paytable, labels) {
+  const friendlyName = paytable[symbol]?.friendlyName || symbol;
+  const type = paytable[symbol]?.type || 'other';
+  const isScatter = type === 'scatter';
+  const primaryLabel = isScatter ? 'Scatter Wins' : labels.primaryHeader;
+  const primaryEmpty = isScatter ? 'No scatter wins' : `No ${labels.primaryHeader.toLowerCase()}`;
+
+  const buckets = [];
+  buckets.push({ key: 'counts', header: primaryLabel });
+  if (stats.wildAssisted && Object.keys(stats.wildAssisted.counts).length > 0) {
+    buckets.push({ key: 'wildAssisted', header: 'Wild-Assisted Wins' });
+  }
+  if (stats.alone && Object.keys(stats.alone.counts).length > 0) {
+    buckets.push({ key: 'alone', header: 'Alone Bonus' });
+  }
+  if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
+    buckets.push({ key: 'expanding', header: 'Expanding Wins' });
+  }
+
+  const typeBadge = type === 'other' ? '' : `<span class="sim-symbol-type">${type}</span>`;
+  let html = `<article class="sim-symbol-card">`;
+  html += `<header class="sim-symbol-header"><span class="sim-symbol-name">${friendlyName}</span>${typeBadge}</header>`;
+  html += '<div class="sim-symbol-body">';
+  buckets.forEach(({ key, header }, index) => {
+    const meta = BUCKET_META[key];
+    const bucketCounts = stats[key] || {};
+    const isPrimary = index === 0;
+    html += `<div class="sim-bucket${isPrimary ? '' : ' sim-bucket-extra'}">`;
+    html += `<span class="sim-bucket-label">${header}</span>`;
+    html += renderWinTable(bucketCounts, isPrimary ? labels.hitLabel : meta.hitLabel, meta.color, isPrimary ? primaryEmpty : '');
+    html += '</div>';
+  });
+  html += '</div></article>';
   return html;
 }
 
@@ -37,49 +81,18 @@ function renderWinTable(counts, hitLabel, accentColor, emptyText) {
 // passes its own (see CascadeSpinMechanic.statsLabels: 'Cluster Wins'/'Cluster Size') so a
 // cluster win doesn't get mislabeled as a payline hit.
 function createSection(title, symbols, symbolStats, paytable, labels = { primaryHeader: 'Normal Wins', hitLabel: 'Hits' }) {
-  if (symbols.length === 0) return `<div style="color: #666; font-style: italic; font-size: 0.85em; margin-bottom: 12px;">No wins found for ${title}</div>`;
-  let sectionHtml = `<h4 style="margin: 20px 0 10px 0; color: #888; text-transform: uppercase; font-size: 0.75em; letter-spacing: 1.5px; font-weight: 700;">${title}</h4>`;
-  sectionHtml += `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;">`;
-
+  if (symbols.length === 0) {
+    return `<div class="sim-section-empty">No wins found for ${title}</div>`;
+  }
+  let html = `<section class="sim-section">`;
+  html += `<h4 class="sim-section-title">${title}</h4>`;
+  html += `<div class="sim-symbol-grid">`;
   symbols.forEach(symbol => {
     const stats = symbolStats[symbol] || { counts: {}, wildAssisted: { counts: {} }, alone: { counts: {} }, expanding: { counts: {} } };
-    const friendlyName = paytable[symbol]?.friendlyName || symbol;
-    const isScatter = paytable[symbol]?.type === 'scatter';
-
-    sectionHtml += `<div style="border: 1px solid rgba(255,255,255,0.12); padding: 14px; border-radius: 10px; background: rgba(0, 0, 0, 0.25); box-shadow: 0 4px 12px rgba(0,0,0,0.15);">`;
-    sectionHtml += `<strong style="display: block; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px; color: #fff; font-size: 0.95em;">${friendlyName}</strong>`;
-
-    sectionHtml += `<div style="margin-bottom: 8px;">`;
-    sectionHtml += `<span style="font-size: 0.7em; color: #aaa; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">${isScatter ? 'Scatter Wins' : labels.primaryHeader}</span>`;
-    sectionHtml += renderWinTable(stats.counts, labels.hitLabel, '#4ade80', isScatter ? 'No scatter wins' : `No ${labels.primaryHeader.toLowerCase()}`);
-    sectionHtml += `</div>`;
-
-    if (stats.wildAssisted && Object.keys(stats.wildAssisted.counts).length > 0) {
-      sectionHtml += `<div style="margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-      sectionHtml += `<span style="font-size: 0.7em; color: #60a5fa; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Wild-Assisted Wins</span>`;
-      sectionHtml += renderWinTable(stats.wildAssisted.counts, 'Natural Hits', '#60a5fa', '');
-      sectionHtml += `</div>`;
-    }
-
-    if (stats.alone && Object.keys(stats.alone.counts).length > 0) {
-      sectionHtml += `<div style="margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-      sectionHtml += `<span style="font-size: 0.7em; color: #f97316; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Alone Bonus</span>`;
-      sectionHtml += renderWinTable(stats.alone.counts, 'Landed', '#f97316', '');
-      sectionHtml += `</div>`;
-    }
-
-    if (stats.expanding && Object.keys(stats.expanding.counts).length > 0) {
-      sectionHtml += `<div style="margin-top: 10px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.1);">`;
-      sectionHtml += `<span style="font-size: 0.7em; color: #eab308; text-transform: uppercase; font-weight: 600; letter-spacing: 0.5px;">Expanding Wins</span>`;
-      sectionHtml += renderWinTable(stats.expanding.counts, 'Reels', '#eab308', '');
-      sectionHtml += `</div>`;
-    }
-
-    sectionHtml += `</div>`;
+    html += renderSymbolCard(symbol, stats, paytable, labels);
   });
-
-  sectionHtml += `</div>`;
-  return sectionHtml;
+  html += '</div></section>';
+  return html;
 }
 
 /**
@@ -102,6 +115,58 @@ function groupSymbolsByType(paytable) {
   return order.map(type => ({ type, symbols: groups[type] }));
 }
 
+function getOrCreateStatsGrid(host) {
+  if (!host) return null;
+  let grid = host.querySelector('#sim-stats');
+  if (!grid) {
+    grid = document.createElement('div');
+    grid.id = 'sim-stats';
+    grid.className = 'sim-stats';
+    grid.setAttribute('aria-live', 'polite');
+    host.appendChild(grid);
+  } else {
+    grid.innerHTML = '';
+  }
+  return grid;
+}
+
+function ensureStatCard(grid, id, label, { hero = false, wide = false } = {}) {
+  if (!grid) return null;
+  let box = grid.querySelector(`#${id}`)?.closest('.stat-box');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'stat-box';
+    box.innerHTML = `<span class="stat-label">${label}</span><div id="${id}" class="stat-value">-</div>`;
+    grid.appendChild(box);
+  }
+  if (hero) box.classList.add('stat-box-hero');
+  if (wide) box.classList.add('stat-box-wide');
+  return box.querySelector(`#${id}`);
+}
+
+function buildDetailsHtml({ paytable, symbolStats, labels }) {
+  let html = `<header class="sim-details-header">
+    <div>
+      <h3 class="sim-details-title">Detailed Win Breakdown</h3>
+      <p class="sim-details-subtitle">Winnings per symbol, grouped by symbol type</p>
+    </div>
+    <button id="sim-export-log-btn" class="btn-icon btn-sim-btn" type="button">Export Spin Log (CSV)</button>
+  </header>`;
+  groupSymbolsByType(paytable).forEach(({ type, symbols }) => {
+    const title = type.charAt(0).toUpperCase() + type.slice(1) + ' Symbols';
+    html += labels
+      ? createSection(title, symbols, symbolStats, paytable, labels)
+      : createSection(title, symbols, symbolStats, paytable);
+  });
+  return html;
+}
+
+const setStatTextOrError = (node, value, fallbackMessage) => {
+  if (!node) return;
+  const isValid = value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value));
+  node.textContent = isValid ? value : fallbackMessage;
+};
+
 /**
  * Runs engine.runSimulation() and renders the results (stats + detailed win breakdown)
  * into the given DOM refs.
@@ -117,40 +182,24 @@ function groupSymbolsByType(paytable) {
  * @param {Object} args.domRefs
  */
 export function runSimulationAndRender({ engine, paytable, betPerLine, linesCount, numSpins = 1000000, labels, domRefs }) {
-  const { btnSim, simModal, panel = simModal, simStats, simRtpDisplay, simTotalSpinsDisplay, simMaxWinDisplay, simFreeSpinsDisplay } = domRefs;
+  const { btnSim, simModal, panel = simModal } = domRefs;
   const idleButtonMarkup = btnSim.innerHTML;
-  const statScope = panel || simModal;
-  const resolvedSimStats = simStats || statScope?.querySelector('#sim-stats');
-  const resolvedSimRtpDisplay = simRtpDisplay || statScope?.querySelector('#sim-rtp');
-  const resolvedSimTotalSpinsDisplay = simTotalSpinsDisplay || statScope?.querySelector('#sim-total-spins');
-  const resolvedSimMaxWinDisplay = simMaxWinDisplay || statScope?.querySelector('#sim-max-win');
-  const resolvedSimFreeSpinsDisplay = simFreeSpinsDisplay || statScope?.querySelector('#sim-free-spins');
-  const statHost = resolvedSimStats || statScope;
-
-  const ensureStatNode = (existingNode, id, label) => {
-    if (existingNode) return existingNode;
-    if (!statHost) return null;
-    let box = statHost.querySelector(`#${id}`)?.closest('.stat-box');
-    if (!box) {
-      box = document.createElement('div');
-      box.className = 'stat-box';
-      box.innerHTML = `<span class="stat-label">${label}</span><div id="${id}" class="stat-value">-</div>`;
-      statHost.appendChild(box);
-    }
-    return box.querySelector(`#${id}`);
-  };
+  // Always host the stats grid directly on the panel. Deliberately ignores any caller-supplied
+  // simStats/simRtpDisplay/etc - those are dead params left over from a pre-stat-card-grid API
+  // (DeveloperPanels.js's panels have no such static slot) - because at least one caller
+  // (lemonpop) re-queries document.getElementById('sim-stats') fresh on every click. That id
+  // doesn't exist before the first run, so it's null on run 1 (falls through harmlessly) but on
+  // run 2+ it resolves to the very grid this function created last time, which getOrCreateStatsGrid
+  // then can't recognize as itself (querySelector only searches descendants) - producing a second
+  // nested #sim-stats grid instead of clearing the first.
+  const statsGrid = getOrCreateStatsGrid(panel);
 
   const statNodes = {
-    stats: statHost,
-    rtp: ensureStatNode(resolvedSimRtpDisplay, 'sim-rtp', 'Return to Player (RTP)'),
-    totalSpins: ensureStatNode(resolvedSimTotalSpinsDisplay, 'sim-total-spins', 'Total Spins'),
-    maxWin: ensureStatNode(resolvedSimMaxWinDisplay, 'sim-max-win', 'Max Win'),
-    freeSpins: ensureStatNode(resolvedSimFreeSpinsDisplay, 'sim-free-spins', 'Free Spins Triggered'),
-  };
-  const setStatTextOrError = (node, value, fallbackMessage) => {
-    if (!node) return;
-    const isValid = value !== null && value !== undefined && value !== '' && !(typeof value === 'number' && Number.isNaN(value));
-    node.textContent = isValid ? value : fallbackMessage;
+    rtp: ensureStatCard(statsGrid, 'sim-rtp', 'Return to Player (RTP)'),
+    totalSpins: ensureStatCard(statsGrid, 'sim-total-spins', 'Total Spins'),
+    maxWin: ensureStatCard(statsGrid, 'sim-max-win', 'Max Win'),
+    freeSpins: ensureStatCard(statsGrid, 'sim-free-spins', 'Free Spins Triggered'),
+    seed: ensureStatCard(statsGrid, 'sim-seed', 'Overall Seed'),
   };
 
   btnSim.textContent = '⏳';
@@ -166,16 +215,16 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
       const startedAt = new Date().toISOString();
       const results = engine.runSimulation(numSpins, betPerLine, linesCount, { seed, logSpins: true });
 
-      if (statNodes.stats) statNodes.stats.style.display = '';
       setStatTextOrError(statNodes.rtp, results.rtp, 'Error: RTP value unavailable');
-      setStatTextOrError(statNodes.totalSpins, results.totalSpins, 'Error: Total Spins value unavailable');
+      setStatTextOrError(statNodes.totalSpins, fmtInt(results.totalSpins), 'Error: Total Spins value unavailable');
       setStatTextOrError(statNodes.maxWin, `$${fmt(results.maxWin)}`, 'Error: Max Win value unavailable');
       const pct = results.totalSpins > 0 ? (results.freeSpinsTriggered / results.totalSpins) * 100 : 0;
       setStatTextOrError(
         statNodes.freeSpins,
-        `${results.freeSpinsTriggered} (${pct.toFixed(2)}%)`,
+        `${fmtInt(results.freeSpinsTriggered)} (${fmtPct(pct)})`,
         'Error: Free Spins value unavailable',
       );
+      setStatTextOrError(statNodes.seed, seed, 'Error: Seed value unavailable');
 
       function bump(bucket, key, amount) {
         if (!bucket[key]) bucket[key] = { count: 0, totalAmount: 0 };
@@ -204,27 +253,10 @@ export function runSimulationAndRender({ engine, paytable, betPerLine, linesCoun
       if (!detailsContainer) {
         detailsContainer = document.createElement('div');
         detailsContainer.id = 'sim-details';
-        detailsContainer.style.marginTop = '24px';
-        detailsContainer.style.padding = '20px';
-        detailsContainer.style.background = 'rgba(0, 0, 0, 0.2)';
-        detailsContainer.style.border = '1px solid rgba(255, 255, 255, 0.08)';
-        detailsContainer.style.borderRadius = '14px';
-        detailsContainer.style.fontSize = '0.9em';
+        detailsContainer.className = 'sim-details';
         panel.appendChild(detailsContainer);
-      } else {
-        detailsContainer.innerHTML = '';
       }
-
-      let detailsHtml = '<h3 style="margin-top: 0; border-bottom: 1px solid rgba(255,255,255,0.12); padding-bottom: 10px; font-size: 1.1em; letter-spacing: 0.5px;">Detailed Win Breakdown</h3>';
-      detailsHtml += `<div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 20px; font-size: 0.85em; color: #888;">
-                        <span title="Pass this to engine.runSimulation(..., { seed }) to reproduce this exact run">Seed: <strong style="color: #4ade80; font-family: monospace; font-size: 1.05em;">${seed}</strong></span>
-                        <button id="sim-export-log-btn" class="btn-icon btn-sim-btn" style="padding: 6px 14px; font-size: 0.85em; border-radius: 6px;">EXPORT SPIN LOG (CSV)</button>
-                      </div>`;
-      groupSymbolsByType(paytable).forEach(({ type, symbols }) => {
-        const title = type.charAt(0).toUpperCase() + type.slice(1) + ' Symbols';
-        detailsHtml += labels ? createSection(title, symbols, symbolStats, paytable, labels) : createSection(title, symbols, symbolStats, paytable);
-      });
-      detailsContainer.innerHTML = detailsHtml;
+      detailsContainer.innerHTML = buildDetailsHtml({ paytable, symbolStats, labels });
 
       detailsContainer.querySelector('#sim-export-log-btn').addEventListener('click', () => {
         exportSpinLogCsv(results.spinLog, { seed, startedAt, filenamePrefix: 'spinlog' });

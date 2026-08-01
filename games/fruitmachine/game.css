@@ -397,32 +397,9 @@ canvas {
   font-size: 24px;
 }
 
-.sim-stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 15px;
-  margin-bottom: 25px;
-}
-
-.stat-box {
-  background: rgba(255, 255, 255, 0.05);
-  padding: 15px;
-  border-radius: 10px;
-  text-align: center;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.stat-label {
-  font-size: 12px;
-  color: #d9a891;
-  display: block;
-  margin-bottom: 5px;
-  text-transform: uppercase;
-}
-
-.stat-value {
-  font-size: 18px;
-  font-weight: bold;
-  color: #fff;
-}
+.sim-stats { gap: 12px; }
+.stat-box { border-color: rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.05); text-align: left; }
+.stat-box-hero { background: linear-gradient(135deg, rgba(255,255,255,.1), rgba(255,255,255,.04)); }
+.stat-label { color: #d9a891; }
+.stat-value { color: #fff; }
 /* End of theme-specific styles. */
