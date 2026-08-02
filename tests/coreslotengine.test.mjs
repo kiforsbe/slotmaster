@@ -152,6 +152,42 @@ test('enterFreeSpins sets inFreeSpins and the spins counters; exitFreeSpins clea
   assert.equal(engine.freeSpinsRemaining, 14);
 });
 
+test('each free spin reports only its own win - lastWin does not carry over from the triggering spin or prior free spins', async () => {
+  // Queue of per-call payouts: base-spin win (the scatter trigger's own line payout) is 20,
+  // then two free spins - a winner (5) and a blank (0).
+  const payouts = [20, 5, 0];
+  const engine = new CoreSlotEngine(stubCanvas(), {
+    mechanic: {
+      resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: payouts.shift() }], scatterWin: null }),
+    },
+    animator: noAnimation(),
+    renderer: { draw: () => {} },
+  });
+
+  await engine.spin(1);
+  assert.equal(engine.lastWin, 20);
+
+  // Set up free spins directly rather than via enterFreeSpins(), which synchronously chains
+  // into its own spinFreeSpins()/spin() call - racing an explicit spin() call against that
+  // auto-triggered one is exactly the kind of ordering this test needs to avoid.
+  engine.inFreeSpins = true;
+  engine.freeSpinsRemaining = 2;
+  engine.freeSpinsTotal = 2;
+  engine.freeSpinsAccumulatedWin = 0;
+
+  await engine.spin(2);
+  // Regression: lastWin was only ever reset to 0 in the "not in free spins" branch of _spin(),
+  // so during free spins it kept whatever the triggering base spin (or the prior free spin)
+  // left behind and added the new payout on top of that stale total, instead of reporting just
+  // this spin's own win.
+  assert.equal(engine.lastWin, 5);
+  assert.equal(engine.freeSpinsAccumulatedWin, 5);
+
+  await engine.spin(3);
+  assert.equal(engine.lastWin, 0);
+  assert.equal(engine.freeSpinsAccumulatedWin, 5);
+});
+
 test('free-spins intro pauses autoplay and ignores spin requests until entry', () => {
   const engine = new CoreSlotEngine(stubCanvas(), {
     mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
