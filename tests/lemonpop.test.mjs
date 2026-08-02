@@ -113,7 +113,6 @@ test('each Pop charge effect is seeded, makes a bounded board change, and preser
     const again = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature, rng: createSeededRng(51) });
     assert.deepEqual(first, again, `${feature} must be seeded and repeatable`);
     assert.equal(first.feature, feature);
-    // No-refill gravity always leaves any empty cells above the landed symbols in a column.
     first.grid.forEach(column => {
       const firstSymbol = column.findIndex(symbol => symbol != null);
       if (firstSymbol >= 0) assert.ok(column.slice(0, firstSymbol).every(symbol => symbol == null));
@@ -129,26 +128,81 @@ test('each Pop charge effect is seeded, makes a bounded board change, and preser
   assert.ok(burst.grid.flat().filter(symbol => symbol != null).length < base.flat().filter(symbol => symbol != null).length);
 });
 
-test('filled Pops fire only after settle, spend one segment, and expose debug state', () => {
+test('settling at one wild or fewer triggers Pop Rush without needing the meter filled', () => {
   const makeEvaluator = () => {
     let calls = 0;
     return () => {
       calls += 1;
       if (calls <= 15) return {
-      clusterWins: [{ kind: 'straight-line', orientation: 'horizontal', symbol: 'lemon', count: 3, payout: 1, winningPositions: [[0, 0], [1, 0], [2, 0]], wildSpawnPosition: [1, 0] }],
-      totalPayoutMultiplier: 1, wildSymbol: WILD_SYMBOL,
+        clusterWins: [{ kind: 'straight-line', orientation: 'horizontal', symbol: 'lemon', count: 3, payout: 1, winningPositions: [[0, 0], [1, 0], [2, 0]], wildSpawnPosition: [1, 0] }],
+        totalPayoutMultiplier: 1, wildSymbol: WILD_SYMBOL,
       };
       return { clusterWins: [], totalPayoutMultiplier: 0, wildSymbol: WILD_SYMBOL };
     };
   };
-  const clearGrid = blank();
-  const clearMultipliers = Array.from({ length: 5 }, () => Array(5).fill(1));
+  const oneWildGrid = blank();
+  oneWildGrid[2][2] = WILD_SYMBOL;
+  const oneWildMultipliers = Array.from({ length: 5 }, () => Array(5).fill(1));
   const args = { reelStrips: Array.from({ length: 5 }, () => ['lemon', 'mint']), rowsCount: 5, seed: 9,
     config: {
       paytable: PAYTABLE,
       wildSymbol: WILD_SYMBOL,
       linesPerPop: 5,
-      popsToRush: 3,
+      popsToRush: 99,
+      betAmount: 1,
+      popFeatures: ['wild-splash'],
+      applyPopFeature: ({ feature }) => ({
+        grid: oneWildGrid.map(column => column.slice()),
+        wildMultipliers: oneWildMultipliers.map(column => column.slice()),
+        fallOffsets: oneWildGrid.map(column => column.map(() => 0)),
+        feature,
+        affectedPositions: [],
+      }),
+      popRushVariants: ['pop-rush'],
+      applyPopRushVariant: ({ grid, wildMultipliers }) => ({ grid, wildMultipliers }),
+    } };
+  const result = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
+  const replay = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
+  const rushTriggerStep = result.steps.find(step => (step.popSettleDebug?.action ?? step.popDebug?.action) === 'pop-rush-triggered');
+  const rushTriggerDebug = rushTriggerStep?.popSettleDebug || rushTriggerStep?.popDebug;
+  assert.equal(result.triggeredPopRush, true);
+  assert.ok(rushTriggerStep);
+  assert.ok(rushTriggerDebug.wildsRemaining <= 1);
+  assert.ok(rushTriggerDebug.bankedChargeLines < 5 * 99, 'Pop Rush should trigger long before the meter is full');
+  assert.equal(replay.popProgress.totalLines, result.popProgress.totalLines);
+  assert.equal(LemonPopSpinMechanic.name, 'lemonPopCascade');
+  assert.equal(resolveMechanic('line').name, 'line');
+  const rebuilt = resolveWinEvaluator('checkStraightLineWins', PAYTABLE, null, 3, null, null, WILD_SYMBOL);
+  const board = blank(); board[0][0] = board[1][0] = board[2][0] = 'lemon';
+  assert.deepEqual(rebuilt(board, null), checkStraightLineWins(board, PAYTABLE, { wildSymbol: WILD_SYMBOL, wildMultipliers: null }));
+});
+
+test('a fully cleared board triggers Pop Rush and awards the 25x total-bet bonus', () => {
+  const makeEvaluator = () => {
+    let calls = 0;
+    return () => {
+      calls += 1;
+      if (calls <= 5) {
+        const row = calls - 1;
+        return {
+          clusterWins: [{ kind: 'straight-line', orientation: 'horizontal', symbol: 'lemon', count: 3, payout: 1, winningPositions: [[0, row], [1, row], [2, row]], wildSpawnPosition: [1, row] }],
+          totalPayoutMultiplier: 1, wildSymbol: WILD_SYMBOL,
+        };
+      }
+      return { clusterWins: [], totalPayoutMultiplier: 0, wildSymbol: WILD_SYMBOL };
+    };
+  };
+  const clearGrid = blank();
+  const clearMultipliers = Array.from({ length: 5 }, () => Array(5).fill(1));
+  const result = LemonPopSpinMechanic.resolveLiveSpin({
+    reelStrips: Array.from({ length: 5 }, () => ['lemon', 'mint']),
+    rowsCount: 5,
+    seed: 9,
+    config: {
+      paytable: PAYTABLE,
+      wildSymbol: WILD_SYMBOL,
+      linesPerPop: 5,
+      popsToRush: 99,
       betAmount: 1,
       popFeatures: ['wild-splash'],
       applyPopFeature: ({ feature }) => ({
@@ -160,35 +214,13 @@ test('filled Pops fire only after settle, spend one segment, and expose debug st
       }),
       popRushVariants: ['pop-rush'],
       applyPopRushVariant: ({ grid, wildMultipliers }) => ({ grid, wildMultipliers }),
-    } };
-  const result = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
-  const replay = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
-  const firstFeatureStepIndex = result.steps.findIndex(step => step.popFeatures?.length);
-  assert.ok(firstFeatureStepIndex > 0);
-  assert.ok(result.steps.slice(0, firstFeatureStepIndex).every(step => (step.popFeatures?.length ?? 0) === 0));
-  assert.ok(result.steps.slice(0, firstFeatureStepIndex).some(step => step.clusterWins.length === 0));
-  assert.equal(result.steps[firstFeatureStepIndex].clusterWins.length, 0);
-  assert.equal(result.triggeredPopRush, false);
-  assert.deepEqual(result.popProgress, {
-    totalLines: 15,
-    bankedChargeLines: 10,
-    linesPerPop: 5,
-    popsToRush: 3,
-    availablePops: 2,
-    completedPops: 2,
-    linesInCurrentPop: 0,
+    },
+    winEvaluator: makeEvaluator(),
   });
-  assert.equal(result.steps.flatMap(step => step.popFeatures || []).length, 1);
-  assert.equal(result.steps[firstFeatureStepIndex].popDebug.action, 'mini-pop-triggered');
-  assert.equal(result.steps[firstFeatureStepIndex].popDebug.availablePopsBeforeSpend, 3);
-  assert.equal(result.steps[firstFeatureStepIndex].popDebug.availablePopsAfterSpend, 2);
-  assert.equal(result.steps.at(-1).popSettleDebug.action, 'settled-board-clear');
-  assert.equal(replay.popProgress.availablePops, result.popProgress.availablePops);
-  assert.equal(LemonPopSpinMechanic.name, 'lemonPopCascade');
-  assert.equal(resolveMechanic('line').name, 'line');
-  const rebuilt = resolveWinEvaluator('checkStraightLineWins', PAYTABLE, null, 3, null, null, WILD_SYMBOL);
-  const board = blank(); board[0][0] = board[1][0] = board[2][0] = 'lemon';
-  assert.deepEqual(rebuilt(board, null), checkStraightLineWins(board, PAYTABLE, { wildSymbol: WILD_SYMBOL, wildMultipliers: null }));
+  const bonusStep = result.steps.find(step => (step.popSettleDebug?.fullClearBonusMultiplier ?? step.popDebug?.fullClearBonusMultiplier) === 25);
+  assert.equal(result.triggeredPopRush, true);
+  assert.ok(bonusStep);
+  assert.equal(bonusStep.payout, 25);
 });
 
 test('Lemon Pop uses a 5x5 reel shape, includes every configured paying symbol, and never puts the wild can on strips', () => {

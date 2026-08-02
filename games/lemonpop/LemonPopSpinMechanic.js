@@ -6,6 +6,7 @@ import { applyPopFeature, applyPopRushVariant, POP_FEATURES, POP_RUSH_VARIANTS }
 import { createCascadeSpinLogEntry } from '../../core/logging/SpinLog.js';
 
 export const LEMON_POP_MECHANIC_NAME = 'lemonPopCascade';
+const FULL_CLEAR_BONUS_MULTIPLIER = 25;
 
 const popProgressSnapshot = (totalLines, bankedChargeLines, linesPerPop, popsToRush) => ({
   totalLines,
@@ -19,6 +20,26 @@ const popProgressSnapshot = (totalLines, bankedChargeLines, linesPerPop, popsToR
 
 function isBoardClear(grid) {
   return grid.every(column => column.every(symbol => symbol == null));
+}
+
+function countSymbol(grid, symbol) {
+  return grid.reduce((count, column) => count + column.filter(cell => cell === symbol).length, 0);
+}
+
+function awardFullClearBonus(sequence, bonusMultiplier = FULL_CLEAR_BONUS_MULTIPLIER) {
+  if (!isBoardClear(sequence.finalGrid)) return sequence;
+  const lastStep = sequence.cascadeSteps.at(-1);
+  if (!lastStep) return sequence;
+  lastStep.payout = (lastStep.payout || 0) + bonusMultiplier;
+  if (lastStep.popSettleDebug) {
+    lastStep.popSettleDebug.fullClearBonusMultiplier = bonusMultiplier;
+  } else if (lastStep.popDebug) {
+    lastStep.popDebug.fullClearBonusMultiplier = bonusMultiplier;
+  } else {
+    lastStep.popDebug = { action: 'full-clear-bonus-awarded', fullClearBonusMultiplier: bonusMultiplier };
+  }
+  sequence.totalPayoutMultiplier += bonusMultiplier;
+  return sequence;
 }
 
 function cloneGrid(grid) {
@@ -161,6 +182,7 @@ function resolveCheatMiniFeature({ reelStrips, rowsCount, seed, config, winEvalu
       affectedPositions: applied.affectedPositions,
       transformedSymbol: applied.transformedSymbol,
       removedSymbols: applied.removedSymbols,
+      spawnSymbol: config.wildSymbol,
     },
     popDebug: {
       action: 'mini-pop-cheat-triggered',
@@ -192,7 +214,7 @@ function resolveCheatPopRush({ reelStrips, rowsCount, seed, config, winEvaluator
   const linesPerPop = Math.max(1, config.linesPerPop ?? 5);
   const popsToRush = Math.max(1, config.popsToRush ?? 3);
   const chargedLines = linesPerPop * popsToRush;
-  const special = resolveSequence({
+  const special = awardFullClearBonus(resolveSequence({
     reelStrips,
     rowsCount,
     seed: (seed ^ 0x9e3779b9) >>> 0,
@@ -202,7 +224,7 @@ function resolveCheatPopRush({ reelStrips, rowsCount, seed, config, winEvaluator
     totalLines: chargedLines,
     bankedChargeLines: chargedLines,
     forcedPopRushVariant: variant,
-  });
+  }));
   return {
     cascadeSteps: special.cascadeSteps,
     totalPayoutMultiplier: special.totalPayoutMultiplier,
@@ -231,6 +253,7 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
   let triggeredMiniPops = 0;
 
   const availablePops = () => Math.min(popsToRush, Math.floor(bankedChargeLines / linesPerPop));
+  const canTriggerPopRush = () => countSymbol(currentGrid, config.wildSymbol) <= 1;
 
   const annotateLastSettledStep = (action, extra = {}) => {
     const lastStep = cascadeSteps.at(-1);
@@ -241,6 +264,7 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
       bankedChargeLines,
       availablePops: availablePops(),
       boardClear: isBoardClear(currentGrid),
+      wildsRemaining: countSymbol(currentGrid, config.wildSymbol),
       ...extra,
     };
     if ((lastStep.popFeatures?.length ?? 0) > 0) {
@@ -263,6 +287,7 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
 
   while (!isBoardClear(currentGrid)) {
     annotateLastSettledStep('settled-before-mini-pop-check');
+    if (canTriggerPopRush()) break;
     if (availablePops() <= 0) break;
     const feature = popFeaturePool[Math.floor(featureRng() * popFeaturePool.length)];
     const bankedChargeLinesBeforeSpend = bankedChargeLines;
@@ -294,6 +319,7 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
         affectedPositions: applied.affectedPositions,
         transformedSymbol: applied.transformedSymbol,
         removedSymbols: applied.removedSymbols,
+        spawnSymbol: config.wildSymbol,
       },
       popDebug: {
         action: 'mini-pop-triggered',
@@ -309,9 +335,15 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
     }));
   }
 
-  annotateLastSettledStep(isBoardClear(currentGrid) ? 'settled-board-clear' : 'settled-no-mini-pops-remaining');
+  const boardCleared = isBoardClear(currentGrid);
+  const rushReady = canTriggerPopRush();
+  annotateLastSettledStep(boardCleared ? 'settled-board-clear' : rushReady ? 'settled-pop-rush-ready' : 'settled-no-mini-pops-remaining');
+  if (boardCleared) {
+    awardFullClearBonus({ cascadeSteps, totalPayoutMultiplier, finalGrid: currentGrid, wildMultipliers: currentWildMultipliers });
+    totalPayoutMultiplier = cascadeSteps.reduce((sum, step) => sum + (step.payout || 0), 0);
+  }
 
-  if (availablePops() < popsToRush || !isBoardClear(currentGrid)) {
+  if (!rushReady) {
     return {
       cascadeSteps,
       totalPayoutMultiplier,
@@ -327,9 +359,19 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
   // A separate derived seed keeps the base sequence deterministic and makes feature selection
   // reproducible without consuming a second, shared random stream.
   const specialSeed = (seed ^ 0x9e3779b9) >>> 0;
-  annotateLastSettledStep('pop-rush-triggered');
-  const special = resolveSequence({ reelStrips, rowsCount, seed: specialSeed, config, winEvaluator, special: true, totalLines, bankedChargeLines });
+  annotateLastSettledStep('pop-rush-triggered', boardCleared ? { fullClearBonusMultiplier: FULL_CLEAR_BONUS_MULTIPLIER } : {});
+  const special = awardFullClearBonus(resolveSequence({
+    reelStrips,
+    rowsCount,
+    seed: specialSeed,
+    config,
+    winEvaluator,
+    special: true,
+    totalLines,
+    bankedChargeLines,
+  }));
   appendSequence(special);
+  totalPayoutMultiplier = cascadeSteps.reduce((sum, step) => sum + (step.payout || 0), 0);
   return {
     cascadeSteps,
     totalPayoutMultiplier,
