@@ -1,6 +1,6 @@
 {
   "name": "slotmaster",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "description": "Browser-based slot machine games.",
   "private": true,
   "license": "SEE LICENSE IN LICENSE.md",

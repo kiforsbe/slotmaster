@@ -3,6 +3,14 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.11.0 — 2026-08-02
+
+### Fixed
+
+- **Lemon Pop's Pop Rush could trigger with a wild sitting alongside other symbols** — the
+  "one wild can or fewer" settle condition now also requires nothing else remain on the board;
+  previously it counted only wild cans and ignored other leftover symbols.
+
 ## 0.10.2 — 2026-08-02
 
 ### Added

@@ -6,6 +6,9 @@ Lemon Pop is a 5×5 no-refill cascade game. Horizontal and vertical straight run
 - Each paying run is removed, leaves a new 1× wild can at its centre, and the remaining symbols fall. Empty top cells are never refilled.
 - A natural single-symbol run with wilds pays full. Mixed premium runs pay half of the best premium; mixed regular runs do not pay. All-wild runs use the Wild Can ladder.
 - A 2× wild can doubles a winning run once; it is consumed when used. Every five winning lines fills one Pop. Filled Pops wait until the current no-refill cascades stop, then perform one seeded board effect: **Wild Splash** adds one or two wild cans, **Flavor Shift** changes every instance of one landed natural symbol, or **Bubble Burst** removes two matching pairs.
-- Whenever a spin settles with the board fully cleared or holding one wild can or fewer, it upgrades into one free, non-retriggering Pop Rush respin on a fresh board — no need to fill the Pop meter first. Any sequence that ends on a fully clear board also awards a 25× total-bet bonus. Pop Rush randomly selects **Pop Rush**, **Citrus Cross**, **Flavor Remix**, or **Soda Storm**.
+- Whenever a spin settles with the board fully cleared, or holding one wild can or fewer and nothing else, it upgrades into one free, non-retriggering Pop Rush respin on a fresh board — no need to fill the Pop meter first. Any sequence that ends on a fully clear board also awards a 25× total-bet bonus. Pop Rush randomly selects **Pop Rush**, **Citrus Cross**, **Flavor Remix**, or **Soda Storm**.
 
 The implementation uses `core/math/StraightLineMath.js`, `games/lemonpop/LemonPopFeatures.js`, and `games/lemonpop/LemonPopSpinMechanic.js`; live play, the simulator, and workers share the same mechanic.
+
+---
+_Docs last synced with the codebase: 2026-08-02, commit `de3e4f1`._

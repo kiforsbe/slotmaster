@@ -341,7 +341,7 @@ async function initGame() {
     wildSymbol: WILD_SYMBOL, renderSymbol: symbol => symbolIconHtml(symbol, engine.assets),
     featureNames: [
       'Every five winning lines fills one can segment. Filled mini Pops trigger only after the current cascades stop.',
-      'Settling with the board cleared or one wild or fewer left launches one free Pop Rush respin on a fresh board.',
+      'Settling with the board cleared, or with nothing left but one wild or fewer, launches one free Pop Rush respin on a fresh board.',
       'Any fully cleared board awards a 25x total-bet bonus.',
       `Pop effects: ${POP_FEATURES.map(prettyPopFeature).join(', ')}.`,
       ...POP_RUSH_VARIANTS.map(prettyVariant),

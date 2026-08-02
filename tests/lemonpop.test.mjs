@@ -177,6 +177,46 @@ test('settling at one wild or fewer triggers Pop Rush without needing the meter 
   assert.deepEqual(rebuilt(board, null), checkStraightLineWins(board, PAYTABLE, { wildSymbol: WILD_SYMBOL, wildMultipliers: null }));
 });
 
+test('holding one wild alongside another symbol does not trigger Pop Rush', () => {
+  const makeEvaluator = () => {
+    let calls = 0;
+    return () => {
+      calls += 1;
+      if (calls <= 15) return {
+        clusterWins: [{ kind: 'straight-line', orientation: 'horizontal', symbol: 'lemon', count: 3, payout: 1, winningPositions: [[0, 0], [1, 0], [2, 0]], wildSpawnPosition: [1, 0] }],
+        totalPayoutMultiplier: 1, wildSymbol: WILD_SYMBOL,
+      };
+      return { clusterWins: [], totalPayoutMultiplier: 0, wildSymbol: WILD_SYMBOL };
+    };
+  };
+  const oneWildPlusSymbolGrid = blank();
+  oneWildPlusSymbolGrid[2][2] = WILD_SYMBOL;
+  oneWildPlusSymbolGrid[0][0] = 'lemonwedge';
+  const oneWildPlusSymbolMultipliers = Array.from({ length: 5 }, () => Array(5).fill(1));
+  const args = { reelStrips: Array.from({ length: 5 }, () => ['lemon', 'mint']), rowsCount: 5, seed: 9,
+    config: {
+      paytable: PAYTABLE,
+      wildSymbol: WILD_SYMBOL,
+      linesPerPop: 5,
+      popsToRush: 99,
+      betAmount: 1,
+      popFeatures: ['wild-splash'],
+      applyPopFeature: ({ feature }) => ({
+        grid: oneWildPlusSymbolGrid.map(column => column.slice()),
+        wildMultipliers: oneWildPlusSymbolMultipliers.map(column => column.slice()),
+        fallOffsets: oneWildPlusSymbolGrid.map(column => column.map(() => 0)),
+        feature,
+        affectedPositions: [],
+      }),
+      popRushVariants: ['pop-rush'],
+      applyPopRushVariant: ({ grid, wildMultipliers }) => ({ grid, wildMultipliers }),
+    } };
+  const result = LemonPopSpinMechanic.resolveLiveSpin({ ...args, winEvaluator: makeEvaluator() });
+  const rushTriggerStep = result.steps.find(step => (step.popSettleDebug?.action ?? step.popDebug?.action) === 'pop-rush-triggered');
+  assert.equal(result.triggeredPopRush, false, 'a lingering non-wild symbol must block Pop Rush even with one wild or fewer');
+  assert.ok(!rushTriggerStep);
+});
+
 test('a fully cleared board triggers Pop Rush and awards the 25x total-bet bonus', () => {
   const makeEvaluator = () => {
     let calls = 0;

@@ -253,7 +253,8 @@ function resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator })
   let triggeredMiniPops = 0;
 
   const availablePops = () => Math.min(popsToRush, Math.floor(bankedChargeLines / linesPerPop));
-  const canTriggerPopRush = () => countSymbol(currentGrid, config.wildSymbol) <= 1;
+  const canTriggerPopRush = () => countSymbol(currentGrid, config.wildSymbol) <= 1
+    && currentGrid.every(column => column.every(symbol => symbol == null || symbol === config.wildSymbol));
 
   const annotateLastSettledStep = (action, extra = {}) => {
     const lastStep = cascadeSteps.at(-1);
