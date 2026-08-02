@@ -536,24 +536,43 @@ export class SlotRenderer {
   // `clearCellHighlight` preserves the original per-tile gold glow by default, but lets a
   // cluster visualizer replace that busy cell-by-cell treatment with one clean silhouette.
   drawGridSymbols(ctx, asset, symbolsConfig, layout, reelsCount, rowsCount, gridState) {
-    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true, wildMultipliers, wildSymbol, spawnPreviews = [] } = gridState;
+    const { grid, cellOffsets, currentClearVariants, currentFeatureSymbols = new Map(), cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true, wildMultipliers, wildSymbol, spawnPreviews = [] } = gridState;
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
 
     for (let col = 0; col < reelsCount; col++) {
       for (let row = 0; row < rowsCount; row++) {
         const symbol = grid[col][row];
-        if (!symbol) continue;
-
         const offsetRows = cellOffsets[col][row] || 0;
         const cx = reelsX + col * symbolWidth;
         const cy = reelsY + (row - offsetRows) * symbolHeight;
-        const tile = symbolsConfig[symbol];
 
         const clearInfo = clearProgress != null ? currentClearVariants.get(`${col},${row}`) : null;
         const bounceElapsed = now - cellBounceStartTime[col][row];
         const isBouncing = !clearInfo && offsetRows === 0 && bounceElapsed >= 0 && bounceElapsed < bounceDuration;
+        const featureInfo = clearInfo ? currentFeatureSymbols.get(`${col},${row}`) : null;
+
+        if (!symbol && !featureInfo) continue;
+
+        const tile = symbol ? symbolsConfig[symbol] : null;
 
         if (clearInfo && clearCellHighlight) this._drawClearGlow(ctx, cx, cy, layout, clearProgress);
+
+        if (featureInfo?.feature === 'wild-splash') {
+          this._drawWildSplashTransition(ctx, asset, symbolsConfig, layout, cx, cy, symbolWidth, symbolHeight, featureInfo, clearProgress);
+          continue;
+        }
+
+        if (featureInfo?.feature === 'flavor-shift') {
+          this._drawFlavorShiftTransition(ctx, asset, symbolsConfig, layout, cx, cy, symbolWidth, symbolHeight, featureInfo, clearProgress);
+          continue;
+        }
+
+        if (featureInfo?.feature === 'bubble-burst') {
+          this._drawBubbleBurstTransition(ctx, asset, symbolsConfig, layout, cx, cy, symbolWidth, symbolHeight, featureInfo, clearProgress, col, row);
+          continue;
+        }
+
+        if (!symbol) continue;
 
         ctx.save();
         if (clearInfo) {
@@ -659,6 +678,21 @@ export class SlotRenderer {
         ctx.scale(scale, scale);
         break;
       }
+      case 'wildSplash': {
+        const scale = 0.82 + Math.sin(Math.min(progress, 1) * Math.PI) * 0.16;
+        ctx.scale(scale, scale);
+        break;
+      }
+      case 'flavorShift': {
+        const scale = 1 + Math.sin(Math.min(progress, 1) * Math.PI) * 0.08;
+        ctx.scale(scale, scale);
+        break;
+      }
+      case 'bubbleBurst': {
+        const scale = Math.max(0.2, 1 - progress * 0.85);
+        ctx.scale(scale, scale);
+        break;
+      }
       case 'gravitate': {
         const targetCol = clearInfo.targetPosition?.[0] ?? null;
         const targetRow = clearInfo.targetPosition?.[1] ?? null;
@@ -679,6 +713,120 @@ export class SlotRenderer {
     }
 
     ctx.translate(-centerX, -centerY);
+  }
+
+  _drawWildSplashTransition(ctx, asset, symbolsConfig, layout, cx, cy, symbolWidth, symbolHeight, featureInfo, progress) {
+    const fromTile = featureInfo.fromSymbol ? symbolsConfig[featureInfo.fromSymbol] : null;
+    const toTile = featureInfo.toSymbol ? symbolsConfig[featureInfo.toSymbol] : null;
+    const eased = Math.sin(Math.min(progress, 1) * (Math.PI / 2));
+    const oldAlpha = fromTile ? Math.max(0, 1 - Math.min(progress / 0.45, 1)) : 0;
+    const newAlpha = Math.max(0, Math.min((progress - 0.08) / 0.36, 1));
+    const glowAlpha = Math.max(0, Math.min((progress - 0.02) / 0.28, 1)) * Math.max(0, 1 - progress * 0.55);
+    const spawnScale = progress < 0.68
+      ? 0.24 + (progress / 0.68) * 0.92
+      : 1.16 - ((progress - 0.68) / 0.32) * 0.16;
+
+    if (fromTile && oldAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = oldAlpha;
+      drawSpriteSymbol(ctx, asset, fromTile, cx, cy, symbolWidth, symbolHeight, 0);
+      ctx.restore();
+    }
+
+    if (glowAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = glowAlpha;
+      ctx.translate(cx + symbolWidth / 2, cy + symbolHeight / 2);
+      ctx.fillStyle = 'rgba(245, 255, 111, 0.9)';
+      ctx.shadowColor = '#fff46f';
+      ctx.shadowBlur = 22 * eased;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(symbolWidth, symbolHeight) * (0.12 + eased * 0.24), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    if (toTile && newAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = newAlpha;
+      ctx.shadowColor = '#eeff63';
+      ctx.shadowBlur = 18 * eased;
+      ctx.translate(cx + symbolWidth / 2, cy + symbolHeight / 2);
+      ctx.scale(spawnScale, spawnScale);
+      ctx.translate(-(cx + symbolWidth / 2), -(cy + symbolHeight / 2));
+      drawSpriteSymbol(ctx, asset, toTile, cx, cy, symbolWidth, symbolHeight, 0);
+      ctx.restore();
+    }
+  }
+
+  _drawFlavorShiftTransition(ctx, asset, symbolsConfig, layout, cx, cy, symbolWidth, symbolHeight, featureInfo, progress) {
+    const fromTile = featureInfo.fromSymbol ? symbolsConfig[featureInfo.fromSymbol] : null;
+    const toTile = featureInfo.toSymbol ? symbolsConfig[featureInfo.toSymbol] : null;
+    const eased = Math.sin(Math.min(progress, 1) * (Math.PI / 2));
+    const vanishAlpha = progress < 0.56 ? 1 : Math.max(0, 1 - ((progress - 0.56) / 0.38));
+    const appearAlpha = Math.max(0, Math.min((progress - 0.34) / 0.4, 1));
+    const oldScale = 1 - eased * 0.1;
+    const newScale = 0.78 + eased * 0.24;
+
+    if (fromTile && vanishAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = vanishAlpha;
+      ctx.translate(cx + symbolWidth / 2, cy + symbolHeight / 2);
+      ctx.rotate(eased * Math.PI * 0.18);
+      ctx.scale(oldScale, oldScale);
+      ctx.translate(-(cx + symbolWidth / 2), -(cy + symbolHeight / 2));
+      drawSpriteSymbol(ctx, asset, fromTile, cx, cy, symbolWidth, symbolHeight, 0);
+      ctx.restore();
+    }
+
+    if (toTile && appearAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = appearAlpha;
+      ctx.shadowColor = '#f7f36d';
+      ctx.shadowBlur = 14 * eased;
+      ctx.translate(cx + symbolWidth / 2, cy + symbolHeight / 2);
+      ctx.scale(newScale, newScale);
+      ctx.translate(-(cx + symbolWidth / 2), -(cy + symbolHeight / 2));
+      drawSpriteSymbol(ctx, asset, toTile, cx, cy, symbolWidth, symbolHeight, 0);
+      ctx.restore();
+    }
+  }
+
+  _drawBubbleBurstTransition(ctx, asset, symbolsConfig, layout, cx, cy, symbolWidth, symbolHeight, featureInfo, progress, col, row) {
+    const fromTile = featureInfo.fromSymbol ? symbolsConfig[featureInfo.fromSymbol] : null;
+    if (!fromTile) return;
+
+    const centerX = cx + symbolWidth / 2;
+    const centerY = cy + symbolHeight / 2;
+    const direction = (((col + 1) * 37) + ((row + 1) * 53)) * (Math.PI / 180);
+    const travel = Math.sin(Math.min(progress, 1) * (Math.PI / 2)) * Math.min(symbolWidth, symbolHeight) * 0.32;
+    const driftX = Math.cos(direction) * travel;
+    const driftY = Math.sin(direction) * travel - (progress * symbolHeight * 0.08);
+    const alpha = Math.max(0, 1 - Math.min(progress / 0.42, 1));
+    const scale = Math.max(0.16, 1 - progress * 0.78);
+    const ringAlpha = Math.max(0, 1 - Math.min(progress / 0.55, 1));
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(centerX + driftX, centerY + driftY);
+    ctx.rotate(progress * Math.PI * 0.28 * (col % 2 === 0 ? 1 : -1));
+    ctx.scale(scale, scale);
+    ctx.translate(-centerX, -centerY);
+    drawSpriteSymbol(ctx, asset, fromTile, cx, cy, symbolWidth, symbolHeight, 0);
+    ctx.restore();
+
+    if (ringAlpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = ringAlpha * 0.9;
+      ctx.strokeStyle = '#8df6ff';
+      ctx.lineWidth = 3;
+      ctx.shadowColor = '#8df6ff';
+      ctx.shadowBlur = 12;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, Math.max(symbolWidth, symbolHeight) * (0.12 + progress * 0.42), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   _drawClearSpriteEffect(ctx, clearEffect, cx, cy, layout, progress) {
@@ -960,6 +1108,7 @@ export class SlotRenderer {
         clearCellHighlight: engine.config.clearCellHighlight !== false,
         wildMultipliers: animator.wildMultipliers,
         wildSymbol: engine.config.wildSymbol,
+        currentFeatureSymbols: animator.currentFeatureSymbols,
         spawnPreviews: animator.currentSpawnPreviews,
         bounceDuration: engine.turboMode ? 140 : 260,
         now: Date.now(),

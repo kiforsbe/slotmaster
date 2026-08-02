@@ -49,6 +49,62 @@ export class ParticleSystem {
     });
   }
 
+  /**
+   * Replaces any current burst with a citrus swirl centered on each given world-space point.
+   * @param {{x: number, y: number}[]} points
+   */
+  spawnSwirl(points) {
+    this.particles = [];
+    const maxSpots = Math.min(points.length, Math.floor(MAX_PARTICLES / PARTICLES_PER_SPOT));
+    points.slice(0, maxSpots).forEach(({ x: cx, y: cy }) => {
+      for (let i = 0; i < PARTICLES_PER_SPOT; i++) {
+        const orbit = (i / PARTICLES_PER_SPOT) * Math.PI * 2;
+        const speed = 0.8 + Math.random() * 2.2;
+        const radius = 8 + Math.random() * 18;
+        this.particles.push({
+          x: cx + Math.cos(orbit) * radius,
+          y: cy + Math.sin(orbit) * radius * 0.7,
+          vx: Math.cos(orbit + Math.PI / 2) * speed * (0.6 + Math.random() * 0.7),
+          vy: Math.sin(orbit + Math.PI / 2) * speed * 0.45 - 0.35,
+          size: 2 + Math.random() * 4,
+          alpha: 0.95,
+          decay: 0.012 + Math.random() * 0.012,
+          color: `hsl(${48 + Math.random() * 24}, 100%, ${58 + Math.random() * 18}%)`,
+          rotation: orbit,
+          vRotation: 0.08 + Math.random() * 0.1,
+        });
+      }
+    });
+  }
+
+  /**
+   * Replaces any current burst with a fizzy bubble scatter centered on each given world-space point.
+   * @param {{x: number, y: number}[]} points
+   */
+  spawnPopScatter(points) {
+    this.particles = [];
+    const maxSpots = Math.min(points.length, Math.floor(MAX_PARTICLES / PARTICLES_PER_SPOT));
+    points.slice(0, maxSpots).forEach(({ x: cx, y: cy }) => {
+      for (let i = 0; i < PARTICLES_PER_SPOT; i++) {
+        const angle = (i / PARTICLES_PER_SPOT) * Math.PI * 2;
+        const speed = 1.4 + Math.random() * 3.4;
+        const lift = 0.5 + Math.random() * 1.1;
+        this.particles.push({
+          x: cx,
+          y: cy,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed - lift,
+          size: 2 + Math.random() * 5,
+          alpha: 0.92,
+          decay: 0.018 + Math.random() * 0.014,
+          color: `hsl(${182 + Math.random() * 34}, 92%, ${68 + Math.random() * 18}%)`,
+          rotation: angle,
+          vRotation: -0.18 + Math.random() * 0.36,
+        });
+      }
+    });
+  }
+
   render(ctx) {
     this.particles.forEach(p => {
       ctx.save();

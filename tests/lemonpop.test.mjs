@@ -121,6 +121,10 @@ test('each Pop charge effect is seeded, makes a bounded board change, and preser
   });
   const splash = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature: 'wild-splash', rng: createSeededRng(1) });
   assert.ok(splash.grid.flat().filter(symbol => symbol === WILD_SYMBOL).length >= 1);
+  const shift = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature: 'flavor-shift', rng: createSeededRng(2) });
+  assert.ok(shift.affectedPositions.length > 1);
+  const shiftedSymbols = new Set(shift.affectedPositions.map(([col, row]) => shift.grid[col][row]));
+  assert.deepEqual([...shiftedSymbols], [shift.transformedSymbol]);
   const burst = applyPopFeature({ grid: base, wildMultipliers: mults, paytable: PAYTABLE, wildSymbol: WILD_SYMBOL, feature: 'bubble-burst', rng: createSeededRng(2) });
   assert.ok(burst.grid.flat().filter(symbol => symbol != null).length < base.flat().filter(symbol => symbol != null).length);
 });

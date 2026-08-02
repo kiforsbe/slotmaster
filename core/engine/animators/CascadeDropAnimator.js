@@ -78,6 +78,7 @@ export class CascadeDropAnimator {
     this.currentClearDurationMs = null;
     this.currentClearVariants = new Map();
     this.currentSpawnPreviews = [];
+    this.currentFeatureSymbols = new Map();
     this.activePopups = [];
   }
 
@@ -216,6 +217,7 @@ export class CascadeDropAnimator {
     this.currentClearPositions = [];
     this.currentClearDurationMs = null;
     this.currentSpawnPreviews = [];
+    this.currentFeatureSymbols = new Map();
 
     this._runFallPhase(engine, step.grid, step.fallOffsets, hasExistingGrid, onDone, step.wildMultipliers);
   }
@@ -294,6 +296,7 @@ export class CascadeDropAnimator {
           this.currentClearPositions = [];
           this.currentClearDurationMs = null;
           this.currentSpawnPreviews = [];
+          this.currentFeatureSymbols = new Map();
           this.currentClusterWins = null;
           this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
         }
@@ -307,8 +310,13 @@ export class CascadeDropAnimator {
   _playFeatureTransition(engine, prevStep, nextStep, onDone) {
     const reelsCount = engine.config.reelsCount;
     const rowsCount = engine.config.rowsCount;
-    this.grid = nextStep.grid.map(col => col.slice());
-    this.wildMultipliers = nextStep.wildMultipliers?.map(column => column.slice())
+    const baseFeatureDuration = engine.turboMode ? 1200 : 2000;
+    const interruptedFeatureDuration = engine.turboMode ? 600 : 1000;
+    const hasWildSplash = (nextStep.popFeatures || []).some(feature => feature.feature === 'wild-splash');
+    const hasBubbleBurst = (nextStep.popFeatures || []).some(feature => feature.feature === 'bubble-burst');
+    const featureRevealOnly = hasWildSplash || hasBubbleBurst;
+    this.grid = prevStep.grid.map(col => col.slice());
+    this.wildMultipliers = prevStep.wildMultipliers?.map(column => column.slice())
       || this.grid.map(column => new Array(column.length).fill(1));
     this.cellOffsets = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(0));
 
@@ -337,20 +345,72 @@ export class CascadeDropAnimator {
       return;
     }
 
+    // Mini Pop reveals need to stay readable even when the player has already requested a stop;
+    // let turbo/stop shorten them somewhat, but never down to ordinary cascade-clear timings.
     const clearDuration = engine._stopRequested
-      ? Math.min(3200, engine.turboMode ? 600 : 1000)
-      : 3200;
+      ? interruptedFeatureDuration
+      : baseFeatureDuration;
     this._clearStartTime = Date.now();
     this.currentClearDurationMs = clearDuration;
-    this.currentClearPositions = changedPositions;
     this.currentClearVariants = new Map();
-    changedPositions.forEach(([col, row]) => {
-      this.currentClearVariants.set(`${col},${row}`, {
-        variant: 'spin',
-        spinDirection: 1,
+    this.currentFeatureSymbols = new Map();
+    const explicitFeaturePositions = [];
+    const wildSplashPoints = [];
+    const flavorShiftPoints = [];
+    const bubbleBurstPoints = [];
+    nextStep.popFeatures.forEach(feature => {
+      (feature.affectedPositions || []).forEach(([col, row]) => {
+        const key = `${col},${row}`;
+        const previousSymbol = prevStep.grid?.[col]?.[row] ?? null;
+        const nextSymbol = nextStep.grid?.[col]?.[row] ?? null;
+        this.currentFeatureSymbols.set(key, {
+          feature: feature.feature,
+          fromSymbol: previousSymbol,
+          toSymbol: feature.feature === 'wild-splash'
+            ? (feature.spawnSymbol || engine.config.wildSymbol)
+            : nextSymbol,
+        });
+        if (!explicitFeaturePositions.some(([existingCol, existingRow]) => existingCol === col && existingRow === row)) {
+          explicitFeaturePositions.push([col, row]);
+        }
+        this.currentClearVariants.set(key, {
+          variant: feature.feature === 'wild-splash'
+            ? 'wildSplash'
+            : feature.feature === 'flavor-shift'
+              ? 'flavorShift'
+              : feature.feature === 'bubble-burst'
+                ? 'bubbleBurst'
+                : 'spin',
+          spinDirection: 1,
+        });
+        const point = {
+          x: engine.reelsX + (col * engine.symbolWidth) + (engine.symbolWidth / 2),
+          y: engine.reelsY + (row * engine.symbolHeight) + (engine.symbolHeight / 2),
+        };
+        if (feature.feature === 'wild-splash') wildSplashPoints.push(point);
+        else if (feature.feature === 'flavor-shift') flavorShiftPoints.push(point);
+        else if (feature.feature === 'bubble-burst') bubbleBurstPoints.push(point);
       });
     });
-    this._spawnClearParticles(engine, changedPositions);
+    this.currentClearPositions = featureRevealOnly ? explicitFeaturePositions : changedPositions;
+    if (!featureRevealOnly) changedPositions.forEach(([col, row]) => {
+      const key = `${col},${row}`;
+      if (!this.currentClearVariants.has(key)) {
+        this.currentClearVariants.set(key, {
+          variant: 'spin',
+          spinDirection: 1,
+        });
+      }
+    });
+    if (wildSplashPoints.length > 0) {
+      this.particleSystem?.spawnSwirl(wildSplashPoints);
+    } else if (flavorShiftPoints.length > 0) {
+      this.particleSystem?.spawnSwirl(flavorShiftPoints);
+    } else if (bubbleBurstPoints.length > 0) {
+      this.particleSystem?.spawnPopScatter(bubbleBurstPoints);
+    } else {
+      this._spawnClearParticles(engine, this.currentClearPositions);
+    }
     engine.audioController?.onExpand?.();
 
     const waitForFeatureClear = () => {
@@ -359,9 +419,17 @@ export class CascadeDropAnimator {
         return;
       }
 
+      this.grid = nextStep.grid.map(col => col.slice());
+      this.wildMultipliers = nextStep.wildMultipliers?.map(column => column.slice())
+        || this.grid.map(column => new Array(column.length).fill(1));
       this.currentClearPositions = [];
       this.currentClearDurationMs = null;
       this.currentClearVariants = new Map();
+      this.currentFeatureSymbols = new Map();
+      if (featureRevealOnly) {
+        this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
+        return;
+      }
       onDone();
     };
     requestAnimationFrame(waitForFeatureClear);
@@ -441,6 +509,7 @@ export class CascadeDropAnimator {
         this.currentClearPositions = [];
         this.currentClearDurationMs = null;
         this.currentSpawnPreviews = [];
+        this.currentFeatureSymbols = new Map();
         this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
       };
       requestAnimationFrame(waitForClear);

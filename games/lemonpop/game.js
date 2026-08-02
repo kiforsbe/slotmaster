@@ -31,6 +31,7 @@ export const BET_MAX = 50;
 export const WILD_SYMBOL = 'lemonpop';
 export const LINES_PER_POP = 5;
 export const POPS_TO_RUSH = 3;
+const DEBUG_MODE = true;
 
 // Calibrated over the complete three-Pop progression + Pop Rush sequence for the seven-symbol
 // reel set. All ladders scale together, preserving hierarchy and feature logic at 96% RTP.
@@ -233,6 +234,18 @@ function prettyPopFeature(feature) {
   return ({ 'wild-splash': 'WILD SPLASH', 'flavor-shift': 'FLAVOR SHIFT', 'bubble-burst': 'BUBBLE BURST' })[feature] || feature;
 }
 
+function triggerCheat(cheat) {
+  if (!DEBUG_MODE || !engine) return;
+  if (engine.state !== 'idle' && engine.state !== 'showing_wins') return;
+  const previousCheat = engine.config.debugNextCheat;
+  try {
+    engine.config.debugNextCheat = cheat;
+    void engine.spin();
+  } finally {
+    engine.config.debugNextCheat = previousCheat ?? null;
+  }
+}
+
 function openPaytable() { refs.paytableModal.classList.add('active'); }
 function closePaytable() { refs.paytableModal.classList.remove('active'); }
 
@@ -249,7 +262,17 @@ async function initGame() {
     popChargeTracks: [...document.querySelectorAll('.pop-charge-track')],
     popChargeIcon: document.querySelector('.pop-charge-icon'), popChargeSegments: [...document.querySelectorAll('.pop-charge-fill')],
     tune: document.getElementById('btn-tune'), sim: document.getElementById('btn-sim'), spinlog: document.getElementById('btn-spinlog'),
+    debugShortcuts: document.querySelector('.debug-shortcuts'),
+    cheatMiniWildSplash: document.getElementById('cheat-mini-wild-splash'),
+    cheatMiniWildSplashSparse: document.getElementById('cheat-mini-wild-splash-sparse'),
+    cheatMiniFlavorShift: document.getElementById('cheat-mini-flavor-shift'),
+    cheatMiniBubbleBurst: document.getElementById('cheat-mini-bubble-burst'),
+    cheatMajorPopRush: document.getElementById('cheat-major-pop-rush'),
+    cheatMajorCitrusCross: document.getElementById('cheat-major-citrus-cross'),
+    cheatMajorFlavorRemix: document.getElementById('cheat-major-flavor-remix'),
+    cheatMajorSodaStorm: document.getElementById('cheat-major-soda-storm'),
   };
+  if (refs.debugShortcuts && DEBUG_MODE) refs.debugShortcuts.classList.add('debug-enabled');
   const developerPanels = ensureDeveloperPanels();
   const renderer = new SlotRenderer();
   const particleSystem = new ParticleSystem();
@@ -306,6 +329,14 @@ async function initGame() {
       linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH,
     },
   }));
+  refs.cheatMiniWildSplash?.addEventListener('click', () => triggerCheat({ type: 'mini-pop', feature: 'wild-splash' }));
+  refs.cheatMiniWildSplashSparse?.addEventListener('click', () => triggerCheat({ type: 'mini-pop', feature: 'wild-splash', sparseGrid: true }));
+  refs.cheatMiniFlavorShift?.addEventListener('click', () => triggerCheat({ type: 'mini-pop', feature: 'flavor-shift' }));
+  refs.cheatMiniBubbleBurst?.addEventListener('click', () => triggerCheat({ type: 'mini-pop', feature: 'bubble-burst' }));
+  refs.cheatMajorPopRush?.addEventListener('click', () => triggerCheat({ type: 'pop-rush', variant: 'pop-rush' }));
+  refs.cheatMajorCitrusCross?.addEventListener('click', () => triggerCheat({ type: 'pop-rush', variant: 'citrus-cross' }));
+  refs.cheatMajorFlavorRemix?.addEventListener('click', () => triggerCheat({ type: 'pop-rush', variant: 'flavor-remix' }));
+  refs.cheatMajorSodaStorm?.addEventListener('click', () => triggerCheat({ type: 'pop-rush', variant: 'soda-storm' }));
   renderStraightLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, assets: engine.assets,
     wildSymbol: WILD_SYMBOL, renderSymbol: symbol => symbolIconHtml(symbol, engine.assets),
     featureNames: [

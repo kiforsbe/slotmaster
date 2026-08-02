@@ -26,6 +26,35 @@ header { display: flex; align-items: center; justify-content: space-between; bac
 .game-viewport { position: relative; min-height: 0; background: #240b25; }
 #game-canvas { display: block; }
 .game-ticker { position: absolute; z-index: 6; top: 9px; left: 50%; transform: translateX(-50%); color: #fff; font-size: clamp(10px, 1.5vw, 14px); font-weight: 800; letter-spacing: .12em; text-shadow: 0 2px 4px #251020; }
+.debug-shortcuts {
+  position: absolute;
+  z-index: 8;
+  right: 8px;
+  bottom: 8px;
+  display: none;
+  max-width: min(420px, calc(100% - 16px));
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.debug-shortcuts.debug-enabled { display: flex; }
+.btn-debug {
+  border: 1px solid rgba(255,255,255,.24);
+  border-radius: 999px;
+  background: rgba(19, 5, 23, .74);
+  color: #fcefff;
+  cursor: pointer;
+  font: 800 10px/1 Outfit, sans-serif;
+  letter-spacing: .05em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+.btn-debug:hover { background: rgba(232,255,80,.88); color: #381231; }
+.btn-debug-label {
+  cursor: default;
+  color: rgba(255,255,255,.6);
+  border-style: dashed;
+}
 .pop-rush-meter { position: absolute; z-index: 6; top: 60px; left: 80px; display: flex; align-items: flex-start; color: #fff9ae; text-shadow: 0 2px 3px #24101f; }
 .pop-rush-meter-title { margin-top: 28px; font-size: 24px; font-weight: 900; letter-spacing: .08em; line-height: 1; text-align: center; white-space: nowrap; }
 .pop-charge-ring .segment-1 { --segment-color: #ff78d1; --segment-shadow: rgba(255,120,209,.75); --segment-track: rgba(110, 29, 84, .92); --segment-outline: rgba(74, 16, 57, .98); }
@@ -90,6 +119,7 @@ body.pop-rush-active .game-viewport { box-shadow: inset 0 0 40px rgba(236,255,97
   .pop-charge-visual { width: 88px; height: 88px; }
   .pop-rush-meter-title { margin-top: 24px; font-size: 20px; }
   .pop-rush-panel { top: 118px; }
+  .debug-shortcuts { left: 8px; right: 8px; justify-content: flex-start; }
   /* The dev toolbar remains an intentional floating tool, but no longer covers the title/header. */
   .developer-tools { top: 64px !important; }
 }

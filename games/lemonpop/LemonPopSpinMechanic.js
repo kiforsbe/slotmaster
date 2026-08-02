@@ -21,6 +21,29 @@ function isBoardClear(grid) {
   return grid.every(column => column.every(symbol => symbol == null));
 }
 
+function cloneGrid(grid) {
+  return grid.map(column => column.slice());
+}
+
+function cloneWildMultipliers(grid, wildMultipliers) {
+  return wildMultipliers?.map(column => column.slice())
+    || grid.map(column => new Array(column.length).fill(1));
+}
+
+function zeroOffsetsLike(grid) {
+  return grid.map(column => new Array(column.length).fill(0));
+}
+
+function sparseWildSplashGrid() {
+  const grid = Array.from({ length: 5 }, () => new Array(5).fill(null));
+  grid[0][4] = 'lemonice';
+  grid[1][3] = 'gumdrop';
+  grid[2][4] = 'heart';
+  grid[3][2] = 'pinkfizz';
+  grid[4][4] = 'lemoncandy';
+  return grid;
+}
+
 function resolveSequence({
   reelStrips,
   rowsCount,
@@ -35,6 +58,7 @@ function resolveSequence({
   startingFallOffsets = null,
   popFeature = null,
   popDebug = null,
+  forcedPopRushVariant = null,
 }) {
   let popRushVariant = null;
   const linesPerPop = Math.max(1, config.linesPerPop ?? 5);
@@ -52,7 +76,7 @@ function resolveSequence({
     initialFallOffsets: startingFallOffsets,
     initialStepData: { popProgress: initialPopProgress, popFeatures: popFeature ? [popFeature] : [], popDebug },
     initialTransform: special ? ({ grid, wildMultipliers, rng }) => {
-      popRushVariant = rushVariants[Math.floor(rng() * rushVariants.length)];
+      popRushVariant = forcedPopRushVariant || rushVariants[Math.floor(rng() * rushVariants.length)];
       return popRushApplier({
         grid, wildMultipliers, paytable: config.paytable, wildSymbol: config.wildSymbol,
         variant: popRushVariant, rng,
@@ -75,6 +99,119 @@ function resolveSequence({
     totalLines: runningTotalLines,
     bankedChargeLines: runningBankedChargeLines,
     popProgress: popProgressSnapshot(runningTotalLines, runningBankedChargeLines, linesPerPop, popsToRush),
+  };
+}
+
+function resolveCheatMiniFeature({ reelStrips, rowsCount, seed, config, winEvaluator, feature, sparseGrid = false }) {
+  const linesPerPop = Math.max(1, config.linesPerPop ?? 5);
+  const popsToRush = Math.max(1, config.popsToRush ?? 3);
+  const base = sparseGrid ? null : resolveSequence({ reelStrips, rowsCount, seed, config, winEvaluator, totalLines: 0, bankedChargeLines: 0 });
+  const settledStep = sparseGrid
+    ? {
+      grid: sparseWildSplashGrid(),
+      wildMultipliers: Array.from({ length: 5 }, () => new Array(5).fill(1)),
+      fallOffsets: Array.from({ length: 5 }, () => new Array(5).fill(0)),
+    }
+    : ([...base.cascadeSteps].reverse().find(step => !isBoardClear(step.grid)) || base.cascadeSteps[0]);
+  const startGrid = cloneGrid(settledStep.grid);
+  const startWildMultipliers = cloneWildMultipliers(startGrid, settledStep.wildMultipliers);
+  const applied = (config.applyPopFeature ?? applyPopFeature)({
+    grid: startGrid,
+    wildMultipliers: startWildMultipliers,
+    paytable: config.paytable,
+    wildSymbol: config.wildSymbol,
+    feature,
+    rng: createSeededRng((seed ^ 0xa511e9b3) >>> 0),
+    forcedAffectedPositions: sparseGrid && feature === 'wild-splash' ? [[1, 0]] : undefined,
+  });
+
+  const cheatStep = {
+    grid: cloneGrid(settledStep.grid),
+    wildMultipliers: cloneWildMultipliers(settledStep.grid, settledStep.wildMultipliers),
+    fallOffsets: zeroOffsetsLike(settledStep.grid),
+    clusterWins: [],
+    payout: 0,
+    popFeatures: [],
+    popDebug: {
+      action: 'mini-pop-cheat-armed',
+      feature,
+      availablePops: 1,
+      boardClear: false,
+      sparseGrid,
+    },
+    popProgress: popProgressSnapshot(0, linesPerPop, linesPerPop, popsToRush),
+    presentationPhase: 'base',
+    popRushVariant: null,
+  };
+
+  const followUp = resolveSequence({
+    reelStrips,
+    rowsCount,
+    seed: (seed ^ 0x45d9f3b) >>> 0,
+    config,
+    winEvaluator,
+    totalLines: 0,
+    bankedChargeLines: 0,
+    startingGrid: applied.grid,
+    startingWildMultipliers: applied.wildMultipliers,
+    startingFallOffsets: applied.fallOffsets,
+    popFeature: {
+      popIndex: 1,
+      feature: applied.feature,
+      affectedPositions: applied.affectedPositions,
+      transformedSymbol: applied.transformedSymbol,
+      removedSymbols: applied.removedSymbols,
+    },
+    popDebug: {
+      action: 'mini-pop-cheat-triggered',
+      triggerNumber: 1,
+      feature: applied.feature,
+      sparseGrid,
+      totalLines: 0,
+      bankedChargeLinesBeforeSpend: linesPerPop,
+      bankedChargeLinesAfterSpend: 0,
+      availablePopsBeforeSpend: 1,
+      availablePopsAfterSpend: 0,
+      affectedPositions: applied.affectedPositions,
+    },
+  });
+
+  return {
+    cascadeSteps: [cheatStep, ...followUp.cascadeSteps],
+    totalPayoutMultiplier: followUp.totalPayoutMultiplier,
+    finalGrid: followUp.finalGrid,
+    wildMultipliers: followUp.wildMultipliers,
+    scatterWin: null,
+    triggeredPopRush: false,
+    popRushVariant: null,
+    popProgress: followUp.popProgress,
+  };
+}
+
+function resolveCheatPopRush({ reelStrips, rowsCount, seed, config, winEvaluator, variant }) {
+  const linesPerPop = Math.max(1, config.linesPerPop ?? 5);
+  const popsToRush = Math.max(1, config.popsToRush ?? 3);
+  const chargedLines = linesPerPop * popsToRush;
+  const special = resolveSequence({
+    reelStrips,
+    rowsCount,
+    seed: (seed ^ 0x9e3779b9) >>> 0,
+    config,
+    winEvaluator,
+    special: true,
+    totalLines: chargedLines,
+    bankedChargeLines: chargedLines,
+    forcedPopRushVariant: variant,
+  });
+  return {
+    cascadeSteps: special.cascadeSteps,
+    totalPayoutMultiplier: special.totalPayoutMultiplier,
+    finalGrid: special.finalGrid,
+    wildMultipliers: special.wildMultipliers,
+    scatterWin: null,
+    triggeredPopRush: true,
+    popRushVariant: special.popRushVariant,
+    popProgress: popProgressSnapshot(chargedLines, chargedLines, linesPerPop, popsToRush),
   };
 }
 
@@ -211,7 +348,12 @@ export const LemonPopSpinMechanic = {
   isCascade: true,
 
   resolveLiveSpin({ reelStrips, rowsCount, seed, config, winEvaluator }) {
-    const sequence = resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator });
+    const debugCheat = config.debugNextCheat;
+    const sequence = debugCheat?.type === 'mini-pop'
+      ? resolveCheatMiniFeature({ reelStrips, rowsCount, seed, config, winEvaluator, feature: debugCheat.feature, sparseGrid: debugCheat.sparseGrid === true })
+      : debugCheat?.type === 'pop-rush'
+        ? resolveCheatPopRush({ reelStrips, rowsCount, seed, config, winEvaluator, variant: debugCheat.variant })
+        : resolveWholeSpin({ reelStrips, rowsCount, seed, config, winEvaluator });
     const betAmount = config.betAmount ?? 1;
     return {
       steps: sequence.cascadeSteps.map(step => ({ ...step, payout: step.payout * betAmount })),

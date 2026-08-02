@@ -204,11 +204,12 @@ function naturalSymbols(paytable, wildSymbol) {
  * @param {GridState} state
  * @param {string} wildSymbol
  * @param {() => number} rng
+ * @param {Position[]} [forcedPositions]
  * @returns {PopFeatureResult}
  */
-function applyWildSplash(state, wildSymbol, rng) {
-  const count = 1 + Math.floor(rng() * 2);
-  const positions = shuffled(everyPosition(state.grid), rng).slice(0, count);
+function applyWildSplash(state, wildSymbol, rng, forcedPositions = null) {
+  const count = forcedPositions?.length || (1 + Math.floor(rng() * 2));
+  const positions = forcedPositions?.slice(0, count) || shuffled(everyPosition(state.grid), rng).slice(0, count);
   const next = applyNoRefillCascade(state.grid, [], positions.map(position => ({ position, symbol: wildSymbol })), state.wildMultipliers);
   return { ...next, feature: 'wild-splash', affectedPositions: positions };
 }
@@ -301,8 +302,8 @@ function sodaStormPositions(grid, paytable, wildSymbol) {
  * effects can therefore create another ordinary straight-line cascade without ever refilling the
  * board.
  *
- * `wild-splash` injects one or two wilds, `flavor-shift` retargets a single non-wild symbol, and
- * `bubble-burst` removes up to two matching pairs.
+ * `wild-splash` injects one or two wilds, `flavor-shift` retargets every instance of one chosen
+ * non-wild symbol, and `bubble-burst` removes up to two matching pairs.
  *
  * @param {{
  *   grid: SymbolGrid,
@@ -310,16 +311,17 @@ function sodaStormPositions(grid, paytable, wildSymbol) {
  *   paytable: PopFeaturePaytable,
  *   wildSymbol: string,
  *   feature: string,
- *   rng: () => number
+ *   rng: () => number,
+ *   forcedAffectedPositions?: Position[]
  * }} params
  * @returns {PopFeatureResult}
  */
-export function applyPopFeature({ grid, wildMultipliers, paytable, wildSymbol, feature, rng }) {
+export function applyPopFeature({ grid, wildMultipliers, paytable, wildSymbol, feature, rng, forcedAffectedPositions }) {
   const state = cloneState(grid, wildMultipliers);
   const allPositions = everyPosition(state.grid);
 
   if (feature === 'wild-splash') {
-    return applyWildSplash(state, wildSymbol, rng);
+    return applyWildSplash(state, wildSymbol, rng, forcedAffectedPositions);
   }
 
   if (feature === 'flavor-shift') {
@@ -334,9 +336,13 @@ export function applyPopFeature({ grid, wildMultipliers, paytable, wildSymbol, f
     const [col, row] = position;
     const currentSymbol = state.grid[col][row];
     const target = shuffled(naturalSymbols(paytable, wildSymbol).filter(symbol => symbol !== currentSymbol), rng)[0];
-    state.grid[col][row] = target || currentSymbol;
-    state.wildMultipliers[col][row] = 1;
-    return { ...state, feature, affectedPositions: [position], transformedSymbol: target || currentSymbol };
+    const transformedSymbol = target || currentSymbol;
+    const affectedPositions = candidates.filter(([candidateCol, candidateRow]) => state.grid[candidateCol][candidateRow] === currentSymbol);
+    affectedPositions.forEach(([candidateCol, candidateRow]) => {
+      state.grid[candidateCol][candidateRow] = transformedSymbol;
+      state.wildMultipliers[candidateCol][candidateRow] = 1;
+    });
+    return { ...state, feature, affectedPositions, transformedSymbol };
   }
 
   // Bubble Burst removes two matching pairs when possible. Removing a small, predictable
