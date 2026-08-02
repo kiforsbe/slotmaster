@@ -3,6 +3,18 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.11.1 — 2026-08-02
+
+### Fixed
+
+- **Bar Fruits' free spins kept paying out the initiating scatter's win on every subsequent
+  spin** — `CoreSlotEngine._spin()` only reset `lastWin` to 0 inside its "not in free spins"
+  branch (bundled with bet deduction), so during a free-spins round `lastWin` never cleared
+  between spins. Each free spin's win stacked on top of the triggering base spin's win (and
+  every prior free spin's), instead of reporting just what that single spin paid; the round
+  summary's accumulated total compounded the same error. `lastWin` now always resets at the
+  start of every spin, independent of the bet-deduction/free-spins gating.
+
 ## 0.11.0 — 2026-08-02
 
 ### Fixed
