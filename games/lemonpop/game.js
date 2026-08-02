@@ -79,26 +79,115 @@ const PLAYFIELD = {
 
 let engine;
 let refs = {};
+const POP_RING_PATH_LENGTH = 300;
+const POP_RING_SEGMENT_LENGTH = 100;
 
-function symbolIconHtml(symbol, assets, size = 34) {
+function symbolIconHtml(symbol, assets, size = 34, options = {}) {
   const sprite = assets?.symbols?.tiles?.[symbol];
   const tile = sprite?.frameAt?.() || sprite?.frames?.[0]?.tile || sprite?.frames?.[0] || sprite;
   if (!tile || !assets?.symbols?.sheetUrl) return '';
-  const scale = size / tile.w;
-  return `<span class="paytable-icon" style="width:${size}px;height:${Math.round(tile.h * scale)}px"><img src="${assets.symbols.sheetUrl}" alt="" style="transform:scale(${scale}) translate(${-tile.x}px,${-tile.y}px)"></span>`;
+  const centered = options.centered === true;
+  const scale = centered ? (size / Math.max(tile.w, tile.h)) : (size / tile.w);
+  const width = centered ? size : size;
+  const height = centered ? size : Math.round(tile.h * scale);
+  const left = centered ? ((size - (tile.w * scale)) / 2) - (tile.x * scale) : 0;
+  const top = centered ? ((size - (tile.h * scale)) / 2) - (tile.y * scale) : 0;
+  const imageStyle = centered
+    ? `left:${left}px;top:${top}px;transform:scale(${scale})`
+    : `transform:scale(${scale}) translate(${-tile.x}px,${-tile.y}px)`;
+  return `<span class="paytable-icon" style="width:${width}px;height:${height}px"><img src="${assets.symbols.sheetUrl}" alt="" style="${imageStyle}"></span>`;
+}
+
+function measureOpaqueTileBounds(spritesheet, tile) {
+  const canvas = document.createElement('canvas');
+  canvas.width = tile.w;
+  canvas.height = tile.h;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) return null;
+  context.drawImage(spritesheet, tile.x, tile.y, tile.w, tile.h, 0, 0, tile.w, tile.h);
+  const { data, width, height } = context.getImageData(0, 0, tile.w, tile.h);
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (data[((y * width) + x) * 4 + 3] === 0) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, w: (maxX - minX) + 1, h: (maxY - minY) + 1 };
+}
+
+function createCenteredMeterIcon(symbol, assets, size = 46) {
+  const sprite = assets?.symbols?.tiles?.[symbol];
+  const tile = sprite?.frameAt?.() || sprite?.frames?.[0]?.tile || sprite?.frames?.[0] || sprite;
+  const spritesheet = assets?.symbols?.image;
+  if (!tile || !spritesheet) return null;
+
+  const crop = measureOpaqueTileBounds(spritesheet, tile) || { x: 0, y: 0, w: tile.w, h: tile.h };
+  const dpr = window.devicePixelRatio || 1;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(size * dpr);
+  canvas.height = Math.round(size * dpr);
+  canvas.style.width = `${size}px`;
+  canvas.style.height = `${size}px`;
+  const context = canvas.getContext('2d');
+  if (!context) return null;
+  context.setTransform(dpr, 0, 0, dpr, 0, 0);
+  context.imageSmoothingEnabled = true;
+  const drawScale = size / Math.max(crop.w, crop.h);
+  const drawWidth = crop.w * drawScale;
+  const drawHeight = crop.h * drawScale;
+  const drawX = (size - drawWidth) / 2;
+  const drawY = (size - drawHeight) / 2;
+  context.drawImage(
+    spritesheet,
+    tile.x + crop.x,
+    tile.y + crop.y,
+    crop.w,
+    crop.h,
+    drawX,
+    drawY,
+    drawWidth,
+    drawHeight,
+  );
+
+  const wrapper = document.createElement('span');
+  wrapper.className = 'paytable-icon';
+  wrapper.style.width = `${size}px`;
+  wrapper.style.height = `${size}px`;
+  wrapper.append(canvas);
+  return wrapper;
 }
 
 function updatePopRushMeter() {
   const step = engine?.spinSequence?.[engine?.stepIndex ?? -1];
   const progress = step?.popProgress || { totalLines: 0, linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH };
   const linesPerPop = progress.linesPerPop || LINES_PER_POP;
-  refs.popCharges?.forEach((charge, index) => {
-    const chargeLines = Math.max(0, Math.min(linesPerPop, progress.totalLines - (index * linesPerPop)));
-    charge.style.setProperty('--charge-fill', `${(chargeLines / linesPerPop) * 100}%`);
-    charge.classList.toggle('charging', chargeLines > 0 && chargeLines < linesPerPop);
-    charge.classList.toggle('filled', chargeLines === linesPerPop);
-    charge.querySelector('b').textContent = `${chargeLines}/${linesPerPop}`;
+  const popsToRush = progress.popsToRush || POPS_TO_RUSH;
+  const completedPops = Math.min(popsToRush, progress.completedPops ?? Math.floor(progress.totalLines / linesPerPop));
+  const linesInCurrentPop = completedPops === popsToRush ? linesPerPop : (progress.linesInCurrentPop ?? Math.min(linesPerPop, progress.totalLines % linesPerPop));
+  const segmentLines = Array.from({ length: popsToRush }, (_, index) => Math.max(0, Math.min(linesPerPop, progress.totalLines - (index * linesPerPop))));
+
+  refs.popChargeSegments?.forEach((segment, index) => {
+    const segmentFill = Math.max(0, Math.min(1, (segmentLines[index] || 0) / linesPerPop));
+    const filledLength = segmentFill * POP_RING_SEGMENT_LENGTH;
+    const isUnlocked = index === 0 || completedPops >= index;
+    segment.style.strokeDasharray = `${filledLength} ${POP_RING_PATH_LENGTH - filledLength}`;
+    segment.classList.toggle('unlocked', isUnlocked);
+    segment.classList.toggle('charging', segmentFill > 0 && segmentFill < 1);
+    segment.classList.toggle('filled', segmentFill === 1);
   });
+
+  refs.popCharge?.classList.toggle('charging', linesInCurrentPop > 0 && completedPops < popsToRush);
+  refs.popCharge?.classList.toggle('filled', completedPops === popsToRush);
 }
 
 function updateUI() {
@@ -146,7 +235,9 @@ async function initGame() {
     ticker: document.getElementById('game-ticker'), paytableModal: document.getElementById('modal-paytable'),
     paytableClose: document.getElementById('btn-paytable-ok'), rushPanel: document.getElementById('pop-rush-panel'),
     rushLabel: document.getElementById('pop-rush-label'), featurePanel: document.getElementById('pop-feature-panel'),
-    featureLabel: document.getElementById('pop-feature-label'), popCharges: [...document.querySelectorAll('.pop-charge')],
+    featureLabel: document.getElementById('pop-feature-label'), popCharge: document.querySelector('.pop-charge'),
+    popChargeTracks: [...document.querySelectorAll('.pop-charge-track')],
+    popChargeIcon: document.querySelector('.pop-charge-icon'), popChargeSegments: [...document.querySelectorAll('.pop-charge-fill')],
     tune: document.getElementById('btn-tune'), sim: document.getElementById('btn-sim'), spinlog: document.getElementById('btn-spinlog'),
   };
   const developerPanels = ensureDeveloperPanels();
@@ -171,10 +262,14 @@ async function initGame() {
     } }),
   });
   await engine.init();
-  ['lemonwedge', 'gumdrop', 'heart'].forEach((symbol, index) => {
-    const icon = refs.popCharges[index]?.querySelector('.pop-charge-icon');
-    if (icon) icon.innerHTML = symbolIconHtml(symbol, engine.assets, 30);
-  });
+  if (refs.popChargeIcon) {
+    const centeredMeterIcon = createCenteredMeterIcon(WILD_SYMBOL, engine.assets, 60);
+    if (centeredMeterIcon) {
+      refs.popChargeIcon.replaceChildren(centeredMeterIcon);
+    } else {
+      refs.popChargeIcon.innerHTML = symbolIconHtml(WILD_SYMBOL, engine.assets, 60, { centered: true });
+    }
+  }
   bindCommonSlotControls({ getEngine: () => engine, onUpdate: updateUI, betStep: BET_STEP, betMax: BET_MAX, linesMax: 1 });
   observeSlotViewport();
   refs.paytable.addEventListener('click', openPaytable);
@@ -203,8 +298,8 @@ async function initGame() {
   renderStraightLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, assets: engine.assets,
     wildSymbol: WILD_SYMBOL, renderSymbol: symbol => symbolIconHtml(symbol, engine.assets),
     featureNames: [
-      'Every five winning lines fills one Pop and triggers a random Pop effect.',
-      'Fill all three Pops to award one free Pop Rush respin.',
+      'Every five winning lines fills one can segment and triggers one mini Pop effect after the board settles.',
+      'Fill all three segments to award one free Pop Rush respin.',
       `Pop effects: ${POP_FEATURES.map(prettyPopFeature).join(', ')}.`,
       ...POP_RUSH_VARIANTS.map(prettyVariant),
     ],

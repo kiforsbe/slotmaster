@@ -20,11 +20,24 @@
 
     <section class="game-viewport" aria-label="Lemon Pop game board">
       <div id="game-ticker" class="game-ticker">READY TO POP</div>
-      <div class="pop-rush-meter" aria-label="Fill five winning lines per Pop. Three Pops unlock a free Pop Rush respin." aria-live="polite">
-        <span class="pop-rush-meter-title">POP RUSH</span>
-        <div class="pop-charge" data-pop="1"><span class="pop-charge-icon" aria-hidden="true"></span><b>0/5</b></div>
-        <div class="pop-charge" data-pop="2"><span class="pop-charge-icon" aria-hidden="true"></span><b>0/5</b></div>
-        <div class="pop-charge" data-pop="3"><span class="pop-charge-icon" aria-hidden="true"></span><b>0/5</b></div>
+      <div class="pop-rush-meter" aria-label="Fill the can in three stages. Each full stage triggers one mini Pop effect after the board settles. Filling all three stages unlocks a free Pop Rush respin." aria-live="polite">
+        <div class="pop-charge">
+          <span class="pop-charge-visual">
+            <svg class="pop-charge-ring" viewBox="0 0 100 100" aria-hidden="true">
+              <circle class="pop-charge-outline segment-1" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="100 200" stroke-dashoffset="0"></circle>
+              <circle class="pop-charge-outline segment-2" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="100 200" stroke-dashoffset="-100"></circle>
+              <circle class="pop-charge-outline segment-3" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="100 200" stroke-dashoffset="-200"></circle>
+              <circle class="pop-charge-track segment-1" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="100 200" stroke-dashoffset="0"></circle>
+              <circle class="pop-charge-track segment-2" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="100 200" stroke-dashoffset="-100"></circle>
+              <circle class="pop-charge-track segment-3" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="100 200" stroke-dashoffset="-200"></circle>
+              <circle class="pop-charge-fill segment-1" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="0 300" stroke-dashoffset="0"></circle>
+              <circle class="pop-charge-fill segment-2" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="0 300" stroke-dashoffset="-100"></circle>
+              <circle class="pop-charge-fill segment-3" cx="50" cy="50" r="39" pathLength="300" stroke-dasharray="0 300" stroke-dashoffset="-200"></circle>
+            </svg>
+            <span class="pop-charge-core"><span class="pop-charge-icon" aria-hidden="true"></span></span>
+          </span>
+          <span class="pop-rush-meter-title">POP RUSH</span>
+        </div>
       </div>
       <div id="pop-feature-panel" class="pop-feature-panel" aria-live="polite"><b id="pop-feature-label">POP EFFECT</b></div>
       <div id="pop-rush-panel" class="pop-rush-panel" aria-live="polite"><b id="pop-rush-label">POP RUSH</b></div>
