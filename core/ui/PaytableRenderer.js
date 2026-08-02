@@ -12,14 +12,21 @@ function symbolIconMarkup(symbol, assets, size = 28) {
   return `<span class="slot-paytable-icon" style="width:${size}px;height:${Math.round(tile.h * scale)}px"><img src="${sheetUrl}" alt="" style="transform:scale(${scale}) translate(${-tile.x}px,${-tile.y}px)"></span>`;
 }
 
+function symbolTypeBadge(meta) {
+  if (meta.type === 'premium') return `<span class="slot-paytable-type-badge slot-paytable-type-premium">Premium</span>`;
+  if (meta.type === 'regular') return `<span class="slot-paytable-type-badge slot-paytable-type-regular">Regular</span>`;
+  return '';
+}
+
 function symbolMarkup(symbol, meta, renderSymbol) {
   const icon = renderSymbol?.(symbol, meta) || '';
-  return `${icon}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>`;
+  return `${icon}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>${symbolTypeBadge(meta)}`;
 }
 
 function clusterHeaderMarkup(symbol, meta, renderSymbol) {
   const icon = renderSymbol?.(symbol, meta) || '';
-  return `<div class="slot-paytable-header"><span class="slot-paytable-header-icon">${icon}</span><span class="slot-paytable-header-name">${meta.friendlyName || symbol}</span></div>`;
+  const typeLabel = meta.type === 'premium' ? 'Premium' : meta.type === 'regular' ? 'Regular' : '';
+  return `<div class="slot-paytable-header" data-symbol-type="${meta.type || ''}" title="${typeLabel}"><span class="slot-paytable-header-icon">${icon}</span><span class="slot-paytable-header-name">${meta.friendlyName || symbol}</span></div>`;
 }
 
 function makeLinePreview(container, paylines, rows = 3) {
@@ -81,7 +88,7 @@ export function renderLinePaytable({
     const row = document.createElement('tr');
     const symbolCell = document.createElement('th');
     symbolCell.className = 'slot-paytable-symbol-cell';
-    symbolCell.innerHTML = `${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>`;
+    symbolCell.innerHTML = `${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>${symbolTypeBadge(meta)}`;
     row.appendChild(symbolCell);
 
     hits.forEach(hit => {
@@ -132,7 +139,7 @@ export function renderLinePaytable({
     const scatterBody = document.createElement('tbody');
     scatterSymbols.forEach(([symbol, meta]) => {
       const row = document.createElement('tr');
-      row.innerHTML = `<th class="slot-paytable-symbol-cell">${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span></th>${scatterHits.map(hit => {
+      row.innerHTML = `<th class="slot-paytable-symbol-cell">${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>${symbolTypeBadge(meta)}</th>${scatterHits.map(hit => {
         const payout = meta.payout?.[hit - 1];
         return `<td class="${payout > 0 ? 'has-payout' : ''}">${payout > 0 ? asMultiplier(payout) : '—'}</td>`;
       }).join('')}`;
@@ -184,6 +191,9 @@ export function renderClusterPaytable({
   defaultRule.className = 'slot-paytable-default-rule';
   defaultRule.textContent = 'Clusters pay for orthogonally connected symbols anywhere on the grid. Values are multipliers of the total bet.';
   container.replaceChildren(defaultRule, table);
+  if (paying.some(([, meta]) => meta.type === 'premium' || meta.type === 'regular')) {
+    container.insertAdjacentHTML('beforeend', `<p class="slot-paytable-default-rule slot-paytable-type-legend"><span class="slot-paytable-type-dot slot-paytable-type-premium-dot"></span> Premium &nbsp; <span class="slot-paytable-type-dot slot-paytable-type-regular-dot"></span> Regular</p>`);
+  }
   if (notes) container.insertAdjacentHTML('beforeend', notes);
 }
 
@@ -197,7 +207,7 @@ export function renderStraightLinePaytable({ container, paytable, assets, wildSy
   const wild = paytable[wildSymbol];
   const table = document.createElement('table');
   table.className = 'slot-paytable-table slot-straight-line-paytable';
-  table.innerHTML = `<thead><tr><th>Symbol</th><th>3</th><th>4</th><th>5</th></tr></thead><tbody>${paying.map(([symbol, meta]) => `<tr><th class="slot-paytable-symbol-cell">${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span></th>${meta.linePayout.map(value => `<td class="has-payout">${asMultiplier(value)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  table.innerHTML = `<thead><tr><th>Symbol</th><th>3</th><th>4</th><th>5</th></tr></thead><tbody>${paying.map(([symbol, meta]) => `<tr><th class="slot-paytable-symbol-cell">${renderSymbol?.(symbol, meta) || symbolIconMarkup(symbol, assets)}<span class="slot-paytable-symbol-name">${meta.friendlyName || symbol}</span>${symbolTypeBadge(meta)}</th>${meta.linePayout.map(value => `<td class="has-payout">${asMultiplier(value)}</td>`).join('')}</tr>`).join('')}</tbody>`;
   const rules = document.createElement('div');
   rules.className = 'slot-paytable-straight-rules';
   rules.innerHTML = `<p class="slot-paytable-default-rule">Horizontal and vertical runs of 3–5 pay. Every winning run pops, leaves one wild can at its centre, then gravity drops the board without refilling it.</p><ul><li>One natural symbol plus wild cans pays that symbol’s full value.</li><li>Mixed premium runs pay half the highest premium present; mixed regular runs do not pay.</li>${featureNames.map(name => `<li><b>${name}</b></li>`).join('')}</ul>`;
