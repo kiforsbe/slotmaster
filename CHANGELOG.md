@@ -3,6 +3,32 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.10.2 — 2026-08-02
+
+### Added
+
+- **New particle effects for Lemon Pop's mini Pop features and Pop Rush** — `ParticleSystem`
+  gained a citrus swirl burst and a fizzy pop-scatter burst, with `CascadeDropAnimator` and
+  `SlotRenderer` extended to trigger and time them around mini Pop and Pop Rush board transitions.
+
+### Changed
+
+- **Pop Rush no longer requires fully charging the Pop meter first** — it now upgrades any settle
+  where the board is fully clear or holds at most one wild can. A fully cleared board also awards
+  a 25× total-bet bonus on top, independent of whether Pop Rush triggers.
+- **Lemon Pop's Pop meter was redesigned** — updated visual styling and layout for the charge ring
+  and Pop Rush indicator, with clearer state feedback as segments fill.
+- **Paytable panel scrollbar and symbol typing were unified across all games** — the shared
+  `PaytableRenderer`/`slot-game.css` now render a themed scrollbar on the paytable panel and a
+  Premium/Regular badge (or a corner-dot indicator for the compact cluster headers) next to each
+  symbol.
+
+### Fixed
+
+- Cleaned up a broken duplicate `<div>` left before `<!doctype html>` in Lemon Pop's `index.html`
+  and a duplicate rules bullet in its `README.md`, both stray leftovers from an earlier
+  AI-assisted edit.
+
 ## 0.10.1 — 2026-08-01
 
 ### Fixed
