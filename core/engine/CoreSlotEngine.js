@@ -270,8 +270,13 @@ export class CoreSlotEngine {
         return;
       }
       this.balance -= this.totalBet;
-      this.lastWin = 0;
     }
+    // Always starts at 0, independent of the bet-deduction branch above - each spin (including
+    // every free spin) reports only its own win. Bundling this reset into the "not in free
+    // spins" branch was the bug: during free spins lastWin never cleared, so each spin kept
+    // stacking its win on top of every prior spin's (and the triggering base spin's) total,
+    // instead of reporting just what that single spin paid.
+    this.lastWin = 0;
 
     this.lastSpinSeed = seed;
     this._setState('spinning');
