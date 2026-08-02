@@ -75,6 +75,7 @@ export class CascadeDropAnimator {
     this.columnEnterStartTime = null;
     this.cellBounceStartTime = null;
     this.currentClearPositions = [];
+    this.currentClearDurationMs = null;
     this.currentClearVariants = new Map();
     this.activePopups = [];
   }
@@ -212,12 +213,17 @@ export class CascadeDropAnimator {
       this.outgoingOffsets = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(0));
     }
     this.currentClearPositions = [];
+    this.currentClearDurationMs = null;
 
     this._runFallPhase(engine, step.grid, step.fallOffsets, hasExistingGrid, onDone, step.wildMultipliers);
   }
 
   playTransition(engine, prevStep, nextStep, onDone) {
     if (prevStep.clusterWins.length === 0) {
+      if ((nextStep.popFeatures?.length ?? 0) > 0) {
+        this._playFeatureTransition(engine, prevStep, nextStep, onDone);
+        return;
+      }
       this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
       return;
     }
@@ -245,6 +251,7 @@ export class CascadeDropAnimator {
       this.currentClusterIndex = clusterIndex;
       const clearDuration = engine.turboMode ? this.turboClearDurationMs : this.normalClearDurationMs;
       this._clearStartTime = Date.now();
+      this.currentClearDurationMs = clearDuration;
 
       this.currentClearPositions = cluster.winningPositions;
       this.currentClearVariants = new Map();
@@ -279,6 +286,7 @@ export class CascadeDropAnimator {
           clearNextCluster();
         } else {
           this.currentClearPositions = [];
+          this.currentClearDurationMs = null;
           this.currentClusterWins = null;
           this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
         }
@@ -287,6 +295,69 @@ export class CascadeDropAnimator {
     };
 
     clearNextCluster();
+  }
+
+  _playFeatureTransition(engine, prevStep, nextStep, onDone) {
+    const reelsCount = engine.config.reelsCount;
+    const rowsCount = engine.config.rowsCount;
+    this.grid = nextStep.grid.map(col => col.slice());
+    this.wildMultipliers = nextStep.wildMultipliers?.map(column => column.slice())
+      || this.grid.map(column => new Array(column.length).fill(1));
+    this.cellOffsets = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(0));
+
+    const changedPositions = [];
+    for (let col = 0; col < reelsCount; col++) {
+      for (let row = 0; row < rowsCount; row++) {
+        const prevSymbol = prevStep.grid?.[col]?.[row] ?? null;
+        const nextSymbol = nextStep.grid?.[col]?.[row] ?? null;
+        const prevMultiplier = prevStep.wildMultipliers?.[col]?.[row] ?? 1;
+        const nextMultiplier = nextStep.wildMultipliers?.[col]?.[row] ?? 1;
+        if (prevSymbol !== nextSymbol || prevMultiplier !== nextMultiplier) {
+          changedPositions.push([col, row]);
+        }
+      }
+    }
+    nextStep.popFeatures.forEach(feature => {
+      (feature.affectedPositions || []).forEach(position => {
+        if (!changedPositions.some(([col, row]) => col === position[0] && row === position[1])) {
+          changedPositions.push(position);
+        }
+      });
+    });
+
+    if (changedPositions.length === 0) {
+      onDone();
+      return;
+    }
+
+    const clearDuration = engine._stopRequested
+      ? Math.min(3200, engine.turboMode ? 600 : 1000)
+      : 3200;
+    this._clearStartTime = Date.now();
+    this.currentClearDurationMs = clearDuration;
+    this.currentClearPositions = changedPositions;
+    this.currentClearVariants = new Map();
+    changedPositions.forEach(([col, row]) => {
+      this.currentClearVariants.set(`${col},${row}`, {
+        variant: 'spin',
+        spinDirection: 1,
+      });
+    });
+    this._spawnClearParticles(engine, changedPositions);
+    engine.audioController?.onExpand?.();
+
+    const waitForFeatureClear = () => {
+      if (Date.now() - this._clearStartTime < clearDuration) {
+        requestAnimationFrame(waitForFeatureClear);
+        return;
+      }
+
+      this.currentClearPositions = [];
+      this.currentClearDurationMs = null;
+      this.currentClearVariants = new Map();
+      onDone();
+    };
+    requestAnimationFrame(waitForFeatureClear);
   }
 
   // Payline cascades show each winning path in turn, but all of the lines belong to one
@@ -321,6 +392,7 @@ export class CascadeDropAnimator {
 
       const clearDuration = engine.turboMode ? this.turboClearDurationMs : this.normalClearDurationMs;
       this._clearStartTime = Date.now();
+      this.currentClearDurationMs = clearDuration;
       this.currentClearPositions = clearPositions;
       this.currentClearVariants = new Map();
       clearPositions.forEach(([col, row]) => {
@@ -350,6 +422,7 @@ export class CascadeDropAnimator {
           this.wildMultipliers[col][row] = 1;
         });
         this.currentClearPositions = [];
+        this.currentClearDurationMs = null;
         this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
       };
       requestAnimationFrame(waitForClear);

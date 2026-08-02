@@ -35,7 +35,7 @@ header { display: flex; align-items: center; justify-content: space-between; bac
 .pop-charge-visual { position: relative; display: grid; width: 96px; height: 96px; place-items: center; }
 .pop-charge-ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 10px rgba(0,0,0,.6)); transform: rotate(-90deg); }
 .pop-charge-outline, .pop-charge-track, .pop-charge-fill { fill: none; }
-.pop-charge-outline { stroke: var(--segment-outline); stroke-width: 32; }
+.pop-charge-outline { stroke: var(--segment-color); stroke-width: 32; }
 .pop-charge-track, .pop-charge-fill { stroke-width: 28; }
 .pop-charge-track { stroke: var(--segment-track); opacity: 1; transition: stroke .18s ease; }
 .pop-charge-fill { stroke: var(--segment-color); opacity: 0; stroke-linecap: butt; transition: stroke-dasharray .22s ease, stroke .22s ease, filter .22s ease, opacity .18s ease; }

@@ -79,6 +79,7 @@ const PLAYFIELD = {
 
 let engine;
 let refs = {};
+let lastLoggedPopDebugStep = null;
 const POP_RING_PATH_LENGTH = 300;
 const POP_RING_SEGMENT_LENGTH = 100;
 
@@ -172,9 +173,10 @@ function updatePopRushMeter() {
   const progress = step?.popProgress || { totalLines: 0, linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH };
   const linesPerPop = progress.linesPerPop || LINES_PER_POP;
   const popsToRush = progress.popsToRush || POPS_TO_RUSH;
-  const completedPops = Math.min(popsToRush, progress.completedPops ?? Math.floor(progress.totalLines / linesPerPop));
-  const linesInCurrentPop = completedPops === popsToRush ? linesPerPop : (progress.linesInCurrentPop ?? Math.min(linesPerPop, progress.totalLines % linesPerPop));
-  const segmentLines = Array.from({ length: popsToRush }, (_, index) => Math.max(0, Math.min(linesPerPop, progress.totalLines - (index * linesPerPop))));
+  const bankedChargeLines = Math.max(0, progress.bankedChargeLines ?? progress.totalLines ?? 0);
+  const completedPops = Math.min(popsToRush, progress.availablePops ?? progress.completedPops ?? Math.floor(bankedChargeLines / linesPerPop));
+  const linesInCurrentPop = completedPops === popsToRush ? linesPerPop : (progress.linesInCurrentPop ?? Math.min(linesPerPop, bankedChargeLines % linesPerPop));
+  const segmentLines = Array.from({ length: popsToRush }, (_, index) => Math.max(0, Math.min(linesPerPop, bankedChargeLines - (index * linesPerPop))));
 
   refs.popChargeSegments?.forEach((segment, index) => {
     const segmentFill = Math.max(0, Math.min(1, (segmentLines[index] || 0) / linesPerPop));
@@ -190,6 +192,13 @@ function updatePopRushMeter() {
   refs.popCharge?.classList.toggle('filled', completedPops === popsToRush);
 }
 
+function logPopDebug(step) {
+  if ((!step?.popDebug && !step?.popSettleDebug) || step === lastLoggedPopDebugStep) return;
+  lastLoggedPopDebugStep = step;
+  if (step.popDebug) console.debug('[Lemon Pop]', step.popDebug);
+  if (step.popSettleDebug) console.debug('[Lemon Pop]', step.popSettleDebug);
+}
+
 function updateUI() {
   if (!engine) return;
   refs.balance.textContent = `$${engine.balance.toFixed(2)}`;
@@ -199,6 +208,7 @@ function updateUI() {
 
 function setPresentationPhase(phase, step) {
   document.body.classList.toggle('pop-rush-active', phase === 'pop-rush');
+  logPopDebug(step);
   const latestFeature = step?.popFeatures?.at(-1);
   if (phase === 'base' && latestFeature) {
     refs.featureLabel.textContent = `POP ${latestFeature.popIndex}: ${prettyPopFeature(latestFeature.feature)}`;
@@ -251,6 +261,7 @@ async function initGame() {
     reelsCount: REELS_COUNT, rowsCount: ROWS_COUNT, paytable: PAYTABLE, reelStrips: REEL_STRIPS, winEvaluator,
     betAmount: BET_AMOUNT, wildSymbol: WILD_SYMBOL, linesPerPop: LINES_PER_POP, popsToRush: POPS_TO_RUSH,
     cascadeWinClearMode: 'all-at-once', cascadeWinPreviewDurationMs: 420,
+    debugPopFeatures: true,
     clearCellHighlight: false, straightLineVisualizer: { horizontalColor: '#fff052', verticalColor: '#7eefff', glow: 20 },
     playfield: PLAYFIELD, assetManifest: GAME_ASSET_MANIFEST,
     viewportBackground: { type: 'image', image: './assets/backgrounds/lemonpop_backround_2.png' },
@@ -298,8 +309,8 @@ async function initGame() {
   renderStraightLinePaytable({ container: document.getElementById('paytable-grid-content'), paytable: PAYTABLE, assets: engine.assets,
     wildSymbol: WILD_SYMBOL, renderSymbol: symbol => symbolIconHtml(symbol, engine.assets),
     featureNames: [
-      'Every five winning lines fills one can segment and triggers one mini Pop effect after the board settles.',
-      'Fill all three segments to award one free Pop Rush respin.',
+      'Every five winning lines fills one can segment. Filled mini Pops trigger only after the current cascades stop.',
+      'Clear the board with a full can to award one free Pop Rush respin.',
       `Pop effects: ${POP_FEATURES.map(prettyPopFeature).join(', ')}.`,
       ...POP_RUSH_VARIANTS.map(prettyVariant),
     ],

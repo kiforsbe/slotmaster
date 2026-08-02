@@ -894,7 +894,7 @@ export class SlotRenderer {
     }
     if (animator?.grid) {
       const isClearing = animator.currentClearPositions && animator.currentClearPositions.length > 0;
-      const clearDuration = engine.turboMode ? animator.turboClearDurationMs : animator.normalClearDurationMs;
+      const clearDuration = animator.currentClearDurationMs || (engine.turboMode ? animator.turboClearDurationMs : animator.normalClearDurationMs);
       const clearProgress = isClearing
         ? Math.min((Date.now() - animator._clearStartTime) / clearDuration, 1)
         : null;

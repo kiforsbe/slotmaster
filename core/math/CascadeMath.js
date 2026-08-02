@@ -135,6 +135,9 @@ export function applyNoRefillCascade(grid, clearedPositions, spawnedSymbols = []
 /** Resolve a deterministic cascade sequence with one initial reel fill and gravity-only steps. */
 export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvaluator, {
   maxCascadeSteps = 25,
+  initialGrid = null,
+  initialWildMultipliers = null,
+  initialFallOffsets = null,
   initialTransform = null,
   initialStepData = null,
   // Optional game-specific hook that runs after a winning grid has cleared, spawned its
@@ -148,8 +151,19 @@ export function resolveNoRefillCascadeSequence(strips, rowsCount, seed, winEvalu
   const emptyGrid = Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(null));
   const allPositions = [];
   for (let col = 0; col < reelsCount; col++) for (let row = 0; row < rowsCount; row++) allPositions.push([col, row]);
-  let { grid: currentGrid, fallOffsets: currentFallOffsets } = applyCascade(emptyGrid, cursorStateByColumn, strips, allPositions);
-  let currentWildMultipliers = createWildMultipliers(reelsCount, rowsCount);
+  let currentGrid;
+  let currentFallOffsets;
+  let currentWildMultipliers;
+  if (initialGrid) {
+    currentGrid = initialGrid.map(column => column.slice());
+    currentFallOffsets = initialFallOffsets?.map(column => column.slice())
+      || Array.from({ length: reelsCount }, () => new Array(rowsCount).fill(0));
+    currentWildMultipliers = initialWildMultipliers?.map(column => column.slice())
+      || createWildMultipliers(reelsCount, rowsCount);
+  } else {
+    ({ grid: currentGrid, fallOffsets: currentFallOffsets } = applyCascade(emptyGrid, cursorStateByColumn, strips, allPositions));
+    currentWildMultipliers = createWildMultipliers(reelsCount, rowsCount);
+  }
   if (initialTransform) {
     const transformed = initialTransform({ grid: currentGrid, wildMultipliers: currentWildMultipliers, rng });
     currentGrid = transformed.grid;
