@@ -536,7 +536,7 @@ export class SlotRenderer {
   // `clearCellHighlight` preserves the original per-tile gold glow by default, but lets a
   // cluster visualizer replace that busy cell-by-cell treatment with one clean silhouette.
   drawGridSymbols(ctx, asset, symbolsConfig, layout, reelsCount, rowsCount, gridState) {
-    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true, wildMultipliers, wildSymbol } = gridState;
+    const { grid, cellOffsets, currentClearVariants, cellBounceStartTime, clearProgress, bounceDuration, now, clearEffect, clearCellHighlight = true, wildMultipliers, wildSymbol, spawnPreviews = [] } = gridState;
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
 
     for (let col = 0; col < reelsCount; col++) {
@@ -572,6 +572,10 @@ export class SlotRenderer {
           this._drawClearSpriteEffect(ctx, clearEffect, cx, cy, layout, clearProgress);
         }
       }
+    }
+
+    if (clearProgress != null && spawnPreviews.length > 0) {
+      spawnPreviews.forEach(preview => this._drawSpawnPreview(ctx, asset, symbolsConfig, layout, wildSymbol, preview, clearProgress));
     }
   }
 
@@ -655,6 +659,17 @@ export class SlotRenderer {
         ctx.scale(scale, scale);
         break;
       }
+      case 'gravitate': {
+        const targetCol = clearInfo.targetPosition?.[0] ?? null;
+        const targetRow = clearInfo.targetPosition?.[1] ?? null;
+        const targetX = targetCol == null ? centerX : (targetCol * layout.symbolWidth) + layout.reelsX + (layout.symbolWidth / 2);
+        const targetY = targetRow == null ? centerY : (targetRow * layout.symbolHeight) + layout.reelsY + (layout.symbolHeight / 2);
+        const eased = Math.sin(Math.min(progress, 1) * (Math.PI / 2));
+        ctx.translate((targetX - centerX) * eased, (targetY - centerY) * eased);
+        const scale = 1 - progress * 0.7;
+        ctx.scale(scale, scale);
+        break;
+      }
       case 'scaleFade':
       default: {
         const scale = 1 + progress * 0.4;
@@ -692,6 +707,35 @@ export class SlotRenderer {
       cy + (layout.symbolHeight - height) / 2,
       width,
       height,
+    );
+    ctx.restore();
+  }
+
+  _drawSpawnPreview(ctx, asset, symbolsConfig, layout, wildSymbol, preview, progress) {
+    const tile = symbolsConfig[wildSymbol];
+    if (!tile) return;
+    const [col, row] = preview.position;
+    const cx = layout.reelsX + col * layout.symbolWidth;
+    const cy = layout.reelsY + row * layout.symbolHeight;
+    const eased = Math.sin(Math.min(progress, 1) * (Math.PI / 2));
+    const scale = 0.35 + (0.65 * eased);
+    const width = layout.symbolWidth * scale;
+    const height = layout.symbolHeight * scale;
+    const alpha = Math.min(1, Math.max(0, (progress - 0.15) / 0.55));
+
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = '#ecff61';
+    ctx.shadowBlur = 16 * eased;
+    drawSpriteSymbol(
+      ctx,
+      asset,
+      tile,
+      cx + (layout.symbolWidth - width) / 2,
+      cy + (layout.symbolHeight - height) / 2,
+      width,
+      height,
+      0,
     );
     ctx.restore();
   }
@@ -916,6 +960,7 @@ export class SlotRenderer {
         clearCellHighlight: engine.config.clearCellHighlight !== false,
         wildMultipliers: animator.wildMultipliers,
         wildSymbol: engine.config.wildSymbol,
+        spawnPreviews: animator.currentSpawnPreviews,
         bounceDuration: engine.turboMode ? 140 : 260,
         now: Date.now(),
       });

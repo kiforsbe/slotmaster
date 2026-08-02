@@ -1,12 +1,63 @@
-// Deterministic Lemon Pop board effects. Charge effects happen inside a base no-refill cascade;
-// full Pop Rush variants prepare the one bonus respin after all three charges have been filled.
+/**
+ * Deterministic Lemon Pop board effects.
+ *
+ * The mini Pop features run inside the base no-refill cascade sequence after a charge is spent.
+ * The Pop Rush variants shape the bonus respin board once three charges have been banked and the
+ * mechanic has promoted the player into the major feature.
+ *
+ * Every helper in this module is pure relative to its inputs and only uses the supplied RNG, so
+ * live play, replay logs, and simulations resolve the same board transitions.
+ */
 import { applyNoRefillCascade } from '../../core/math/CascadeMath.js';
+
+/** @typedef {[number, number]} Position */
+
+/** @typedef {Array<Array<string | null>>} SymbolGrid */
+
+/** @typedef {Array<Array<number>>} WildMultiplierGrid */
+
+/**
+ * Minimal paytable shape used by Lemon Pop board-effect selection.
+ *
+ * `type` is used to distinguish premium versus regular symbol targeting, and `linePayout[0]`
+ * acts as the relative value score when ranking candidate upgrades.
+ *
+ * @typedef {Object.<string, { linePayout?: number[], type?: string }>} PopFeaturePaytable
+ */
+
+/**
+ * Result shape returned by a mini Pop feature.
+ *
+ * Some variants add extra metadata such as `transformedSymbol` or `removedSymbols` so the game
+ * can surface a more descriptive debug payload without re-deriving the effect outcome.
+ *
+ * @typedef {{
+ *   grid: SymbolGrid,
+ *   wildMultipliers: WildMultiplierGrid,
+ *   feature: string,
+ *   affectedPositions: Position[],
+ *   transformedSymbol?: string,
+ *   removedSymbols?: string[]
+ * }} PopFeatureResult
+ */
+
+/** @typedef {{ grid: SymbolGrid, wildMultipliers: WildMultiplierGrid }} GridState */
 
 const keyOf = ([col, row]) => `${col},${row}`;
 
+/** Pop Rush bonus board variants in the order exposed to the mechanic/UI. */
 export const POP_RUSH_VARIANTS = ['pop-rush', 'citrus-cross', 'flavor-remix', 'soda-storm'];
+
+/** Single-charge mini features in the order consumed by the mechanic/UI. */
 export const POP_FEATURES = ['wild-splash', 'flavor-shift', 'bubble-burst'];
 
+/**
+ * Clone a board state so effect helpers can stay pure and mutate only the local working copy.
+ *
+ * @param {SymbolGrid} grid
+ * @param {WildMultiplierGrid | undefined} wildMultipliers
+ * @returns {GridState}
+ */
 function cloneState(grid, wildMultipliers) {
   return {
     grid: grid.map(column => column.slice()),
@@ -15,6 +66,16 @@ function cloneState(grid, wildMultipliers) {
   };
 }
 
+/**
+ * Enumerate every horizontal and vertical window of a given length on the board.
+ *
+ * The major-feature placement logic uses these windows to look for cells that are one step away
+ * from completing a strong line hit.
+ *
+ * @param {SymbolGrid} grid
+ * @param {number} [length=3]
+ * @returns {Position[][]}
+ */
 function allWindows(grid, length = 3) {
   const windows = [];
   const rows = grid[0].length;
@@ -31,10 +92,35 @@ function allWindows(grid, length = 3) {
   return windows;
 }
 
+/**
+ * Read a comparable payout score for a symbol.
+ *
+ * @param {PopFeaturePaytable} paytable
+ * @param {string} symbol
+ * @returns {number}
+ */
 function valueOf(paytable, symbol) {
   return Number(paytable[symbol]?.linePayout?.[0] ?? 0);
 }
 
+/**
+ * Find windows that are close to becoming a paying line and rank them by value.
+ *
+ * Premium windows can be completed by turning the remaining cells into any premium symbol,
+ * whereas regular windows look for the highest-count regular match already present.
+ *
+ * @param {SymbolGrid} grid
+ * @param {PopFeaturePaytable} paytable
+ * @param {string} wildSymbol
+ * @returns {Array<{
+ *   positions: Position[],
+ *   target: string,
+ *   premiumTarget: boolean,
+ *   compatibleCount: number,
+ *   missing: Position[],
+ *   value: number
+ * }>}
+ */
 function bestNearLineCandidates(grid, paytable, wildSymbol) {
   return allWindows(grid).map(positions => {
     const symbols = positions.map(([col, row]) => grid[col][row]);
@@ -61,11 +147,27 @@ function bestNearLineCandidates(grid, paytable, wildSymbol) {
     .sort((a, b) => b.value - a.value || a.missing.length - b.missing.length);
 }
 
+/**
+ * Write a wild into the working state while preserving the strongest multiplier already present.
+ *
+ * @param {GridState} state
+ * @param {Position} position
+ * @param {string} wildSymbol
+ * @param {number} [multiplier=1]
+ */
 function setWild(state, [col, row], wildSymbol, multiplier = 1) {
   state.grid[col][row] = wildSymbol;
   state.wildMultipliers[col][row] = Math.max(state.wildMultipliers[col][row] ?? 1, multiplier);
 }
 
+/**
+ * Deterministically shuffle an array with the supplied RNG.
+ *
+ * @template T
+ * @param {T[]} items
+ * @param {() => number} rng
+ * @returns {T[]}
+ */
 function shuffled(items, rng) {
   const result = items.slice();
   for (let index = result.length - 1; index > 0; index--) {
@@ -75,14 +177,35 @@ function shuffled(items, rng) {
   return result;
 }
 
+/**
+ * Enumerate every coordinate in column-major order.
+ *
+ * @param {SymbolGrid} grid
+ * @returns {Position[]}
+ */
 function everyPosition(grid) {
   return grid.flatMap((column, col) => column.map((_, row) => [col, row]));
 }
 
+/**
+ * Return all natural symbols that can be used for a flavor-shift transformation.
+ *
+ * @param {PopFeaturePaytable} paytable
+ * @param {string} wildSymbol
+ * @returns {string[]}
+ */
 function naturalSymbols(paytable, wildSymbol) {
   return Object.keys(paytable).filter(symbol => symbol !== wildSymbol && paytable[symbol]?.linePayout);
 }
 
+/**
+ * Add one or two wilds and immediately resolve gravity on the no-refill board.
+ *
+ * @param {GridState} state
+ * @param {string} wildSymbol
+ * @param {() => number} rng
+ * @returns {PopFeatureResult}
+ */
 function applyWildSplash(state, wildSymbol, rng) {
   const count = 1 + Math.floor(rng() * 2);
   const positions = shuffled(everyPosition(state.grid), rng).slice(0, count);
@@ -90,6 +213,14 @@ function applyWildSplash(state, wildSymbol, rng) {
   return { ...next, feature: 'wild-splash', affectedPositions: positions };
 }
 
+/**
+ * Pick distinct candidate cells from the highest-value near-line opportunities.
+ *
+ * @param {ReturnType<typeof bestNearLineCandidates>} candidates
+ * @param {number} count
+ * @param {() => number} rng
+ * @returns {Array<ReturnType<typeof bestNearLineCandidates>[number] & { position: Position }>}
+ */
 function pickCandidates(candidates, count, rng) {
   const picked = [];
   const usedCells = new Set();
@@ -107,6 +238,16 @@ function pickCandidates(candidates, count, rng) {
   return picked;
 }
 
+/**
+ * Choose central fallback cells when heuristic placement cannot fill the requested quota.
+ *
+ * This keeps bonus boards legible and avoids bunching replacements at arbitrary corners.
+ *
+ * @param {SymbolGrid} grid
+ * @param {number} count
+ * @param {Set<string>} [occupied=new Set()]
+ * @returns {Position[]}
+ */
 function fallbackPositions(grid, count, occupied = new Set()) {
   const centreCol = (grid.length - 1) / 2;
   const centreRow = (grid[0].length - 1) / 2;
@@ -118,6 +259,15 @@ function fallbackPositions(grid, count, occupied = new Set()) {
     .slice(0, count);
 }
 
+/**
+ * Spread five soda-storm wilds across the board to cover as many promising line completions as
+ * possible, preferring crossing cells that improve multiple windows at once.
+ *
+ * @param {SymbolGrid} grid
+ * @param {PopFeaturePaytable} paytable
+ * @param {string} wildSymbol
+ * @returns {Position[]}
+ */
 function sodaStormPositions(grid, paytable, wildSymbol) {
   const candidates = bestNearLineCandidates(grid, paytable, wildSymbol);
   const selected = [];
@@ -144,10 +294,25 @@ function sodaStormPositions(grid, paytable, wildSymbol) {
 }
 
 /**
- * Apply a small effect when one Pop charge fills. Effects use the spin RNG, so a replay,
- * simulation worker, and live spin always make the same board changes. A wild placed into an
- * empty cell is passed through gravity immediately; all effects can therefore create another
- * ordinary straight-line cascade without ever refilling the board.
+ * Apply one mini Pop feature after a charge is consumed.
+ *
+ * Effects use the spin RNG, so a replay, simulation worker, and live spin always make the same
+ * board changes. A wild placed into an empty cell is passed through gravity immediately; all
+ * effects can therefore create another ordinary straight-line cascade without ever refilling the
+ * board.
+ *
+ * `wild-splash` injects one or two wilds, `flavor-shift` retargets a single non-wild symbol, and
+ * `bubble-burst` removes up to two matching pairs.
+ *
+ * @param {{
+ *   grid: SymbolGrid,
+ *   wildMultipliers: WildMultiplierGrid | undefined,
+ *   paytable: PopFeaturePaytable,
+ *   wildSymbol: string,
+ *   feature: string,
+ *   rng: () => number
+ * }} params
+ * @returns {PopFeatureResult}
  */
 export function applyPopFeature({ grid, wildMultipliers, paytable, wildSymbol, feature, rng }) {
   const state = cloneState(grid, wildMultipliers);
@@ -192,7 +357,24 @@ export function applyPopFeature({ grid, wildMultipliers, paytable, wildSymbol, f
   return { ...next, feature: 'bubble-burst', affectedPositions: positions, removedSymbols: selectedSymbols };
 }
 
-/** Apply one of the four Pop Rush variants to an initial 5x5 board. */
+/**
+ * Apply one Pop Rush major-feature variant to the initial bonus board.
+ *
+ * Variants intentionally bias toward different player-facing patterns:
+ * `pop-rush` completes high-value near-lines, `citrus-cross` builds a central plus shape,
+ * `flavor-remix` upgrades premium windows in place, and `soda-storm` scatters five wilds across
+ * the strongest uncovered opportunities.
+ *
+ * @param {{
+ *   grid: SymbolGrid,
+ *   wildMultipliers: WildMultiplierGrid | undefined,
+ *   paytable: PopFeaturePaytable,
+ *   wildSymbol: string,
+ *   variant: string,
+ *   rng: () => number
+ * }} params
+ * @returns {GridState}
+ */
 export function applyPopRushVariant({ grid, wildMultipliers, paytable, wildSymbol, variant, rng }) {
   const state = cloneState(grid, wildMultipliers);
   const candidates = bestNearLineCandidates(state.grid, paytable, wildSymbol);

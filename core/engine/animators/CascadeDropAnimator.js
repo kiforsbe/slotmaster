@@ -77,6 +77,7 @@ export class CascadeDropAnimator {
     this.currentClearPositions = [];
     this.currentClearDurationMs = null;
     this.currentClearVariants = new Map();
+    this.currentSpawnPreviews = [];
     this.activePopups = [];
   }
 
@@ -214,6 +215,7 @@ export class CascadeDropAnimator {
     }
     this.currentClearPositions = [];
     this.currentClearDurationMs = null;
+    this.currentSpawnPreviews = [];
 
     this._runFallPhase(engine, step.grid, step.fallOffsets, hasExistingGrid, onDone, step.wildMultipliers);
   }
@@ -255,10 +257,14 @@ export class CascadeDropAnimator {
 
       this.currentClearPositions = cluster.winningPositions;
       this.currentClearVariants = new Map();
+      this.currentSpawnPreviews = cluster.wildSpawnPosition
+        ? [{ position: cluster.wildSpawnPosition, multiplier: 1 }]
+        : [];
       this.currentClearPositions.forEach(([col, row]) => {
         this.currentClearVariants.set(`${col},${row}`, {
-          variant: CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
+          variant: cluster.wildSpawnPosition ? 'gravitate' : CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
           spinDirection: Math.random() < 0.5 ? -1 : 1,
+          targetPosition: cluster.wildSpawnPosition || null,
         });
       });
       this._spawnClearParticles(engine, this.currentClearPositions);
@@ -287,6 +293,7 @@ export class CascadeDropAnimator {
         } else {
           this.currentClearPositions = [];
           this.currentClearDurationMs = null;
+          this.currentSpawnPreviews = [];
           this.currentClusterWins = null;
           this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
         }
@@ -395,10 +402,20 @@ export class CascadeDropAnimator {
       this.currentClearDurationMs = clearDuration;
       this.currentClearPositions = clearPositions;
       this.currentClearVariants = new Map();
+      this.currentSpawnPreviews = wins
+        .filter(win => Array.isArray(win.wildSpawnPosition))
+        .reduce((previews, win) => {
+          if (!previews.some(item => item.position[0] === win.wildSpawnPosition[0] && item.position[1] === win.wildSpawnPosition[1])) {
+            previews.push({ position: win.wildSpawnPosition, multiplier: 1 });
+          }
+          return previews;
+        }, []);
       clearPositions.forEach(([col, row]) => {
+        const owner = wins.find(win => win.winningPositions.some(position => position[0] === col && position[1] === row));
         this.currentClearVariants.set(`${col},${row}`, {
-          variant: CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
+          variant: owner?.wildSpawnPosition ? 'gravitate' : CLEAR_VARIANTS[Math.floor(Math.random() * CLEAR_VARIANTS.length)],
           spinDirection: Math.random() < 0.5 ? -1 : 1,
+          targetPosition: owner?.wildSpawnPosition || null,
         });
       });
 
@@ -423,6 +440,7 @@ export class CascadeDropAnimator {
         });
         this.currentClearPositions = [];
         this.currentClearDurationMs = null;
+        this.currentSpawnPreviews = [];
         this._runFallPhase(engine, nextStep.grid, nextStep.fallOffsets, false, onDone, nextStep.wildMultipliers);
       };
       requestAnimationFrame(waitForClear);
