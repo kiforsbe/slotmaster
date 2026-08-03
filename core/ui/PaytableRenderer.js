@@ -13,8 +13,8 @@ function symbolIconMarkup(symbol, assets, size = 28) {
 }
 
 function symbolTypeBadge(meta) {
-  if (meta.type === 'premium') return `<span class="slot-paytable-type-badge slot-paytable-type-premium">Premium</span>`;
-  if (meta.type === 'regular') return `<span class="slot-paytable-type-badge slot-paytable-type-regular">Regular</span>`;
+  if (meta.type === 'premium') return `<span class="slot-paytable-type-dot slot-paytable-type-premium-dot" title="Premium"></span>`;
+  if (meta.type === 'regular') return `<span class="slot-paytable-type-dot slot-paytable-type-regular-dot" title="Regular"></span>`;
   return '';
 }
 
@@ -115,6 +115,9 @@ export function renderLinePaytable({
   defaultRule.className = 'slot-paytable-default-rule';
   defaultRule.textContent = 'Line wins pay left to right on active paylines. Values are multipliers of the line bet.';
   container.replaceChildren(defaultRule, table);
+  if (lineSymbols.some(([, meta]) => meta.type === 'premium' || meta.type === 'regular')) {
+    container.insertAdjacentHTML('beforeend', `<p class="slot-paytable-default-rule slot-paytable-type-legend"><span class="slot-paytable-type-dot slot-paytable-type-premium-dot"></span> Premium &nbsp; <span class="slot-paytable-type-dot slot-paytable-type-regular-dot"></span> Regular</p>`);
+  }
 
   const legend = lineSymbols.map(([symbol, meta]) => {
     const notes = [];

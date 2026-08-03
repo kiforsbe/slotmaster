@@ -301,9 +301,6 @@ header { flex: 0 0 auto; min-height: 48px; padding: clamp(7px, 1.2vw, 14px) clam
 .slot-paytable-table td.has-payout { color: var(--gold); font-weight: 800; }
 .slot-paytable-symbol-cell { min-width: 130px; color: #fff; text-align: left !important; white-space: nowrap; }
 .slot-paytable-symbol-name { display: inline-block; margin-left: 5px; color: inherit; font-weight: 800; }
-.slot-paytable-type-badge { display: inline-block; margin-left: 7px; padding: 2px 7px; border-radius: 999px; font-size: .62em; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; vertical-align: middle; }
-.slot-paytable-type-premium { color: #2a1a00; background: var(--gold, #ffd54f); }
-.slot-paytable-type-regular { color: rgba(255,255,255,.85); background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); }
 .slot-cluster-paytable thead .slot-paytable-header { position: relative; }
 .slot-cluster-paytable thead .slot-paytable-header[data-symbol-type="premium"]::after,
 .slot-cluster-paytable thead .slot-paytable-header[data-symbol-type="regular"]::after {
@@ -312,7 +309,8 @@ header { flex: 0 0 auto; min-height: 48px; padding: clamp(7px, 1.2vw, 14px) clam
 .slot-cluster-paytable thead .slot-paytable-header[data-symbol-type="premium"]::after { background: var(--gold, #ffd54f); box-shadow: 0 0 4px var(--gold, #ffd54f); }
 .slot-cluster-paytable thead .slot-paytable-header[data-symbol-type="regular"]::after { background: rgba(255,255,255,.4); }
 .slot-paytable-type-legend { display: flex; align-items: center; gap: 4px; margin-top: -2px; margin-bottom: 10px; }
-.slot-paytable-type-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.slot-paytable-type-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-left: 7px; vertical-align: middle; }
+.slot-paytable-type-legend .slot-paytable-type-dot:first-child { margin-left: 0; }
 .slot-paytable-type-premium-dot { background: var(--gold, #ffd54f); box-shadow: 0 0 4px var(--gold, #ffd54f); }
 .slot-paytable-type-regular-dot { background: rgba(255,255,255,.4); }
 .slot-paytable-icon { position: relative; display: inline-block; overflow: hidden; vertical-align: middle; }
