@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { SlotRenderer } from '../core/rendering/SlotRenderer.js';
+import { SlotRenderer, selectViewportBackground } from '../core/rendering/SlotRenderer.js';
 import { ClusterOutlineRenderer } from '../core/rendering/ClusterOutlineRenderer.js';
 
 function outlineContext() {
@@ -141,4 +141,70 @@ test('per-cell clear highlight remains opt-in at the grid renderer', () => {
   highlights = 0;
   renderer.drawGridSymbols(ctx, null, {}, layout, 1, 1, { ...gridState, clearCellHighlight: false });
   assert.equal(highlights, 0, 'games can replace per-cell boxes with a cluster-level visualizer');
+});
+
+function spriteCaptureContext() {
+  const draws = [];
+  return {
+    draws,
+    save() {}, restore() {}, translate() {}, scale() {}, drawImage(...args) { draws.push(args); },
+  };
+}
+
+test('drawReelsSymbols draws a stacked symbol\'s per-row variant tiles when the whole column matches, once the reel is idle', () => {
+  const ctx = spriteCaptureContext();
+  const asset = { image: {} };
+  const symbolsConfig = {
+    filler: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow_1: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow_2: { x: 0, y: 128, w: 256, h: 128 },
+    surfer_yellow_3: { x: 0, y: 256, w: 256, h: 128 },
+  };
+  const stackedSymbols = { surfer_yellow: ['surfer_yellow_1', 'surfer_yellow_2', 'surfer_yellow_3'] };
+  const gridLayout = { reelsX: 0, reelsY: 0, symbolWidth: 256, symbolHeight: 128 };
+  const reels = [{
+    state: 'idle', offsetY: 0, speed: 0,
+    symbols: ['filler', 'surfer_yellow', 'surfer_yellow', 'surfer_yellow', 'filler', 'filler'],
+  }];
+
+  new SlotRenderer().drawReelsSymbols(ctx, asset, symbolsConfig, gridLayout, 1, reels, stackedSymbols);
+
+  const sourceYs = ctx.draws.map(args => args[2]); // drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) -> sy at index 2
+  assert.deepEqual(sourceYs, [0, 0, 128, 256, 0, 0], 'the 3 visible rows use variant tiles 1/2/3 (sy 0/128/256); the 2 filler rows stay plain (sy 0)');
+});
+
+test('drawReelsSymbols does not stack a symbol while the reel is still spinning', () => {
+  const ctx = spriteCaptureContext();
+  const asset = { image: {} };
+  const symbolsConfig = {
+    surfer_yellow: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow_1: { x: 0, y: 0, w: 256, h: 128 },
+  };
+  const stackedSymbols = { surfer_yellow: ['surfer_yellow_1'] };
+  const gridLayout = { reelsX: 0, reelsY: 0, symbolWidth: 256, symbolHeight: 128 };
+  const reels = [{
+    state: 'spinning', offsetY: 40, speed: 10,
+    symbols: ['surfer_yellow', 'surfer_yellow', 'surfer_yellow', 'surfer_yellow'],
+  }];
+
+  new SlotRenderer().drawReelsSymbols(ctx, asset, symbolsConfig, gridLayout, 1, reels, stackedSymbols);
+
+  const sourceYs = ctx.draws.map(args => args[2]);
+  assert.ok(sourceYs.every(sy => sy === 0), 'mid-spin, every draw uses the plain tile (sy 0), never a variant');
+});
+
+test('selectViewportBackground uses the base background outside free spins', () => {
+  const config = { viewportBackground: 'base.png', freeSpinsViewportBackground: 'bonus.png' };
+  assert.equal(selectViewportBackground(config, { inFreeSpins: false }), 'base.png');
+});
+
+test('selectViewportBackground prefers freeSpinsViewportBackground while inFreeSpins', () => {
+  const config = { viewportBackground: 'base.png', freeSpinsViewportBackground: 'bonus.png' };
+  assert.equal(selectViewportBackground(config, { inFreeSpins: true }), 'bonus.png');
+});
+
+test('selectViewportBackground falls back to the base background if freeSpinsViewportBackground is unset', () => {
+  const config = { viewportBackground: 'base.png' };
+  assert.equal(selectViewportBackground(config, { inFreeSpins: true }), 'base.png');
 });

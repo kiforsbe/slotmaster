@@ -22,3 +22,30 @@ test('computeGridLayout produces square cells that exactly tile reelsWidth/reels
   assert.ok(Math.abs(layout.reelsHeight - layout.cellSize * 7) < 1e-9);
   assert.ok(layout.reelsX > 0 && layout.reelsY > 0, 'grid is inset from the canvas edge by the margin');
 });
+
+test('computeGridLayout with cellAspectRatio 1 (default) behaves exactly as before', () => {
+  const withDefault = computeGridLayout(900, 900, 1, 7, 7);
+  const withExplicit = computeGridLayout(900, 900, 1, 7, 7, 0.05, 0.08, 1);
+  assert.equal(withDefault.cellWidth, withExplicit.cellWidth);
+  assert.equal(withDefault.cellWidth, withDefault.cellHeight);
+  assert.equal(withDefault.cellWidth, withDefault.cellSize);
+});
+
+test('computeGridLayout with cellAspectRatio 2 produces cells twice as wide as tall', () => {
+  const layout = computeGridLayout(2000, 1000, 1, 5, 5, 0.05, 0.08, 2);
+  assert.ok(Math.abs(layout.cellWidth - layout.cellHeight * 2) < 1e-9);
+  assert.ok(Math.abs(layout.reelsWidth - layout.cellWidth * 5) < 1e-9);
+  assert.ok(Math.abs(layout.reelsHeight - layout.cellHeight * 5) < 1e-9);
+});
+
+test('computeGridLayout with cellAspectRatio 2 still fits inside the available box, centered', () => {
+  const layout = computeGridLayout(2000, 1000, 1, 5, 5, 0.05, 0.08, 2);
+  const marginX = 2000 * 0.05;
+  const marginY = 1000 * 0.08;
+  const availW = 2000 - 2 * marginX;
+  const availH = 1000 - 2 * marginY;
+  assert.ok(layout.reelsWidth <= availW + 1e-6);
+  assert.ok(layout.reelsHeight <= availH + 1e-6);
+  assert.ok(layout.reelsX >= marginX - 1e-6);
+  assert.ok(layout.reelsY >= marginY - 1e-6);
+});

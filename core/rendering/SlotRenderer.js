@@ -15,6 +15,17 @@ import { SpriteAnimation } from '../assets/AssetLoader.js';
 import { resolveAnimatedValue } from '../animation/AnimatedValue.js';
 import { ClusterOutlineRenderer } from './ClusterOutlineRenderer.js';
 import { StraightLineWinRenderer } from './StraightLineWinRenderer.js';
+import { resolveStackedSymbolTileName } from './StackedSymbols.js';
+
+// Which viewportBackground image a line-pay game's frame should draw this frame. Generic and
+// opt-in: a game that never sets freeSpinsViewportBackground gets exactly the old behavior
+// (always config.viewportBackground) whether or not it's in free spins.
+export function selectViewportBackground(config, { inFreeSpins = false } = {}) {
+  if (inFreeSpins) {
+    return config.freeSpinsViewportBackground || config.viewportBackground;
+  }
+  return config.viewportBackground;
+}
 
 // How far outside the grid a payline's numbered tag sits - matches both engines' own
 // LINE_TAG_OFFSET constant, so the line runs tag to tag either way.
@@ -247,17 +258,27 @@ export class SlotRenderer {
   // Extracted from SlotEngine.js's renderReelsSymbols - draws each reel's rolling symbol window
   // (see ReelScrollAnimator, which owns the `reels` array's physics/state) at its current
   // scroll offset, with motion blur while spinning fast.
-  drawReelsSymbols(ctx, asset, symbolsConfig, layout, reelsCount, reels) {
+  drawReelsSymbols(ctx, asset, symbolsConfig, layout, reelsCount, reels, stackedSymbols) {
     const { reelsX, reelsY, symbolWidth, symbolHeight } = layout;
     for (let col = 0; col < reelsCount; col++) {
       const reel = reels[col];
       const cx = reelsX + (col * symbolWidth);
+      // Only resolve stacked variants once the reel is fully at rest - reel.symbols[1..rowsCount]
+      // is exactly what's on screen at that moment (see _ensureReels' rowsCount + 3 buffer
+      // layout: 1 leading filler, rowsCount visible, 2 trailing filler). Reading from the
+      // animator's own settled state (not engine.grid) means this never needs the two to be
+      // kept in sync, and naturally covers the pre-spin idle/attract-mode reels too.
+      const visibleColumn = reel.state === 'idle' ? reel.symbols.slice(1, reel.symbols.length - 2) : null;
 
       for (let s = 0; s < reel.symbols.length; s++) {
         const symbol = reel.symbols[s];
         const cy = reelsY + ((s - 1) * symbolHeight) + reel.offsetY;
         const isSpinningFast = reel.state === 'spinning' && reel.speed > 30;
-        this.drawSymbol(ctx, asset, symbolsConfig, symbol, cx, cy, symbolWidth, symbolHeight, isSpinningFast ? reel.speed : 0);
+        const row = s - 1;
+        const tileName = (visibleColumn && row >= 0 && row < visibleColumn.length)
+          ? resolveStackedSymbolTileName(visibleColumn, row, stackedSymbols)
+          : symbol;
+        this.drawSymbol(ctx, asset, symbolsConfig, tileName, cx, cy, symbolWidth, symbolHeight, isSpinningFast ? reel.speed : 0);
       }
     }
   }
@@ -1004,9 +1025,7 @@ export class SlotRenderer {
 
   _drawLine(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
-    const viewportBackground = engine.presentationPhase === 'pop-rush'
-      ? (engine.config.popRushViewportBackground || engine.config.viewportBackground)
-      : engine.config.viewportBackground;
+    const viewportBackground = selectViewportBackground(engine.config, { inFreeSpins: engine.inFreeSpins });
     this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground);
 
     const theme = engine.config.playfield || {};
@@ -1029,7 +1048,7 @@ export class SlotRenderer {
     this.drawPlayfieldBackground(ctx, layout, theme.background);
     this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
     if (engine.animator?.reels) {
-      this.drawReelsSymbols(ctx, symbols, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.animator.reels);
+      this.drawReelsSymbols(ctx, symbols, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.animator.reels, engine.config.stackedSymbols);
     }
     if (engine.state === 'expanding' && engine.animator?.expansionReelsToAnimate) {
       this.drawExpandingAnimation(

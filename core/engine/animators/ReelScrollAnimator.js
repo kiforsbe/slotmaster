@@ -15,6 +15,20 @@ function easeOutCubic(t) {
   return 1 - Math.pow(1 - t, 3);
 }
 
+// Builds a reel's landed symbol window: one random filler above the real column, the target
+// column itself, then two more random fillers below - matching _ensureReels' rowsCount + 3
+// buffer size for any rowsCount, not just 3. Exported standalone so it's testable without
+// spinning up the animation loop (playEntrance's tick() is driven by Date.now()/rAF, not
+// something a unit test wants to drive directly).
+export function buildLandedSymbols(strip, targetColumn, pickRandom) {
+  return [
+    pickRandom(strip),
+    ...targetColumn,
+    pickRandom(strip),
+    pickRandom(strip),
+  ];
+}
+
 export class ReelScrollAnimator {
   constructor(renderer, { spinDuration = 2000, reelDelay = 150 } = {}) {
     this.renderer = renderer;
@@ -105,12 +119,7 @@ export class ReelScrollAnimator {
           }
 
           if (now >= reel.landStartTime) {
-            reel.symbols = [
-              this._getRandomSymbol(reel.strip),
-              targetGrid[r][0], targetGrid[r][1], targetGrid[r][2],
-              this._getRandomSymbol(reel.strip),
-              this._getRandomSymbol(reel.strip),
-            ];
+            reel.symbols = buildLandedSymbols(reel.strip, targetGrid[r], (s) => this._getRandomSymbol(s));
             reel.offsetY = symbolHeight;
             reel.speed = 0;
             reel.state = 'landing';

@@ -14,10 +14,13 @@
  * @param {number} rowsCount
  * @param {number} [marginXFrac=0.05] - horizontal margin as a fraction of the canvas box.
  * @param {number} [marginYFrac=0.08] - vertical margin as a fraction of the canvas box.
+ * @param {number} [cellAspectRatio=1] - cell width / height. Default 1 keeps every existing
+ *   game's square cells; a game with wide art (e.g. 256x128 tiles) passes 2.
  * @returns {{ cssWidth: number, cssHeight: number, canvasWidth: number, canvasHeight: number,
- *   cellSize: number, reelsWidth: number, reelsHeight: number, reelsX: number, reelsY: number }}
+ *   cellSize: number, cellWidth: number, cellHeight: number, reelsWidth: number,
+ *   reelsHeight: number, reelsX: number, reelsY: number }}
  */
-export function computeGridLayout(parentWidth, parentHeight, dpr, reelsCount, rowsCount, marginXFrac = 0.05, marginYFrac = 0.08) {
+export function computeGridLayout(parentWidth, parentHeight, dpr, reelsCount, rowsCount, marginXFrac = 0.05, marginYFrac = 0.08, cellAspectRatio = 1) {
   const cssWidth = parentWidth;
   const cssHeight = parentHeight;
 
@@ -25,16 +28,19 @@ export function computeGridLayout(parentWidth, parentHeight, dpr, reelsCount, ro
   const marginY = cssHeight * marginYFrac;
   const availW = cssWidth - (2 * marginX);
   const availH = cssHeight - (2 * marginY);
-  const cellSize = Math.min(availW / reelsCount, availH / rowsCount);
-  const reelsWidth = cellSize * reelsCount;
-  const reelsHeight = cellSize * rowsCount;
+  const cellHeight = Math.min(availW / (reelsCount * cellAspectRatio), availH / rowsCount);
+  const cellWidth = cellHeight * cellAspectRatio;
+  const reelsWidth = cellWidth * reelsCount;
+  const reelsHeight = cellHeight * rowsCount;
 
   return {
     cssWidth,
     cssHeight,
     canvasWidth: cssWidth * dpr,
     canvasHeight: cssHeight * dpr,
-    cellSize,
+    cellSize: cellHeight,
+    cellWidth,
+    cellHeight,
     reelsWidth,
     reelsHeight,
     reelsX: marginX + (availW - reelsWidth) / 2,

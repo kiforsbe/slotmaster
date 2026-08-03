@@ -172,7 +172,7 @@ export class CoreSlotEngine {
   resize() {
     const parentRect = this.canvas.parentElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    const layout = computeGridLayout(parentRect.width, parentRect.height, dpr, this.config.reelsCount, this.config.rowsCount);
+    const layout = computeGridLayout(parentRect.width, parentRect.height, dpr, this.config.reelsCount, this.config.rowsCount, undefined, undefined, this.config.symbolAspectRatio ?? 1);
 
     this.canvas.style.width = `${layout.cssWidth}px`;
     this.canvas.style.height = `${layout.cssHeight}px`;
@@ -182,8 +182,8 @@ export class CoreSlotEngine {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.scale(dpr, dpr);
 
-    this.symbolWidth = layout.cellSize;
-    this.symbolHeight = layout.cellSize;
+    this.symbolWidth = layout.cellWidth;
+    this.symbolHeight = layout.cellHeight;
     this.reelsWidth = layout.reelsWidth;
     this.reelsHeight = layout.reelsHeight;
     this.reelsX = layout.reelsX;
