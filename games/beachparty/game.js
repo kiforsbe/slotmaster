@@ -20,7 +20,6 @@ import { renderLinePaytable } from '../../core/ui/PaytableRenderer.js';
 export const REELS_COUNT = 5;
 export const ROWS_COUNT = 5;
 export const REEL_SEEDS = [3001, 3003, 3007, 3011, 3013];
-export const REEL_LENGTH = 400;
 export const BET_PER_LINE = 0.05;
 export const BET_PER_LINE_STEP = 0.05;
 export const BET_PER_LINE_MAX = 5;
@@ -92,20 +91,44 @@ export const STACKED_SYMBOLS = {
   surfer_blue:   ['surfer_blue_1', 'surfer_blue_2', 'surfer_blue_3', 'surfer_blue_4', 'surfer_blue_5'],
 };
 
-const FREQUENCIES = {
+// ---- Tuned 2026-08-03 - accepted-best entry #10 (step 44, linked) ----
+// Achieved: RTP 95.82%  |  free-spin trigger 0.676%  |  single trial, variance unknown
+// TRAINING CANDIDATE ONLY - this is one historical search entry, not the final holdout-selected result.
+// Candidate measurement: 250,000 spins x 1 trial (variance unknown).
+// DO NOT ship from this value: validate these exact tables on fresh full-fidelity trials first.
+// Verdict at the time: single exploration trial (variance unknown), 65 ordering, 30 limit (17 spacing, low volatility, top 1% carry 23%)
+// Shape: volatility 2.8x (low), hit rate 56%, biggest round 88x, top 1% carry 23%
+//
+// To reproduce this exact run, the tuner needs all of the following - same searchSeed AND
+// same reel geometry, since strips are generated from them:
+//   searchSeed 12345   reelSeeds [3001, 3003, 3007, 3011, 3013]
+//   reelLength 800   reels 5 x 5 rows
+//   target RTP 96% +/-1.5   target trigger 0.5988% (1 in 167) +/-0.15
+//   run's final-validation budget: 1,000,000 spins x 3 trials   cmaes, max 500 iterations
+//   exploration: 250,000 spins x 1 trials   holdout: 1,000,000 spins x 3 trials across 4 finalists
+//   initial weights: uniform   max RTP std error 1
+//   reelCoupling linked   maxReelDeviation 0.25
+//   loss weights (normalized): ordering 4, limit 1, uniformity 4, stdError 0, triggerRate 1, spacing 1
+//   ordering bias by reel: [-0.25, -0.25, -0.25, -0.25, -0.25]
+//
+// REEL_LENGTH is part of the result, not a separate setting - these frequencies were tuned
+// against this length and do not reproduce the RTP above at any other.
+export const REEL_LENGTH = 800;
+
+export const FREQUENCIES = {
   defaults: { minGap: 1, maxStack: 1, minStack: 1 },
   symbols: {
-    wild:          { frequency: 0.025, minGap: 4 },
-    surfer_blue:   { frequency: 0.035, minStack: 2, maxStack: 5, stackChance: 0.45 },
-    surfer_green:  { frequency: 0.045, minStack: 2, maxStack: 5, stackChance: 0.45 },
-    surfer_pink:   { frequency: 0.060, minStack: 2, maxStack: 5, stackChance: 0.45 },
-    surfer_yellow: { frequency: 0.075, minStack: 2, maxStack: 5, stackChance: 0.45 },
-    ace:           { frequency: 0.110 },
-    king:          { frequency: 0.130 },
-    queen:         { frequency: 0.150 },
-    jack:          { frequency: 0.170 },
-    ten:           { frequency: 0.190 },
-    bonus:         { frequency: 0.040 },
+    wild:          { frequency: 0.002725, minGap: 4, minFrequency: 0.05 },
+    surfer_blue:   { frequency: 0.007379, maxStack: 5, minStack: 5, stackChance: 0.45, minFrequency: 0.05 },
+    surfer_green:  { frequency: 0.02532, maxStack: 5, minStack: 5, stackChance: 0.45, minFrequency: 0.05 },
+    surfer_pink:   { frequency: 0.1224, maxStack: 5, minStack: 5, stackChance: 0.45, minFrequency: 0.05 },
+    surfer_yellow: { frequency: 0.3162, maxStack: 5, minStack: 5, stackChance: 0.45, minFrequency: 0.05 },
+    ace:           { frequency: 0.01545, minFrequency: 0.05 },
+    king:          { frequency: 0.04221, minFrequency: 0.05 },
+    queen:         { frequency: 0.2886, minFrequency: 0.05 },
+    jack:          { frequency: 0.1317, minFrequency: 0.05 },
+    ten:           { frequency: 0.03803, minFrequency: 0.05 },
+    bonus:         { frequency: 0.02751 },
   },
 };
 
