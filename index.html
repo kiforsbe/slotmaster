@@ -234,8 +234,6 @@
       transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
     }
 
-    .game-card:nth-child(4) { grid-column: 2 / span 2; }
-
     .game-card:hover {
       transform: translateY(-5px);
       border-color: rgba(241, 200, 75, .7);
@@ -336,7 +334,7 @@
     @media (max-width: 800px) {
       .hero { grid-template-columns: 1fr; gap: 2rem; }
       .game-grid { grid-template-columns: repeat(2, 1fr); }
-      .game-card, .game-card:nth-child(4) { grid-column: auto; }
+      .game-card { grid-column: auto; }
     }
 
     @media (max-width: 520px) {
@@ -365,7 +363,7 @@
         <div>
           <p class="eyebrow">Your next spin starts here</p>
           <h1 id="welcome-title">Find your <span>lucky</span> machine.</h1>
-          <p class="hero-copy">Pick a world, press play, and explore five themed slot games built to run right in your browser.</p>
+          <p class="hero-copy">Pick a world, press play, and explore seven themed slot games built to run right in your browser.</p>
           <div class="hero-actions">
             <a class="button" href="#games">Browse the games</a>
             <a class="button secondary" href="games/fruitmachine/">Quick play: Lucky Fruits</a>
@@ -376,7 +374,7 @@
           <strong>Simple to start</strong>
           <p>No account, download, or setup. Every game opens in one click and includes its own rules, sound, and bonus features.</p>
           <div class="stats" aria-label="SlotMaster facts">
-            <div class="stat"><b>5</b><small>themed games</small></div>
+            <div class="stat"><b>7</b><small>themed games</small></div>
             <div class="stat"><b>100%</b><small>in-browser</small></div>
             <div class="stat"><b>∞</b><small>free spins</small></div>
           </div>
@@ -462,6 +460,18 @@
               <h3>Lemon Pop</h3>
               <p>Pop horizontal and vertical citrus lines, preserve wild cans, and unlock a free Pop Rush.</p>
               <a class="play-link" href="games/lemonpop/index.html">Play Lemon Pop</a>
+            </div>
+          </article>
+
+          <article class="game-card">
+            <div class="game-art">
+              <span class="game-tag">Beach · free spins</span>
+              <img src="games/beachparty/screenshot.png" alt="Beach Party 5 by 5 slot machine with surfer symbols" loading="lazy">
+            </div>
+            <div class="game-body">
+              <h3>Beach Party</h3>
+              <p>Chase full-reel surfer stacks into Beach Bonus free spins and a Reef Royale mini jackpot.</p>
+              <a class="play-link" href="games/beachparty/">Play Beach Party</a>
             </div>
           </article>
         </div>
