@@ -225,6 +225,7 @@ async function initGame() {
     fsAwardAmount: document.getElementById('fs-award-amount'),
     fsPanel: document.getElementById('fs-panel'), fsCounter: document.getElementById('fs-counter'), fsTotalWin: document.getElementById('fs-total-win'),
     cheatBonus: document.getElementById('cheat-scatter'), cheatBigWin: document.getElementById('cheat-bigwin'),
+    cheatJackpot: document.getElementById('cheat-jackpot'),
     debugShortcuts: document.querySelector('.debug-shortcuts'),
   };
   if (refs.debugShortcuts && DEBUG_MODE) refs.debugShortcuts.classList.add('debug-enabled');
@@ -459,6 +460,9 @@ function setupUIHandlers() {
   if (DEBUG_MODE) {
     if (refs.cheatBonus) refs.cheatBonus.addEventListener('click', () => engine.forceWinResult('scatter'));
     if (refs.cheatBigWin) refs.cheatBigWin.addEventListener('click', () => engine.forceWinResult('bigwin'));
+    // Only actually pays the Reef Royale jackpot while inFreeSpins (see detectJackpot / DESIGN.md
+    // §5) - trigger the Beach Bonus first, then click this during a bonus spin.
+    if (refs.cheatJackpot) refs.cheatJackpot.addEventListener('click', () => engine.forceWinResult('stackedJackpot'));
   }
 }
 

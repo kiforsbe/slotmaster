@@ -516,6 +516,23 @@ export class CoreSlotEngine {
       for (let col = 0; col < this.config.reelsCount; col++) {
         grid.push(Array(this.config.rowsCount).fill(firstLineSymbol));
       }
+    } else if (winType === 'stackedJackpot') {
+      // Generic hook for games (e.g. Beach Party's "Reef Royale") that pay a mini jackpot for
+      // having a full-height stack of every one of their stackedSymbols variants on the board at
+      // once: fills one reel per distinct stackedSymbols base symbol with that symbol top to
+      // bottom, and lets any remaining reels spin normally. Games without a stackedSymbols config
+      // just get a normal random grid (no game-specific symbol names hardcoded here).
+      const stackedKeys = Object.keys(this.config.stackedSymbols || {});
+      for (let col = 0; col < this.config.reelsCount; col++) {
+        const strip = this.config.reelStrips[col];
+        if (col < stackedKeys.length) {
+          grid.push(Array(this.config.rowsCount).fill(stackedKeys[col]));
+        } else {
+          const colSymbols = [];
+          for (let row = 0; row < this.config.rowsCount; row++) colSymbols.push(randomSymbol(strip));
+          grid.push(colSymbols);
+        }
+      }
     }
     return grid;
   }
