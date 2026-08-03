@@ -47,6 +47,7 @@ const DEFAULT_THEME = {
   outlineGlowIntensity: 1,
   frame: '#2d2510',
   gridLines: 'rgba(212, 175, 55, 0.3)',
+  reelsBackground: 'rgba(10, 10, 15, 0.85)',
   loadingBackground: '#0f0f13',
   loadingColor: '#d4af37',
   // SlotEngine.js's renderLoading hardcoded this text (a bookbookbook-specific string baked into
@@ -171,9 +172,10 @@ export class SlotRenderer {
     ctx.restore();
   }
 
-  drawReelsBackground(ctx, layout, reelsCount) {
+  drawReelsBackground(ctx, layout, reelsCount, theme = {}) {
+    const t = { ...DEFAULT_THEME, ...theme };
     const { reelsX, reelsY, reelsWidth, reelsHeight, symbolWidth } = layout;
-    ctx.fillStyle = 'rgba(10, 10, 15, 0.85)';
+    ctx.fillStyle = t.reelsBackground;
     ctx.fillRect(reelsX, reelsY, reelsWidth, reelsHeight);
 
     ctx.strokeStyle = 'rgba(212, 175, 55, 0.15)';
@@ -323,7 +325,9 @@ export class SlotRenderer {
 
   // winState = { winData, expandingWinData, winCycleIndex, activeWinLineIndex } - SlotEngine.js's
   // line-pay win presentation (win lines + glowing highlight boxes), unchanged from renderWinEffects.
-  drawWinEffects(ctx, state, winState, layout, paylines, reelsCount) {
+  // winHighlightInset shrinks the per-cell highlight box in from the cell edges (default 4,
+  // matching every existing game); a game can pass 0 to draw it flush with the cell instead.
+  drawWinEffects(ctx, state, winState, layout, paylines, reelsCount, winHighlightInset = 4) {
     const { winData, expandingWinData, winCycleIndex, activeWinLineIndex } = winState;
     if (state !== 'showing_wins' || !winData) return;
 
@@ -402,8 +406,8 @@ export class SlotRenderer {
       ctx.shadowBlur = pulse;
 
       ctx.fillStyle = 'rgba(212, 175, 55, 0.15)';
-      ctx.fillRect(cx + 4, cy + 4, symbolWidth - 8, symbolHeight - 8);
-      ctx.strokeRect(cx + 4, cy + 4, symbolWidth - 8, symbolHeight - 8);
+      ctx.fillRect(cx + winHighlightInset, cy + winHighlightInset, symbolWidth - winHighlightInset * 2, symbolHeight - winHighlightInset * 2);
+      ctx.strokeRect(cx + winHighlightInset, cy + winHighlightInset, symbolWidth - winHighlightInset * 2, symbolHeight - winHighlightInset * 2);
 
       ctx.restore();
     });
@@ -483,7 +487,14 @@ export class SlotRenderer {
   //     _drawCascade's own ctx.clearRect call above), so a CSS `background` set on `.game-viewport`
   //     (which GridLayout now sizes the canvas to fill exactly - see its own doc) shows through
   //     pixel-for-pixel instead.
-  drawViewportBackground(ctx, canvasWidth, canvasHeight, background) {
+  // `assets` is the engine's loaded asset map (engine.assets); `assetManifest` is engine.assetManifest.
+  // When `background.image` is a key present in `assetManifest`, it's resolved against `assets`
+  // instead of treated as a URL - its already-loaded Image is drawn directly (no extra network
+  // round trip, no naturalWidth wait) once loading finishes; before that (e.g. the very first
+  // frames, drawn before loadAssets() resolves) this simply skips drawing rather than firing a
+  // request for the literal key string. A game that inlines a raw path instead of a manifest key
+  // (not present in assetManifest) keeps the old behavior: loaded lazily, right here.
+  drawViewportBackground(ctx, canvasWidth, canvasHeight, background, assets = {}, assetManifest = null) {
     if (!background || background.type === 'css' || background.type === 'transparent') return;
     if (background.type === 'color') {
       ctx.fillStyle = background.color;
@@ -496,12 +507,19 @@ export class SlotRenderer {
       }
       if (this._viewportNoiseCanvas) ctx.drawImage(this._viewportNoiseCanvas, 0, 0);
     } else if (background.type === 'image') {
-      if (!this._viewportBackgroundImage || this._viewportBackgroundImageSrc !== background.image) {
-        this._viewportBackgroundImage = new Image();
-        this._viewportBackgroundImage.src = background.image;
-        this._viewportBackgroundImageSrc = background.image;
+      const isManifestKey = !!assetManifest && Object.prototype.hasOwnProperty.call(assetManifest, background.image);
+      let img;
+      if (isManifestKey) {
+        img = assets[background.image]?.image;
+        if (!img) return; // asset still loading - skip this frame, retry once it's ready
+      } else {
+        if (!this._viewportBackgroundImage || this._viewportBackgroundImageSrc !== background.image) {
+          this._viewportBackgroundImage = new Image();
+          this._viewportBackgroundImage.src = background.image;
+          this._viewportBackgroundImageSrc = background.image;
+        }
+        img = this._viewportBackgroundImage;
       }
-      const img = this._viewportBackgroundImage;
       // "Cover" fit, not stretch: scale uniformly so the image's own aspect ratio is preserved
       // and it fills canvasWidth x canvasHeight completely, cropping whatever overflows on the
       // shorter axis instead of distorting a photographic background to the canvas's own shape.
@@ -515,7 +533,7 @@ export class SlotRenderer {
   }
 
   // Playfield background: a flat/alpha color ('color' type - e.g. a translucent hex8 or rgba()
-  // wash, drawn UNDER drawReelsBackground's own fixed rgba(10,10,15,0.85) tint and everything
+  // wash, drawn UNDER drawReelsBackground's own theme.reelsBackground tint and everything
   // else within the same reels-rect clip, so it blends with - and is deliberately never fully
   // hidden by - whatever's beneath it (drawCabinet's backdrop, or drawViewportBackground when a
   // game sets one), a generated noise texture ('noise' type - buildPlayfieldNoise/
@@ -1026,7 +1044,7 @@ export class SlotRenderer {
   _drawLine(engine, ctx) {
     ctx.clearRect(0, 0, engine.canvas.width, engine.canvas.height);
     const viewportBackground = selectViewportBackground(engine.config, { inFreeSpins: engine.inFreeSpins });
-    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground);
+    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground, engine.assets, engine.assetManifest);
 
     const theme = engine.config.playfield || {};
 
@@ -1046,7 +1064,7 @@ export class SlotRenderer {
     ctx.clip();
 
     this.drawPlayfieldBackground(ctx, layout, theme.background);
-    this.drawReelsBackground(ctx, layout, engine.config.reelsCount);
+    this.drawReelsBackground(ctx, layout, engine.config.reelsCount, theme);
     if (engine.animator?.reels) {
       this.drawReelsSymbols(ctx, symbols, symbols?.tiles || {}, layout, engine.config.reelsCount, engine.animator.reels, engine.config.stackedSymbols);
     }
@@ -1064,7 +1082,7 @@ export class SlotRenderer {
     this.drawWinEffects(
       ctx, engine.state,
       { winData: engine.winData, expandingWinData: engine.expandingWinData, winCycleIndex: engine.winCycleIndex, activeWinLineIndex: engine.activeWinLineIndex },
-      layout, engine.config.paylines, engine.config.reelsCount,
+      layout, engine.config.paylines, engine.config.reelsCount, engine.config.winHighlightInset,
     );
     engine.particleSystem?.render(ctx);
   }
@@ -1074,7 +1092,7 @@ export class SlotRenderer {
     const viewportBackground = engine.presentationPhase === 'pop-rush'
       ? (engine.config.popRushViewportBackground || engine.config.viewportBackground)
       : engine.config.viewportBackground;
-    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground);
+    this.drawViewportBackground(ctx, engine.canvas.width, engine.canvas.height, viewportBackground, engine.assets, engine.assetManifest);
 
     const theme = engine.config.playfield || {};
 

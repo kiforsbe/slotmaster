@@ -240,25 +240,52 @@ class SlotAudio {
     this._stopMusic();
     this.currentMusicUrl = track;
 
-    const el = typeof track === 'string' ? new Audio(track) : track;
+    // A string track (a raw URL, not a preloaded element) means this class owns the element it
+    // creates and can freely tear it down later. An object track is normally a game's own
+    // preloaded HTMLAudioElement (CoreSlotEngine's `music` config resolves manifest keys to
+    // `asset.audio`) - reused as-is rather than re-fetched, which matters in this app's file://
+    // VS Code environment: AssetLoader.loadAudio already worked around file:// media-element
+    // restrictions for that element (a blob: src), but `new Audio(rawPath)` here would hit the
+    // exact same restriction fresh, with no such workaround.
+    const owned = typeof track === 'string';
+    const el = owned ? new Audio(track) : track;
     if (!el) return;
     el.loop = true;
     el.preload = 'auto';
     this.musicEl = el;
-    this.musicSource = this.ctx.createMediaElementSource(el);
+    this._musicElOwned = owned;
+
+    // Web Audio only ever allows ONE MediaElementSourceNode per HTMLMediaElement, for the
+    // element's whole lifetime - calling createMediaElementSource twice on the same element
+    // throws. A shared/preloaded element gets revisited every time its state plays again (e.g.
+    // main -> freespins -> main), so cache and reuse its node instead of recreating it.
+    this._mediaSourceNodes ??= new WeakMap();
+    let source = this._mediaSourceNodes.get(el);
+    if (!source) {
+      source = this.ctx.createMediaElementSource(el);
+      this._mediaSourceNodes.set(el, source);
+    }
+    this.musicSource = source;
     this.musicSource.connect(this.musicGain);
 
     if (!this.isMuted && !this.musicMuted) {
       // May be rejected by autoplay policy before the first user gesture; resume() retries after
       // the first user gesture and after the AudioContext has resumed.
-      el.play().catch(() => {});
+      el.play().catch(error => console.warn(
+        `SlotAudio: music playback failed (${el.src || 'no source'})`, error,
+      ));
     }
   }
 
   _stopMusic() {
     if (this.musicEl) {
       try { this.musicEl.pause(); } catch (e) {}
-      this.musicEl.src = '';
+      // Only tear down an element this class created itself from a raw URL string - a shared/
+      // preloaded element (and its cached MediaElementSourceNode, see _playMusicTrack) needs to
+      // keep working the next time its state plays again.
+      if (this._musicElOwned) {
+        try { this.musicEl.src = ''; } catch (e) {}
+      }
       this.musicEl = null;
     }
     if (this.musicSource) {

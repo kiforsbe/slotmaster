@@ -267,7 +267,7 @@ test('a spin queued via requestSpin while busy runs once the current spin settle
   assert.equal(spinCount, 0);
 });
 
-test('a configured `music` map is wired into the audio engine at construction, and swapped on entering/exiting free spins', () => {
+test('a configured `music` map (asset-manifest keys) is wired into the audio engine once assets load, and swapped on entering/exiting free spins', async () => {
   const calls = [];
   const originalSetMusicTracks = audio.setMusicTracks;
   const originalSetMusicState = audio.setMusicState;
@@ -279,8 +279,15 @@ test('a configured `music` map is wired into the audio engine at construction, a
       mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
       animator: noAnimation(),
       renderer: { draw: () => {} },
-      music: { main: 'theme.mp3', freespins: 'freespins.mp3' },
+      // Values are GAME_ASSET_MANIFEST keys, not literal URLs - resolved against `assets` below,
+      // which stands in for what AssetLoader.loadAll would normally produce.
+      assets: { theme: { url: 'theme.mp3' }, altTheme: { url: 'freespins.mp3' } },
+      music: { main: 'theme', freespins: 'altTheme' },
     });
+
+    assert.deepEqual(calls, [], 'not resolved until assets have loaded');
+
+    await engine.loadAssets();
 
     assert.deepEqual(calls, [
       ['setMusicTracks', { main: 'theme.mp3', freespins: 'freespins.mp3' }],
@@ -298,7 +305,7 @@ test('a configured `music` map is wired into the audio engine at construction, a
   }
 });
 
-test('with no `music` config, CoreSlotEngine never calls into the audio engine\'s music subsystem', () => {
+test('with no `music` config and no `music` manifest asset, CoreSlotEngine never calls into the audio engine\'s music subsystem', async () => {
   const calls = [];
   const originalSetMusicTracks = audio.setMusicTracks;
   const originalSetMusicState = audio.setMusicState;
@@ -312,10 +319,38 @@ test('with no `music` config, CoreSlotEngine never calls into the audio engine\'
       renderer: { draw: () => {} },
     });
 
+    await engine.loadAssets();
     engine.enterFreeSpins(3);
     engine.exitFreeSpins();
 
     assert.deepEqual(calls, []);
+  } finally {
+    audio.setMusicTracks = originalSetMusicTracks;
+    audio.setMusicState = originalSetMusicState;
+  }
+});
+
+test('a `music` manifest asset with no explicit config.music still gets wired up as the \'main\' track', async () => {
+  const calls = [];
+  const originalSetMusicTracks = audio.setMusicTracks;
+  const originalSetMusicState = audio.setMusicState;
+  audio.setMusicTracks = (tracks) => calls.push(['setMusicTracks', tracks]);
+  audio.setMusicState = (state) => calls.push(['setMusicState', state]);
+
+  try {
+    const engine = new CoreSlotEngine(stubCanvas(), {
+      mechanic: { resolveLiveSpin: () => ({ steps: [{ grid: [['a']], payout: 0 }], scatterWin: null }) },
+      animator: noAnimation(),
+      renderer: { draw: () => {} },
+      assets: { music: { url: 'theme.mp3' } },
+    });
+
+    await engine.loadAssets();
+
+    assert.deepEqual(calls, [
+      ['setMusicTracks', { main: 'theme.mp3' }],
+      ['setMusicState', 'main'],
+    ]);
   } finally {
     audio.setMusicTracks = originalSetMusicTracks;
     audio.setMusicState = originalSetMusicState;

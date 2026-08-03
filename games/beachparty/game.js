@@ -195,6 +195,9 @@ export const winEvaluator = (grid, paytable, paylines, linesCount, wildSymbol, s
 const GAME_ASSET_MANIFEST = {
   symbols: { url: './assets/symbols/symbols.tiles.json', type: 'tilemap' },
   music: { url: './assets/music/pacific_drift_theme.mp3', type: 'music' },
+  musicFreeSpins: { url: './assets/music/pixel_drift.mp3', type: 'music' },
+  viewportBackground: { url: './assets/backgrounds/beach_lifeguard_hut_2.png', type: 'image' },
+  freeSpinsViewportBackground: { url: './assets/backgrounds/boards_on_the_beach.png', type: 'image' },
 };
 
 const DEBUG_MODE = true; // Set to false in production - matches every other game's own flag.
@@ -249,10 +252,32 @@ async function initGame() {
 
     symbolAspectRatio: 2, // 256x128 tiles - wide cells, new to this game (see GridLayout.js).
     stackedSymbols: STACKED_SYMBOLS,
+    // Flush win-highlight boxes (SlotRenderer.drawWinEffects) instead of every other game's
+    // 4px inset - this game only, other games keep the default.
+    winHighlightInset: 0,
+    // Beach Party leans on its own photo backgrounds rather than a themed cabinet: no frame/
+    // glow border around the reels, and a much lighter reels-area tint (SlotRenderer's default
+    // rgba(10,10,15,0.85) nearly blacks out the background art) so the beach art stays visible
+    // behind the symbols.
+    playfield: {
+      frame: 'transparent',
+      outline: 'transparent',
+      reelsBackground: 'rgba(4, 20, 22, 0.28)',
+    },
 
     assetManifest: GAME_ASSET_MANIFEST,
-    viewportBackground: { type: 'image', image: './assets/backgrounds/beach_lifeguard_hut_2.png' },
-    freeSpinsViewportBackground: { type: 'image', image: './assets/backgrounds/boards_on_the_beach.png' },
+    // `image`/`main`/`freespins` below are GAME_ASSET_MANIFEST keys, not literal paths - resolved
+    // against the loaded asset map (SlotRenderer.drawViewportBackground / CoreSlotEngine.loadAssets),
+    // so both go through AssetLoader's own URL resolution and preloading instead of a raw string.
+    viewportBackground: { type: 'image', image: 'viewportBackground' },
+    freeSpinsViewportBackground: { type: 'image', image: 'freeSpinsViewportBackground' },
+    // Per-state theme music (CoreSlotEngine/SlotAudio's { main, freespins } mechanism, unused by
+    // every other game so far) - Beach Bonus gets its own track instead of looping the base theme
+    // through the bonus round.
+    music: {
+      main: 'music',
+      freespins: 'musicFreeSpins',
+    },
 
     onStateChange: state => updateSlotStateUI({
       engine, state, refs: { spin: refs.spin, ticker: refs.ticker }, onUpdate: updateUI,

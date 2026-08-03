@@ -41,15 +41,13 @@ export class CoreSlotEngine {
     // there is no second game-specific asset representation.
     this.assets = config.assets ?? {};
 
-    // Per-game-state theme music (e.g. { main, freespins }), configured via config.music - a
-    // game that sets nothing never touches the audio engine's music subsystem at all. Wired here
-    // in the constructor rather than init() since init() does browser-only setup (window resize
-    // listeners) that isn't safe to call in tests; setMusicTracks/setMusicState are themselves
-    // no-ops until a real AudioContext exists, so calling them eagerly is safe.
-    this.musicConfig = config.music || null;
-    if (this.musicConfig) {
-      this._configureMusic(this.musicConfig);
-    }
+    // Per-game-state theme music (e.g. { main: 'music', freespins: 'musicFreeSpins' }) - values
+    // are GAME_ASSET_MANIFEST keys, not raw URLs, resolved against the loaded asset map once
+    // loadAssets() finishes (see there) so every music file goes through AssetLoader's own URL
+    // resolution instead of a raw string handed straight to `new Audio()`. A game that sets
+    // nothing but has a `music` manifest entry still gets it wired up as the 'main' track for
+    // free - a game that sets neither never touches the audio engine's music subsystem at all.
+    this.musicConfig = null;
 
     // Duck-on-effect and the master compressor are on by default (matching this file's original
     // fixed behavior); a game can disable either (`false`) or tune its parameters (an object) -
@@ -142,9 +140,26 @@ export class CoreSlotEngine {
       ? this.assetLoader.loadAll(this.assetManifest).then(assets => { this.assets = assets; })
       : Promise.resolve(this.assets);
     this.assetLoadPromise = load.then(() => {
-      if (!this.musicConfig && this.assets.music) {
-        const track = this.assets.music.audio || this.assets.music.url;
-        if (track) this._configureMusic({ main: track });
+      // config.music maps state name -> GAME_ASSET_MANIFEST key (e.g. { main: 'music', freespins:
+      // 'musicFreeSpins' }). Resolved here, against the now-loaded `this.assets`, rather than at
+      // construction time, since the keys only mean anything once assets have loaded. A game that
+      // sets nothing but has a plain `music` manifest entry still gets it as the 'main' track, for
+      // free (matches every game's behavior from before per-state music tracks existed).
+      const musicKeys = this.config.music || (this.assets.music ? { main: 'music' } : null);
+      if (musicKeys) {
+        // Prefer the preloaded `.audio` element over the raw `.url` string: AssetLoader.loadAudio
+        // already worked around this app's file:// media-element restrictions for that element (a
+        // blob: src) - `new Audio(rawUrl)` here would hit the same restriction fresh, with no such
+        // workaround. Reusing the same element across states (e.g. main -> freespins -> main) is
+        // safe because SlotAudio._playMusicTrack now caches/reuses each element's
+        // MediaElementSourceNode instead of recreating it.
+        const trackOf = key => { const asset = this.assets[key]; return asset && (asset.audio || asset.url); };
+        const tracks = {};
+        for (const [state, key] of Object.entries(musicKeys)) {
+          const track = trackOf(key);
+          if (track) tracks[state] = track;
+        }
+        if (Object.keys(tracks).length) this._configureMusic(tracks);
       }
       this.assetsLoaded = true;
       if (this.canvas?.parentElement) this.resize();
