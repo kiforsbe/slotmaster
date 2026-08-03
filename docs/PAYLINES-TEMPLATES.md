@@ -59,3 +59,28 @@ export const PAYLINES = [
   [3, 2, 1, 0, 0], // Line 20: Ascending Run
 ];
 ```
+
+## 5x5 playfield
+```js
+// Payline definitions - 5 reels x 5 rows, 30 fixed lines (Beach Party's grid size - no
+// existing template covered it). Rows are 0 (top) to 4 (bottom), center row 2. Straight rows,
+// then diagonals, V/inverted-V at three depths, step patterns, U-shapes at three depths,
+// zigzags at three row-pairs, and W/M shapes at three spreads, so all 5 rows carry real weight
+// instead of the extra rows just being tacked onto a 5x3/5x4 shape.
+export const PAYLINES = [
+  [0,0,0,0,0], [1,1,1,1,1], [2,2,2,2,2], [3,3,3,3,3], [4,4,4,4,4],       // 1-5: straight rows
+  [0,1,2,3,4], [4,3,2,1,0],                                              // 6-7: diagonals
+  [0,2,4,2,0], [4,2,0,2,4],                                              // 8-9: deep V / inverted-V
+  [1,2,3,2,1], [3,2,1,2,3],                                              // 10-11: shallow V / inverted-V
+  [0,1,3,1,0], [4,3,1,3,4],                                              // 12-13: wide V / inverted-V (skip row 2)
+  [0,0,2,4,4], [4,4,2,0,0],                                              // 14-15: step down / up
+  [0,1,1,1,0], [4,3,3,3,4],                                              // 16-17: shallow U top / bottom
+  [1,0,0,0,1], [3,4,4,4,3],                                              // 18-19: U top / bottom (rows 0-1 / 3-4)
+  [2,1,0,1,2], [2,3,4,3,2],                                              // 20-21: U top / bottom (rows 0-2 / 2-4)
+  [0,1,0,1,0], [4,3,4,3,4],                                              // 22-23: zigzag top / bottom
+  [1,2,1,2,1], [3,2,3,2,3],                                              // 24-25: zigzag upper-mid / lower-mid
+  [0,2,0,2,0], [4,2,4,2,4],                                              // 26-27: W / M wide (rows 0/2, 2/4)
+  [0,4,0,4,0], [4,0,4,0,4],                                              // 28-29: extreme W / M (rows 0/4)
+  [1,3,1,3,1],                                                           // 30: W mid (rows 1/3)
+];
+```
