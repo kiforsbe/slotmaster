@@ -15,15 +15,16 @@ open `index.html` (via a local server, see below) and play.
 | Candy Frenzy | <img src="games/candyfrenzy/screenshot.png" width="160"> | 7x7, cluster pays (min. 5, no paylines) | Bonus scatter → free spins with growing multiplier tiles, cascading wins | [games/candyfrenzy](games/candyfrenzy/README.md) |
 | Mayan Tumble | <img src="games/mayantumble/screenshot.png" width="160"> | 5x3, 10 lines, cascading | Gold scatter → free spins with growing multiplier tiles, cascading wins | [games/mayantumble](games/mayantumble/README.md) |
 | Lemon Pop | <img src="games/lemonpop/screenshot.png" width="160"> | 5x5, horizontal/vertical 3–5 runs, no refill | Three Pops (five winning lines each) → one free Pop Rush respin | [games/lemonpop](games/lemonpop/README.md) |
+| Beach Party | <img src="games/beachparty/screenshot.png" width="160"> | 5x5, 30 lines, wide non-square tiles | Beach Bonus (reels 1/3/5) → free spins with stacked wilds and a Reef Royale mini jackpot | [games/beachparty](games/beachparty/README.md) |
 
-All six games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug tooling (SPIN LOG,
+All seven games run on the same `core/engine/CoreSlotEngine.js` skeleton, debug tooling (SPIN LOG,
 RUN SIMULATION, TUNE FREQUENCIES), and simulator (`core/SpinSimulator.js`) - which spin/win logic
 actually runs is pluggable per game via a **mechanic** component, `core/engine/mechanics/
-LineMechanic.js` (the first three), `core/engine/mechanics/CascadeSpinMechanic.js` (Candy Frenzy
-and Mayan Tumble), or `games/lemonpop/LemonPopSpinMechanic.js` (Lemon Pop) - see
-`docs/ARCHITECTURE.md`'s "pluggable gameplay mechanics" section
-for how they share one architecture instead of two. Each README covers only what's specific to
-that game.
+LineMechanic.js` (Book of Book Book, Lucky Fruits, Bar Fruits, and Beach Party),
+`core/engine/mechanics/CascadeSpinMechanic.js` (Candy Frenzy and Mayan Tumble), or
+`games/lemonpop/LemonPopSpinMechanic.js` (Lemon Pop) - see `docs/ARCHITECTURE.md`'s "pluggable
+gameplay mechanics" section for how they share one architecture instead of two. Each README
+covers only what's specific to that game.
 
 Candy Frenzy and Mayan Tumble share one cascade mechanic with different win evaluators, which is
 the point of the split: Candy Frenzy supplies `core/math/ClusterMath.js`'s cluster evaluator,
@@ -257,4 +258,4 @@ Portions of this project (code, docs, and image assets) were developed with the 
 of AI tools, including Claude Code, GitHub Copilot, and Google Gemini image generation.
 
 ---
-_Docs last synced with the codebase: 2026-08-01, commit `7ce921e`._
+_Docs last synced with the codebase: 2026-08-03, commit `941692c`._
