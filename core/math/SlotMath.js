@@ -396,14 +396,19 @@ export function createSeededRng(seed) {
  * @param {Array<Array<string>>} reelStrips - one strip (array of symbol names) per reel
  * @param {number} rowsCount - visible rows per reel
  * @param {function(): number} rng - rng function as returned by createSeededRng()
+ * @param {number[]} [stopIndexesOut] - if provided, each reel's chosen stop position is
+ *   pushed here (same order as `grid`'s columns). Lets a caller that cares (rendering a
+ *   stacked symbol that's only partially on-screen, see StackedSymbols.js) look at strip
+ *   positions just above/below the visible window; every other caller ignores it.
  * @returns {Array<Array<string>>} grid[col][row] of symbol names
  */
-export function generateTargetGrid(reelStrips, rowsCount, rng) {
+export function generateTargetGrid(reelStrips, rowsCount, rng, stopIndexesOut) {
   const grid = [];
   for (let col = 0; col < reelStrips.length; col++) {
     const strip = reelStrips[col];
     const reelCol = [];
     const stopIndex = Math.floor(rng() * strip.length);
+    if (stopIndexesOut) stopIndexesOut.push(stopIndex);
     for (let row = 0; row < rowsCount; row++) {
       reelCol.push(strip[(stopIndex + row) % strip.length]);
     }

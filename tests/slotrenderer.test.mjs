@@ -194,6 +194,61 @@ test('drawReelsSymbols does not stack a symbol while the reel is still spinning'
   assert.ok(sourceYs.every(sy => sy === 0), 'mid-spin, every draw uses the plain tile (sy 0), never a variant');
 });
 
+test('drawReelsSymbols renders a full-height stack cropped to the visible window when part of it stopped off-screen', () => {
+  const ctx = spriteCaptureContext();
+  const asset = { image: {} };
+  const symbolsConfig = {
+    filler: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow_3: { x: 0, y: 256, w: 256, h: 128 },
+    surfer_yellow_4: { x: 0, y: 384, w: 256, h: 128 },
+    surfer_yellow_5: { x: 0, y: 512, w: 256, h: 128 },
+  };
+  const stackedSymbols = {
+    surfer_yellow: ['surfer_yellow_1', 'surfer_yellow_2', 'surfer_yellow_3', 'surfer_yellow_4', 'surfer_yellow_5'],
+  };
+  const gridLayout = { reelsX: 0, reelsY: 0, symbolWidth: 256, symbolHeight: 128 };
+  // True run on the strip is 5 long (positions 2-6), but the reel only stopped with positions
+  // 4-6 (the bottom 3 of that run) inside the 3-row visible window - positions 2-3 are two rows
+  // above what's on screen.
+  const strip = ['filler', 'filler', 'surfer_yellow', 'surfer_yellow', 'surfer_yellow', 'surfer_yellow', 'surfer_yellow', 'filler'];
+  const reels = [{
+    state: 'idle', offsetY: 0, speed: 0, strip, stopIndex: 4,
+    symbols: ['filler', 'surfer_yellow', 'surfer_yellow', 'surfer_yellow', 'filler', 'filler'],
+  }];
+
+  new SlotRenderer().drawReelsSymbols(ctx, asset, symbolsConfig, gridLayout, 1, reels, stackedSymbols);
+
+  const sourceYs = ctx.draws.map(args => args[2]);
+  assert.deepEqual(sourceYs, [0, 256, 384, 512, 0, 0], 'the 3 visible rows use the bottom 3 variant tiles (3/4/5) of the 5-tall run, not variants 1/2/3');
+});
+
+test('drawReelsSymbols does not crop-stack a run shorter than the full variant count, even with strip context', () => {
+  const ctx = spriteCaptureContext();
+  const asset = { image: {} };
+  const symbolsConfig = {
+    filler: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow: { x: 0, y: 0, w: 256, h: 128 },
+    surfer_yellow_1: { x: 0, y: 128, w: 256, h: 128 },
+  };
+  const stackedSymbols = {
+    surfer_yellow: ['surfer_yellow_1', 'surfer_yellow_2', 'surfer_yellow_3', 'surfer_yellow_4', 'surfer_yellow_5'],
+  };
+  const gridLayout = { reelsX: 0, reelsY: 0, symbolWidth: 256, symbolHeight: 128 };
+  // Only a 2-long run on the strip (positions 3-4) - shorter than the 5-tile variant set, so it
+  // should stay plain even though strip context is available.
+  const strip = ['filler', 'filler', 'filler', 'surfer_yellow', 'surfer_yellow', 'filler'];
+  const reels = [{
+    state: 'idle', offsetY: 0, speed: 0, strip, stopIndex: 3,
+    symbols: ['filler', 'surfer_yellow', 'surfer_yellow', 'filler', 'filler'],
+  }];
+
+  new SlotRenderer().drawReelsSymbols(ctx, asset, symbolsConfig, gridLayout, 1, reels, stackedSymbols);
+
+  const sourceYs = ctx.draws.map(args => args[2]);
+  assert.ok(sourceYs.every(sy => sy === 0), 'a genuinely short run (not a full-height stack) renders plain tiles only');
+});
+
 test('selectViewportBackground uses the base background outside free spins', () => {
   const config = { viewportBackground: 'base.png', freeSpinsViewportBackground: 'bonus.png' };
   assert.equal(selectViewportBackground(config, { inFreeSpins: false }), 'base.png');

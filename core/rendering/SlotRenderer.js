@@ -278,7 +278,7 @@ export class SlotRenderer {
         const isSpinningFast = reel.state === 'spinning' && reel.speed > 30;
         const row = s - 1;
         const tileName = (visibleColumn && row >= 0 && row < visibleColumn.length)
-          ? resolveStackedSymbolTileName(visibleColumn, row, stackedSymbols)
+          ? resolveStackedSymbolTileName(visibleColumn, row, stackedSymbols, reel.strip, reel.stopIndex)
           : symbol;
         this.drawSymbol(ctx, asset, symbolsConfig, tileName, cx, cy, symbolWidth, symbolHeight, isSpinningFast ? reel.speed : 0);
       }

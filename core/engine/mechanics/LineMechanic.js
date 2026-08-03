@@ -14,8 +14,8 @@ export const LineMechanic = {
   // from a random start position. Called once per spin by both SlotEngine.spin() (which then
   // animates reels catching up to it) and SpinSimulator's resolveSpin below (no animation,
   // used immediately).
-  getTargetGrid(reelStrips, rowsCount, rng) {
-    return generateTargetGrid(reelStrips, rowsCount, rng);
+  getTargetGrid(reelStrips, rowsCount, rng, stopIndexesOut) {
+    return generateTargetGrid(reelStrips, rowsCount, rng, stopIndexesOut);
   },
 
   // "Calculate wins": config.winEvaluator (defaults to checkWins) evaluated against a grid.
@@ -46,13 +46,17 @@ export const LineMechanic = {
   // across every step, mechanic-agnostic.
   resolveLiveSpin({ reelStrips, rowsCount, seed, config, linesCount, forcedGrid }) {
     const rng = createSeededRng(seed);
-    const grid = (forcedGrid && forcedGrid.length > 0) ? forcedGrid : this.getTargetGrid(reelStrips, rowsCount, rng);
+    // stopIndexes stays empty for a forced/debug grid (getTargetGrid is skipped entirely) -
+    // ReelScrollAnimator/StackedSymbols.js treat a missing stop index as "no strip context",
+    // falling back to judging stacks by the visible window alone.
+    const stopIndexes = [];
+    const grid = (forcedGrid && forcedGrid.length > 0) ? forcedGrid : this.getTargetGrid(reelStrips, rowsCount, rng, stopIndexes);
     const winData = this.evaluateWin(grid, config, linesCount);
     const totalBet = config.betPerLine * linesCount;
     const payout = (winData.totalLinePayoutMultiplier || 0) * config.betPerLine
       + (winData.scatterWin ? winData.scatterWin.payout * totalBet : 0);
     return {
-      steps: [{ grid, lineWins: winData.lineWins || [], scatterWin: winData.scatterWin || null, payout }],
+      steps: [{ grid, stopIndexes, lineWins: winData.lineWins || [], scatterWin: winData.scatterWin || null, payout }],
       scatterWin: winData.scatterWin || null,
     };
   },

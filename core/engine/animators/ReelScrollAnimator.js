@@ -48,7 +48,7 @@ export class ReelScrollAnimator {
         symbols.push(this._getRandomSymbol(strip));
       }
       this.reels.push({
-        symbols, offsetY: 0, speed: 0, state: 'idle', strip,
+        symbols, offsetY: 0, speed: 0, state: 'idle', strip, stopIndex: null,
         landStartTime: 0, landElapsedStart: 0, landDuration: 0,
         bounceProgress: 0, bounceDirection: 1,
       });
@@ -120,6 +120,11 @@ export class ReelScrollAnimator {
 
           if (now >= reel.landStartTime) {
             reel.symbols = buildLandedSymbols(reel.strip, targetGrid[r], (s) => this._getRandomSymbol(s));
+            // Real strip position the visible window's top row came from (undefined for a
+            // forced/debug grid, which skipped generateTargetGrid entirely) - lets the renderer
+            // recognize a full-height stack that's only partially scrolled into view, see
+            // StackedSymbols.js.
+            reel.stopIndex = step.stopIndexes?.[r] ?? null;
             reel.offsetY = symbolHeight;
             reel.speed = 0;
             reel.state = 'landing';
