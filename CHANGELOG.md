@@ -3,6 +3,47 @@
 Notable changes per release. Starts at 0.6.0 — earlier releases are described by their
 annotated tags (`git show 0.5.0`).
 
+## 0.12.0 — 2026-08-03
+
+### Added
+
+- **New game: Beach Party** — a 5-reel, 5-row, 30-line game with wide 256×128 (non-square) tiles
+  and tall multi-row "stacked" surfer symbols. Landing a full-height stack of one surfer color
+  counts as wild during Beach Bonus free spins (triggered by landing the bonus symbol on reels
+  1/3/5, uncapped retrigger), and collecting full stacks of all four surfer colors at once pays a
+  flat Reef Royale mini jackpot on top.
+- **Non-square symbol tiles** — `symbolAspectRatio` lets a game's grid/reel layout fit wide cells
+  instead of assuming width equals height, generalized in `core/rendering/GridLayout.js` and
+  `CoreSlotEngine.resize()`.
+- **Stacked-symbol rendering** (`core/rendering/StackedSymbols.js`) — a config-driven, opt-in way
+  to draw several consecutive same-symbol reel cells as one continuous tall image via per-row
+  variant tiles, rather than the same square tile repeated.
+- **Manifest-key driven per-state assets** — `music`/`viewportBackground`/`freeSpinsViewportBackground`
+  config fields now reference `GAME_ASSET_MANIFEST` keys instead of raw file paths, so every asset
+  (including ones swapped in for free spins) flows through `AssetLoader`'s own resolution and
+  preloading.
+- **Opt-in playfield theme fields** — `playfield.frame`/`playfield.outline`/`playfield.reelsBackground`
+  and `winHighlightInset` let a game reshape the reels frame, background tint, and win-highlight
+  inset without touching shared rendering code; every existing game keeps its prior look by default.
+
+### Changed
+
+- **Paytable premium/regular indicators** across every line-pay game are now small colored dots
+  instead of text pill badges, with a one-line legend, freeing up space in the symbol row.
+
+### Fixed
+
+- **Music failed to switch back from free spins to the main track** — `AudioContext.createMediaElementSource()`
+  can only ever be called once per media element; `SlotAudio.js` now caches and reuses each
+  element's source node instead of trying to recreate it on every track switch.
+- **Music playback failed entirely under a `file://` runtime** (`NotSupportedError`) — resolving a
+  manifest-key track now consistently prefers the preloaded, blob-URL-backed audio element over a
+  fresh string URL, so `AssetLoader`'s existing `file://` workaround is never bypassed.
+- **A reel's stacked symbol fell back to plain tiles whenever part of the stack landed off-screen**
+  (e.g. only the bottom 3 rows of a 5-tall run inside the visible window) — stacking now looks at
+  the reel's actual strip position, not just the visible column, and renders the correct
+  already-cropped variant tiles for a full-height run regardless of scroll position.
+
 ## 0.11.1 — 2026-08-02
 
 ### Fixed
