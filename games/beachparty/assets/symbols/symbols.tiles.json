@@ -1,0 +1,1862 @@
+{
+  "sheet": "symbols.png",
+  "count": 32,
+  "tiles": [
+    {
+      "index": 0,
+      "name": "surfer_yellow_1",
+      "x": 0,
+      "y": 0,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 1,
+      "name": "surfer_pink_1",
+      "x": 256,
+      "y": 0,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 2,
+      "name": "surfer_green_1",
+      "x": 512,
+      "y": 0,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 3,
+      "name": "surfer_blue_1",
+      "x": 768,
+      "y": 0,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 4,
+      "name": "surfer_yellow_2",
+      "x": 0,
+      "y": 128,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 5,
+      "name": "surfer_pink_2",
+      "x": 256,
+      "y": 128,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 6,
+      "name": "surfer_green_2",
+      "x": 512,
+      "y": 128,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 7,
+      "name": "surfer_blue_2",
+      "x": 768,
+      "y": 128,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 8,
+      "name": "surfer_yellow_3",
+      "x": 0,
+      "y": 256,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 9,
+      "name": "surfer_pink_3",
+      "x": 256,
+      "y": 256,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 10,
+      "name": "surfer_green_3",
+      "x": 512,
+      "y": 256,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 11,
+      "name": "surfer_blue_3",
+      "x": 768,
+      "y": 256,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 12,
+      "name": "surfer_yellow_4",
+      "x": 0,
+      "y": 384,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 13,
+      "name": "surfer_pink_4",
+      "x": 256,
+      "y": 384,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 14,
+      "name": "surfer_green_4",
+      "x": 512,
+      "y": 384,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 15,
+      "name": "surfer_blue_4",
+      "x": 768,
+      "y": 384,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 16,
+      "name": "surfer_yellow_5",
+      "x": 0,
+      "y": 512,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 17,
+      "name": "surfer_pink_5",
+      "x": 256,
+      "y": 512,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 18,
+      "name": "surfer_green_5",
+      "x": 512,
+      "y": 512,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 19,
+      "name": "surfer_blue_5",
+      "x": 768,
+      "y": 512,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 20,
+      "name": "surfer_yellow",
+      "x": 0,
+      "y": 640,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 21,
+      "name": "surfer_pink",
+      "x": 256,
+      "y": 640,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 22,
+      "name": "surfer_green",
+      "x": 512,
+      "y": 640,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 23,
+      "name": "surfer_blue",
+      "x": 768,
+      "y": 640,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 24,
+      "name": "ten",
+      "x": 0,
+      "y": 768,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 25,
+      "name": "jack",
+      "x": 256,
+      "y": 768,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 26,
+      "name": "queen",
+      "x": 512,
+      "y": 768,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 27,
+      "name": "king",
+      "x": 768,
+      "y": 768,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 28,
+      "name": "ace",
+      "x": 0,
+      "y": 896,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 29,
+      "name": "wild",
+      "x": 256,
+      "y": 896,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 30,
+      "name": "bonus",
+      "x": 512,
+      "y": 896,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    },
+    {
+      "index": 31,
+      "name": "scatter",
+      "x": 768,
+      "y": 896,
+      "w": 256,
+      "h": 128,
+      "neighbors": {
+        "nw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "n": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "ne": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "w": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "e": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "sw": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "s": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        },
+        "se": {
+          "mode": "same",
+          "tileIndex": null,
+          "flipH": false,
+          "flipV": false
+        }
+      }
+    }
+  ]
+}
